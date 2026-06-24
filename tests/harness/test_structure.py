@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,7 @@ class_violations = preferences.class_violations_must_be_pydantic
 preferences_violations = preferences.preferences_violations
 star_violations = preferences.star_violations
 underscore_violations = preferences.underscore_violations
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def parse(source: str) -> ast.Module:
@@ -48,14 +50,10 @@ def test_star_unpacking_flagged() -> None:
     assert len(problems) == 3
 
 
-def test_star_signatures_flagged() -> None:
-    """*args and **kwargs parameters are flagged."""
+def test_star_signatures_not_flagged() -> None:
+    """*args/**kwargs in a signature are allowed now; only call/assignment splats are flagged."""
     source = "def f(*args):\n    return args\n\n\ndef g(**kwargs):\n    return kwargs\n"
-    problems = star_violations("m.py", parse(source))
-    assert len(problems) == 2
-    assert all("signature" in problem for problem in problems)
-    assert any(problem.startswith("m.py:1:") for problem in problems)
-    assert any(problem.startswith("m.py:5:") for problem in problems)
+    assert star_violations("m.py", parse(source)) == []
 
 
 def test_pointless_class_flagged() -> None:
@@ -81,24 +79,10 @@ def test_useful_classes_pass() -> None:
     assert class_violations("m.py", parse(source)) == []
 
 
-def test_function_count_limit() -> None:
-    """More top-level functions than the limit is flagged."""
-    source = "".join(f"def f{i}():\n    return {i}\n\n\n" for i in range(6))
-    problems = preferences_violations("m.py", source, 5)
-    assert problems == ["m.py: 6 top-level functions exceeds limit 5; split the module"]
-
-
-def test_function_count_skipped_when_unlimited() -> None:
-    """A zero limit disables only the function count check."""
-    source = "def f():\n    return 1\n\n\ndef g():\n    return 2\n"
-    assert preferences_violations("m.py", source, 0) == []
-
-
-def test_syntax_error_reported() -> None:
-    """Unparseable files are reported instead of crashing the gate."""
-    problems = preferences_violations("m.py", "def broken(:\n", 5)
-    assert len(problems) == 1
-    assert "could not parse" in problems[0]
+def test_syntax_error_raises() -> None:
+    """Unparseable source raises SyntaxError; preferences no longer swallows it."""
+    with pytest.raises(SyntaxError):
+        preferences_violations("m.py", "def broken(:\n")
 
 
 def test_clean_file_passes() -> None:
@@ -110,4 +94,15 @@ def test_clean_file_passes() -> None:
         '    """Double the number."""\n'
         "    return number * 2\n"
     )
-    assert preferences_violations("m.py", source, 5) == []
+    assert preferences_violations("m.py", source) == []
+
+
+def test_source_modules_stay_flat() -> None:
+    """gate.py and cli.py keep a ceiling on top-level functions."""
+    ceilings = {"harness/gate.py": 6, "harness/cli.py": 8}
+    for relative, ceiling in ceilings.items():
+        tree = ast.parse((REPO_ROOT / relative).read_text(encoding="utf-8"))
+        functions = [node for node in tree.body if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)]
+        assert len(functions) <= ceiling, (
+            f"{relative}: {len(functions)} top-level functions exceeds {ceiling}"
+        )

@@ -39,4 +39,4 @@ jobs:
         run: uv run --no-sync semgrep scan --config auto --config p/secrets --error --quiet .
 
       - name: Tests with Coverage Gate
-        run: uv run --no-sync pytest  --cov
+        run: uv run --no-sync pytest --cov --cov-report=term-missing --cov-fail-under=100

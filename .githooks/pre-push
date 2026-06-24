@@ -1,8 +1,8 @@
 #!/bin/sh
-# Ralph pre-push verify: lint, format, types, security (semgrep), tests, 100% coverage
+# Ralph pre-push gate: lint, format, types, security (semgrep), tests, 100% coverage
 # on what is about to be pushed. The pre-commit hook is kept fast; this is the heavy
 # pass, and the local backstop before code leaves the machine.
 # Bypassing this hook is forbidden by AGENTS.md.
 set -eu
 
-uv run --no-sync ralph verify
+.venv/bin/harness gate

@@ -23,7 +23,7 @@ Loosely opinionated scaffold, easy to opt out of features, for a gated autonomou
 ## TLDR; Getting Started.
 
 1. Get the scaffold: clone this repo (or use it as a GitHub template) into your project directory.
-2. Set it up from inside the checkout: `uv run ralph install <your-project-name>` — renames the project, syncs dependencies, installs the git hook.
+2. Set it up from inside the checkout: `uv run harness install <your-project-name>` — renames the project, syncs dependencies, installs the git hook.
 3. Write what you want to build in [docs/plan.md](docs/plan.md).
    Include statements that you _"want specs created at [specs](specs) and [docs](docs) to be updated but do NOT touch `plan.md`"_. Be specific.
 4. Run the loop: `harness/ralph.sh [max_iterations] [max_minutes] <worker-agent>`
@@ -37,9 +37,9 @@ Agents update their spec and `PROJECT_STATUS` at the end of each iteration. How 
 
 ## Start a new project
 
-Use with new Python projects or drop the harness and dependencies into an existing project.
+Use with new Python projects or drop `harness/` and dependencies into an existing project.
 
-1. From inside the checkout, run `uv run ralph install <your-project-name>`. Names the project, installs dependencies, and sets up the git hook.
+1. From inside the checkout, run `uv run harness install <your-project-name>`. Names the project, installs dependencies, and sets up the git hook.
 2. Write your grand vision into `docs/plan.md`.
 3. Optionally add the first spec in `specs/`, or have an agent draft the first specs.
 4. Put product code under `src/` and list new source directories in `pyproject.toml [tool.coverage.run]`.
@@ -53,39 +53,29 @@ harness/ralph.sh [max_iterations] [max_minutes] <worker-agent>  # prompt-injecte
 
 ![L∞PS Architecture Engine Flow](.loops.svg)
 
-```sh
-# For Claude, Codex, Gemini, Copilot
-harness/ralph.sh 100 20 claude -p --permission-mode acceptEdits
-harness/ralph.sh 10 30 codex exec --json --sandbox workspace-write -
-harness/ralph.sh 2 20 gemini --yolo
-harness/ralph.sh 1 10 copilot --allow-tool="shell(git:*)"
-```
-
 ## A l∞p
 
 The repo is the only memory between iterations. Each iteration is a fresh-context agent.
 
 - `specs/` say WHAT to build
-- `PROMPT.md` is the standing instruction every iteration
-- `PROMPT.md` tells the agent: read `specs/`, review `src/`, build the most important unfinished thing
+- constant `PROMPT.md` tells the agent: read `specs/`, review `src/`, build the most important unfinished thing
 - agent builds
 - agent commits
-- every git commit passes the fast gate (lint, format, plus loop containment for the agent)
-- every git push runs the full verify: types, semgrep, tests, 100% coverage
+- every git commit passes the fast preflight (lint, format, plus loop containment for the agent)
+- every git push runs the full gate: lint, types, semgrep, tests, 100% coverage
 - the loop stops at `max_iterations`, a nonzero worker exit, or a timeout
 - Unspecified iterations/minutes → default to 2 iterations × 20 minutes each
-- Want logs? Redirect the loop: `harness/ralph.sh ... > run.log 2>&1`
 - **The harness is worker-agnostic.** Any agent CLI that reads a prompt from stdin and can edit/commit works.
 
 ![L∞PS Agents](.loops_agents.svg)
 
-- There is NO worktree/branch creation by design. Agent duties can be contained to a part of the repo. For example: Codex-1-frontend uses `specs/frontend.md`, Claude-2-researcher uses `specs/backend`...
-- This choice was made:
+- There is NO worktree/branch creation by design. Agent duties can be contained to a part of the repo. e.g. Codex-1-frontend uses `specs/frontend.md`, Claude-2-researcher `specs/backend`...
+- Intentional:
   1. For simplicity and maintainability of the framework.
   2. Because a fresh iteration can't see unmerged work in another worktree, so agents miss context and scramble to merge while conflicts pile up.
   3. Change this behavior if you're comfortable with granting agents machine access, feeding context to agents, and managing rapidly moving git history.
   4. You can also create branches/trees and run a loop in each, then merge.
-  5. If you don't like _ANYTHING_ in this framework, remove it.
+- If you don't like _ANYTHING_ in this framework, remove it.
 
 ## Safety
 
@@ -94,70 +84,65 @@ The repo is the only memory between iterations. Each iteration is a fresh-contex
 
 #### The Gate: Tiered Checks
 
-The safety minimum is in code: `harness/gate.py` holds `FORBIDDEN_PATHS` and `FORBIDDEN_PATTERNS`; `semgrep` comes from `pyproject.toml`; `harness/preferences.py` holds the style checks other tools can't catch, e.g. `MAX_FUNCTIONS_PER_FILE`. Containment runs when `RALPH_LOOP=1`, which `ralph.sh` sets at each invocation. Humans commit normally while agents in the loop get stronger checks.
+ `harness/gate.py` holds `FORBIDDEN_FILES`, `FORBIDDEN_DIRS` and `FORBIDDEN_PATTERNS`. `harness/preferences.py` holds human's style checks other tools can't catch. Containment runs when `RALPH_LOOP=1`, which `ralph.sh` sets on each run. `pyproject.toml` holds many rules. Humans own them (`harness/preferences.py` is part of `harness/`).
 
-⚡ `uv run ralph gate` (pre-commit) → fast checks.
-Ruff lint + check format for everyone, _plus_ **containment** for the agents (via `RALPH_LOOP=1` set by `ralph.sh`): `FORBIDDEN_PATHS` + `FORBIDDEN_PATTERNS` + preferences, including `MAX_FUNCTIONS_PER_FILE`.
+⚡ `harness preflight` (pre-commit) → fast checks.
+Ruff lint + check format for everyone, _plus_ **containment** for the agents.
 
-✅ `uv run ralph verify` (pre-push) → the heavy quality pass: ruff lint + check format, pyright, pylint, semgrep, pytest @ 100% cov — no containment re-check. CI re-runs these quality checks on every PR and every push to `<branch>` as the backstop.
+✅ `harness gate` (CI/PR pre-push) → ruff lint + check format, pyright, pylint, semgrep, pytest @ 100% cov.
 
-Humans can use normal `git` commands.
-
-Forbidden agent paths — `AGENTS.md`, `harness/`, `tests/harness/`, `.githooks/`, `.github/`,
-`pyproject.toml`. Humans own them (`harness/preferences.py` is part of `harness/`).
+Humans ONLY can bypass triggered gates and commit by adding flag `--no-verify`.
 
 ## Layout
-
 ```
-harness/        the gate, loop (ralph.sh), CLI, custom user checks   (forbidden)
-tests/harness/  the harness's own tests                              (forbidden)
-.githooks/      pre-commit / pre-push gate hooks                     (forbidden)
-.github/        CI that re-runs the gate                             (forbidden)
-pyproject.toml  project + tooling config                             (forbidden)
-AGENTS.md       rules for agents working in the repo                 (forbidden)
-PROMPT.md       the standing per-iteration instruction
+harness/        the gate, loop (ralph.sh), CLI, custom user checks   (🤖 forbidden)
+tests/harness/  the harness's own tests                              (🤖 forbidden)
+.githooks/      pre-commit / pre-push gate hooks                     (🤖 forbidden)
+.github/        CI that re-runs the gate                             (🤖 forbidden)
+pyproject.toml  project + tooling config                             (🤖 forbidden)
+AGENTS.md       rules for agents working in the repo                 (🤖 forbidden)
+PROMPT.md       the standing per-iteration instruction               (human maintained)
 specs/          WHAT to build, one PRIORITY-bannered file per track
 src/            your product/source code (add to coverage source)
-docs/           PLAN; PROJECT_STATUS
-scratchpad/     scratch dir agents are pointed at for temp files
+docs/           PLAN; PROJECT_STATUS                                 (human maintained plan.md)
+scratchpad/     scratch dir agents can use for temp files            (For 🤖)
 ```
 
 ## ⚠️ Warnings. Read this before a first run.
 
-1. **The gate is a guardrail, not a jail.** Agents are smart and crafty — like people. They will find a way to complete a task at all costs. Lock the worker down with its own settings (permissions and sandbox flags), add branch protection and required CI, and **trust nothing and no one.**
+1. **This harness does not sandbox agents.** It *tries* to harness bad code in loops via gates. Sandboxing agents will, e.g. prevent them from maintaining git, running Playwright, being seen as trustworthy by semgrep leading to cyclical failures, etc.
 
-2. **This harness does not sandbox your machine.** It *tries* to contain the loop — the gate limits which paths a commit may touch, bans escape-hatch patterns, and steers writes into repo `scratchpad/`. But a worker can still run arbitrary shell commands. For real isolation, constrain all agents from a higher level, use permission/deny rules, or run everything in a container.
+2. **The gate is a guardrail, not a jail.** Agents are crafty — like people. They will find a way to complete a task at all costs. **Trust nothing and no one.**
 
-3. **Mind your usage limits.** `ralph.sh` works to a cap. If you set caps high, or run several workers from the same provider at once, you will burn through your tokens, context windows, and provider usage limits. **Workers keep working as long as there is work to do.** There is always work to do. Recall defaults: **2 loops x 20 minutes**.
+3. **Mind your usage limits.** `ralph.sh` works agents to the cap set. You can easily burn through your tokens, context windows, and provider usage limits. **Workers keep working as long as there is work to do.**
 
-4. **`PROMPT.md` tells the worker to push every iteration** (the harness itself does not push or verify commits), so autonomous commits reach the remote continuously. **If you want to protect `main`, run the loop on its own branch and merge via PR/CI** — a protected `main` rejects the push and stalls the loop.
+4. **`PROMPT.md` tells the worker to push every iteration** Protect `main` and run the loop on its own branch.
 
-5. **100% coverage does not mean good tests.** That is quantity, not quality. If you had the same agents that wrote the code write the tests "green" can mean nothing. Tests should challenge source.
-
-6. Suggestions. `chmod 700 ralph.sh` to limit read/run for the script. `chmod 600 pyproject.toml` once it is set how you want. Agents acting as you will not be limited by this but it will stall them and if the file changes you will know why.
+5. **100% coverage does not mean good tests.** That is quantity, not quality. (Upcoming feature: mutation testing)
 
 ## Commands
 
 ```sh
-uv run ralph install <your-project-name>  # uv sync + set hooks path; with a name, also rewrites the [project] name
-uv run ralph gate  # fast checks: ruff lint + format (plus agent containment)
-uv run ralph verify  # full pass: ruff, format, pyright, pylint, semgrep, pytest @ 100% cov
-uv run ralph status  # recent logs
+harness install <your-project-name>  # rewrite [project] name, uv sync, set core.hooksPath to .githooks
+harness preflight  # fast checks: ruff lint + format (plus loop containment)
+harness gate  # full pass: ruff, format, pyright, pylint, semgrep, pytest @ 100% cov
+harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/copilot, defaults: 2 20 True
 
-git config --get core.hooksPath .githooks  # must print `.githooks` (blank = gate never runs)
-ls -la .githooks/pre-commit   # must exist to be executable
--rwxr-xr-x@ 1 owner  staff  161 Jun 23 00:06 .githooks/pre-commit
-
-# anything else → prints usage:
-ralph [gate|verify|install [name]|status] (exit 2)
-# Underlying tools the gate calls
-ruff check .
-ruff format  # to fix add .
+# Underlying tools
+ruff check . && ruff format
 pyright
 pylint harness src
 semgrep scan --config auto --config p/secrets --error --quiet .
-pytest
-# Note: Pydantic is included. Use it.
+pytest  # Note: Pydantic is included. Use it.
+
+# Underlying agent calls
+harness/ralph.sh 10 20 claude -p --permission-mode acceptEdits --output-format stream-json --verbose
+
+harness/ralph.sh 2 20 codex exec -m gpt-5.5 --json --sandbox workspace-write -
+
+harness/ralph.sh 3 10 agy --log-file agy.log --print
+
+harness/ralph.sh 2 20 sh -c 'copilot --output-format json --stream on --allow-all-tools -p "$(cat)"'
 ```
 
 ## For agents

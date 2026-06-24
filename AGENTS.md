@@ -20,11 +20,11 @@
 - Never run destructive git commands (`rm -rf`, `git reset --hard`, `git branch -D`) unless the user  explicitly asks; verify each risky step.
 - Never bypass or reconfigure git hooks.
 
-## Commit and verify
+## Commit and gate
 
-- `ralph gate` runs on commit — fast lint + format, plus loop containment.
-- Run `uv run ralph verify` often, especially before pushing: lint, format, types, security, tests, 100% coverage.
-- Done means: no forbidden path touched; `ralph verify` is green; the spec and `docs/PROJECT_STATUS.md` reflect what was built; tests pass, cover the change, and honestly challenge the source code.
+- ralph harness preflight runs on commit => fast lint + format check + plus loop containment.
+- Run `uv run ralph gate` often, especially before pushing: lint, format, types, security, tests, 100% coverage.
+- Done means: no forbidden path touched; ralph harness gate is green; your chosen spec and `docs/PROJECT_STATUS.md` reflect what was built; tests pass, cover the change, and honestly challenge the source code.
 
 ## Documentation
 
@@ -59,8 +59,8 @@ Before implementing:
 - Strict scope compliance.
 - Readable and reusable code.
 - Prune code written for unlikely error paths.
-- Avoid sprawl. 200 lines could be 50: rewrite.
 - Be clear, not clever.
+- Avoid sprawl. 200 lines could be 25: rewrite.
 
 Ask: "Would a human say this is over-engineered?" Then simplify.
 
@@ -68,8 +68,8 @@ Ask: "Would a human say this is over-engineered?" Then simplify.
 
 **Touch minimal surfaces. Clean up only your own mess.**
 
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that weren't assigned to you.
+- Don't "improve" adjacent code.
+- Don't refactor code that wasn't assigned.
 - If you notice unrelated dead code, mention it - don't delete it.
 - Remove imports/variables/functions that YOUR changes orphaned.
 
@@ -77,9 +77,9 @@ Acceptance criteria: Each changed line traces directly to the user's request.
 
 ## 4. Python
 
-- Write simple, readable, fully typed Python.
-- Prefer module-level functions over classes; use a dataclass for grouped data or behavior.
-- Avoid AI-bloat like:
+- Write simple, readable Python.
+- Prefer module-level functions. Reserve classes for changed state on data grouped with behavior.
+- Avoid AI-bloat, like:
   - wrapping literals in their constructors (`"x"`, not `str("x")`; `[]`, not `list([])`)
-  - repeated string normalization (`.strip()`/`.replace()`)
-  - overly defensive checks
+  - repeated string normalization (`.strip()` later followed by`.replace()`)
+  - overly defensive checks not at boundaries

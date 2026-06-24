@@ -33,8 +33,7 @@ dev = [
 ]
 
 [project.scripts]
-ralph = "harness.cli:main"
-ralph-harness = "harness.cli:main"
+harness = "harness.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/rxdt/py_ralph_frame"
@@ -66,9 +65,7 @@ reportUnusedVariable = "none"         # Handled by Ruff F841
 [tool.pytest.ini_options]
 minversion = "9.0"
 addopts = [
-    "-ra",
-    "--cov-report=term-missing",
-    "--cov-fail-under=100"
+    "-ra"
 ]
 testpaths = ["tests"]
 pythonpath = ["src"]

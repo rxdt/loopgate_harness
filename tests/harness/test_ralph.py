@@ -155,6 +155,33 @@ def test_gtimeout_is_preferred(tmp_path: Path) -> None:
     assert (tmp_path / "used-timeout").read_text(encoding="utf-8") == "gtimeout\n"
 
 
+def test_worker_args_pass_through_verbatim_without_substitution(tmp_path: Path) -> None:
+    """Ralph does no token substitution: worker args (e.g. a literal {{PROMPT}}) reach the worker
+    byte-for-byte. The prompt is delivered only on stdin, never injected into argv."""
+    (tmp_path / "PROMPT.md").write_text("do the most important thing\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_timeout(bin_dir / "timeout")
+    worker = tmp_path / "worker.sh"
+    # Record argv on one channel and stdin on another, so we can prove where the prompt went.
+    write_executable(worker, '#!/bin/sh\nprintf "%s\\n" "$@" > args.txt\ncat > stdin.txt\n')
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(
+        [str(RALPH), "1", "1", str(worker), "-i", "{{PROMPT}}"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    assert result.returncode == 0
+    assert (tmp_path / "args.txt").read_text(encoding="utf-8") == "-i\n{{PROMPT}}\n"  # untouched argv
+    assert (tmp_path / "stdin.txt").read_text(encoding="utf-8") == (
+        "do the most important thing\n\nRALPH_ITERATION=1/1\n"  # prompt arrives only on stdin
+    )
+
+
 def test_script_has_no_bashisms() -> None:
     """The shell script parses as POSIX sh."""
     assert shutil.which("sh") is not None

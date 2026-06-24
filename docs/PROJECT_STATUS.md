@@ -4,20 +4,28 @@
 
 ## Now
 
-- The active spec now describes the Ralph harness instead of template placeholders.
-- Dirty human-owned guardrail files existed before this iteration and were left untouched.
+- Branch `claude-wires-cli-clean` has staged release work for the Ralph harness:
+  tuple-based agent launch commands, positional run verbosity, live JSONL output,
+  full gate coverage flags, prompt/doc/test cleanup, and CI alignment.
+- The active spec's PRIORITY 1 items are satisfied: `specs/base.md` is
+  active/concrete and `tests/test_specs.py` guards against template regression.
 
 ## Checks
 
-- `uv run ralph preflight` — failed before checks: `ralph` executable not found.
-- `uv run python -m harness.cli preflight` — passed.
-- `uv run pytest tests/test_specs.py` — passed.
+- `uv run harness preflight` — passed.
+- `uv run harness gate` — passed.
+- `uv run pytest -q` — passed, 89 tests.
+- `uv run pytest --cov --cov-report=term-missing --cov-fail-under=100 -q` —
+  passed, 100% coverage.
 
 ## Next
 
-- Run the loop from `specs/base.md`.
-- Add downstream product code only after the human plan names a concrete project.
+- Human should review and commit the staged release work.
+- Add downstream product code only after `docs/plan.md` names a concrete project.
 
 ## Blockers
-- `docs/plan.md` was rejected by the commit hook as forbidden; its working-tree edit is left unstaged for human review.
-- Pre-existing dirty forbidden files may block agent containment or commit hooks; Codex-base-1/1 left them untouched.
+
+- Untracked `zsh` file (appears to be an accidental empty file) was left in place,
+  not committed or deleted.
+- A test Claude run created commit `6ca3347` with stale status text; this file now
+  corrects that state in the working tree.

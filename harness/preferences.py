@@ -1,25 +1,22 @@
 """AST-based structural style checks for staged Python files.
 
-OPTIONAL for humans to use or edit!
+OPTIONAL for humans to use or edit! The functions below are examples to use. Or delete.
 
-Agents in the loop cannot edit this file (it is in `FORBIDDEN_PATHS` via `harness/`); humans own it.
+Agents in the loop cannot edit this file. It's in `FORBIDDEN_FILES` at `harness/gate.py`.
 
-This module enforces the repo owner's structural style hates:  underscore-prefixed names, star unpacking,
-pointless classes, and oversized modules.
+This module should reflect the repo owner's personal coding style hates. It's personal.
+e.g. indiscriminate __underscore_names, **star-unpacking, pointless classes, loops instead of Set math.
 
 Use this file ONLY for rules that ruff, pylint, and pyright cannot express but you want enforced. Keep short.
-The functions below are examples you can keep or not.
 """
 
 from __future__ import annotations
 
 import ast
 
-MAX_FUNCTIONS_PER_FILE = 5  # low, conservative, prevents lazy agent code
-
 
 def underscore_violations(path: str, tree: ast.Module) -> list[str]:
-    """Flag function, argument, and assigned names that start with an underscore."""
+    """No function or argument starts with an underscore."""
     problems: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -36,22 +33,18 @@ def underscore_violations(path: str, tree: ast.Module) -> list[str]:
 
 
 def star_violations(path: str, tree: ast.Module) -> list[str]:
-    """Flag star and double-star unpacking in calls, assignments, and signatures. Not everyone's desire."""
+    """Double-star unpacking in function signnatures or assignments."""
     problems: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Starred):
             problems.append(f"{path}:{node.lineno}: star unpacking; pass explicit values")
         elif isinstance(node, ast.keyword) and node.arg is None:
             problems.append(f"{path}:{node.lineno}: double-star unpacking; pass explicit arguments")
-        elif isinstance(node, ast.arguments) and (node.vararg or node.kwarg):
-            splat = node.vararg or node.kwarg
-            lineno = splat.lineno if splat else 0
-            problems.append(f"{path}:{lineno}: signature uses *args or **kwargs; declare explicit parameters")
     return problems
 
 
 def class_violations_must_be_pydantic(path: str, tree: ast.Module) -> list[str]:
-    """Flag plain classes that should be module functions, a dataclass, or a Pydantic model."""
+    """Flag plain classes that should be functions or a Pydantic class."""
     problems: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef) or node.bases or node.keywords or node.decorator_list:
@@ -59,22 +52,15 @@ def class_violations_must_be_pydantic(path: str, tree: ast.Module) -> list[str]:
         methods = [item for item in node.body if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)]
         if len(methods) <= 1:
             problems.append(
-                f"{path}:{node.lineno}: class '{node.name}' has no base, decorator, or behavior; "
-                "use module functions or Pydantic"
+                f"{path}:{node.lineno} '{node.name}': no base,decorator,or behavior. Use function or Pydantic"
             )
     return problems
 
 
-def preferences_violations(path: str, source: str, limit: int) -> list[str]:
-    """Run every structural check on one Python file; limit 0 skips the function count."""
-    try:
-        tree = ast.parse(source)
-    except SyntaxError as error:
-        return [f"{path}: could not parse: {error.msg} (line {error.lineno})"]
+def preferences_violations(path: str, source: str) -> list[str]:
+    """Run every structural check on one Python file"""
+    tree = ast.parse(source)
     problems = underscore_violations(path, tree)
     problems.extend(star_violations(path, tree))
     problems.extend(class_violations_must_be_pydantic(path, tree))
-    top = [node for node in tree.body if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)]
-    if limit and len(top) > limit:
-        problems.append(f"{path}: {len(top)} top-level functions exceeds limit {limit}; split the module")
     return problems

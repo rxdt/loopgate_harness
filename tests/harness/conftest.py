@@ -21,11 +21,16 @@ def run_cmd(args: list[str], cwd: Path) -> str:
 
 @pytest.fixture
 def git_repo(tmp_path: Path) -> Path:
-    """Provide a git repo with an identity and a clean initial commit."""
+    """Provide a git repo with an identity, the tracked git hooks, and a clean initial commit."""
     run_cmd(["git", "init", "-q"], tmp_path)
     run_cmd(["git", "config", "user.email", "harness@test.local"], tmp_path)
     run_cmd(["git", "config", "user.name", "harness-test"], tmp_path)
+    hooks = tmp_path / ".githooks"
+    hooks.mkdir()
+    for hook in ("pre-commit", "pre-push"):
+        (hooks / hook).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (hooks / hook).chmod(0o755)
     (tmp_path / "README.md").write_text("seed\n", encoding="utf-8")
-    run_cmd(["git", "add", "README.md"], tmp_path)
+    run_cmd(["git", "add", "README.md", ".githooks"], tmp_path)
     run_cmd(["git", "commit", "-q", "-m", "seed"], tmp_path)
     return tmp_path

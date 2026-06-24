@@ -16,12 +16,11 @@ from conftest import run_cmd
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 GATE_HOOK = (
-    "import os, sys, pathlib\n"
+    "import sys, pathlib\n"
     f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
     "from harness import gate\n"
-    "repo = pathlib.Path.cwd()\n"
-    "loop = os.environ.get('RALPH_LOOP')\n"
-    "problems = gate.agent_violations(repo, gate.staged_files(repo)) if loop else []\n"
+    "gate.run_checks = lambda repo, checks: []  # isolate containment from the real quality tools\n"
+    "problems = gate.run_preflight(pathlib.Path.cwd())\n"
     "for problem in problems:\n"
     "    sys.stderr.write(problem + '\\n')\n"
     "sys.exit(1 if problems else 0)\n"
@@ -31,7 +30,7 @@ GATE_HOOK = (
 def arm_gate_hook(repo: Path) -> None:
     """Install a real pre-commit hook that runs the harness containment check."""
     hooks = repo / ".githooks"
-    hooks.mkdir()
+    hooks.mkdir(exist_ok=True)
     (hooks / "gate_hook.py").write_text(GATE_HOOK, encoding="utf-8")
     pre_commit = hooks / "pre-commit"
     pre_commit.write_text(
@@ -59,13 +58,19 @@ def attempt_commit(repo: Path, message: str, loop: bool, no_verify: bool) -> sub
     return subprocess.run(args, cwd=repo, capture_output=True, text=True, check=False, env=env)
 
 
-def test_hook_blocks_forbidden_path_under_loop(git_repo: Path) -> None:
-    """RALPH_LOOP=1 + active hook: a real commit touching a forbidden path is rejected."""
+def test_hook_excludes_forbidden_path_under_loop(git_repo: Path) -> None:
+    """RALPH_LOOP=1 + active hook: a real commit drops the forbidden path but commits the legit work."""
     arm_gate_hook(git_repo)
     stage_forbidden(git_repo)
-    result = attempt_commit(git_repo, "evil", loop=True, no_verify=False)
-    assert result.returncode != 0
-    assert "forbidden path modified: harness/evil.py" in result.stderr
+    (git_repo / "src").mkdir()
+    (git_repo / "src" / "feature.py").write_text("y = 2\n", encoding="utf-8")
+    run_cmd(["git", "add", "src/feature.py"], git_repo)
+    result = attempt_commit(git_repo, "work beside evil", loop=True, no_verify=False)
+    assert result.returncode == 0
+    committed = run_cmd(["git", "show", "--name-only", "--format=", "HEAD"], git_repo).split()
+    assert "src/feature.py" in committed  # legit work landed
+    assert "harness/evil.py" not in committed  # forbidden path kept out of the commit
+    assert (git_repo / "harness" / "evil.py").exists()  # but left in the working tree, not reverted
 
 
 def test_hook_allows_forbidden_path_without_loop(git_repo: Path) -> None:
@@ -82,3 +87,16 @@ def test_no_verify_bypasses_the_hook(git_repo: Path) -> None:
     stage_forbidden(git_repo)
     result = attempt_commit(git_repo, "bypass", loop=True, no_verify=True)
     assert result.returncode == 0
+
+
+def test_hook_blocks_banned_pattern_and_makes_no_commit(git_repo: Path) -> None:
+    """A staged banned pattern can't be ejected, so the hook rejects the commit — nothing lands."""
+    arm_gate_hook(git_repo)
+    (git_repo / "src").mkdir()
+    (git_repo / "src" / "x.py").write_text("value = 1  # noqa\n", encoding="utf-8")
+    run_cmd(["git", "add", "src/x.py"], git_repo)
+    result = attempt_commit(git_repo, "sneaky", loop=True, no_verify=False)
+    assert result.returncode != 0
+    assert "banned pattern 'noqa'" in result.stderr
+    log = run_cmd(["git", "log", "--oneline"], git_repo)
+    assert "sneaky" not in log  # the commit never happened

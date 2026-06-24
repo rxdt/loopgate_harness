@@ -1,6 +1,6 @@
 #!/bin/sh
-# Ralph commit gate: fast lint/format for everyone, plus loop containment.
+# Ralph commit preflight: fast lint/format for everyone, plus loop containment.
 # Bypassing this hook is forbidden by AGENTS.md.
 set -eu
 
-uv run --no-sync ralph gate
+.venv/bin/harness preflight

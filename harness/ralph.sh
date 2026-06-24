@@ -1,7 +1,7 @@
 #!/bin/sh
 # Ralph: hand PROMPT.md to a fresh-context agent and loop. The repo is the only memory.
 # Keep Ralph Dumb: start the worker, give it the prompt, print a line, repeat. Nothing else.
-# Setup (deps + git hooks) is `ralph install`. The gate runs from the git hooks on commit.
+# Setup (deps + git hooks) is `harness install`. The gate runs from the git hooks on commit.
 # Want logs? Redirect this script: `harness/ralph.sh ... > run.log 2>&1`.
 #
 # Usage:
