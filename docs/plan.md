@@ -1,19 +1,32 @@
 # Plan
 
-> The human vision: what this project is and why. The loop reads this for direction; `specs/` carries out concrete, prioritized build plans.
+> The human vision. Agents read this for direction; `specs/` turns it into concrete, prioritized work. Humans own this file.
 
 ## Goal
 
-This project is a reusable Python Ralph harness for fresh-context autonomous coding loops. It gives agents a standing prompt, prioritized specs, docs handoff points, and gated commit/push checks so each iteration can make one bounded change and leave the repo resumable.
+Describe the final outcome, e.g. a one page web app that does X for Y users. Describe features and functionality in non-contradictory detail.
 
-## Approach
+## Approach To Reach Goal
 
-- Deterministic, well-typed packages under `src/`.
-- Built by the gated Ralph loop, one small change per iteration, 100% covered from day one.
-- Keep human-owned guardrail files stable unless a human explicitly assigns that work.
+Describe the strategy for reaching the goal. Prefer concrete direction over vague quality words. For example, name required frameworks, storage choices, APIs, user flows, performance targets, compatibility requirements, or things the project must avoid.
+
+List things like:
+- Major technical choices
+- Workflows
+- Libraries
+- Services
+- Data sources
+- UX expectations
 
 ## Milestones
 
-1. Replace placeholder planning/spec docs with concrete Ralph harness direction.
-2. Add non-harness tests that protect agent-maintained loop docs from template regressions.
-3. Add downstream product code only after the plan names a concrete project.
+1. First major milestone and its concrete description
+2. Second major milestone and its concrete description
+3. Third major milestone and its concrete description
+4. <fill in additional milestones as needed>
+5. Release or handoff milestone
+
+## Non-goals and Constraints
+
+- Add rules to follow
+- Add repository constraints on agents

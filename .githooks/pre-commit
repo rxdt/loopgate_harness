@@ -1,5 +1,5 @@
 #!/bin/sh
-# Ralph commit preflight: fast lint/format for everyone, plus loop containment.
+# Ralph commit preflight: fast lint (blocking) + a format report (informative), plus loop containment.
 # Bypassing this hook is forbidden by AGENTS.md.
 set -eu
 

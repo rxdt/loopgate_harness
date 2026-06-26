@@ -5,6 +5,7 @@
 - Work only inside this repository; use `scratchpad/` for temporary files.
 - Do not read, write, or search outside the repo unless the user explicitly asks.
 - Do not edit forbidden paths: `AGENTS.md`, `harness/`, `tests/harness/`, `.githooks/`, `.github/`, `pyproject.toml`. The gate enforces this; the list lives in `harness/gate.py`. `harness/preferences.py` is human-owned, like the rest of `harness/`.
+- Do not make assumptions. Check the code before moving forward.
 
 ## The loop
 
@@ -23,7 +24,7 @@
 ## Commit and gate
 
 - ralph harness preflight runs on commit => fast lint + format check + plus loop containment.
-- Run `uv run ralph gate` often, especially before pushing: lint, format, types, security, tests, 100% coverage.
+- Run `harness gate` often, especially before pushing: lint, format, types, security, tests, 100% coverage.
 - Done means: no forbidden path touched; ralph harness gate is green; your chosen spec and `docs/PROJECT_STATUS.md` reflect what was built; tests pass, cover the change, and honestly challenge the source code.
 
 ## Documentation

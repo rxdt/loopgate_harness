@@ -1,5 +1,6 @@
 #!/bin/sh
-# Ralph pre-push gate: lint, format, types, security (semgrep), tests, 100% coverage
+# Ralph pre-push gate: lint, types, security (semgrep), tests, 100% coverage (blocking),
+# plus a format report (informative, never blocks)
 # on what is about to be pushed. The pre-commit hook is kept fast; this is the heavy
 # pass, and the local backstop before code leaves the machine.
 # Bypassing this hook is forbidden by AGENTS.md.

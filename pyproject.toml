@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Gated, harnessed, single-worker autonomy loop (Ralph) scaffold for starting new Python projects."
 authors = [{ name = "rxdt" }]
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 keywords = ["ralph", "agent", "autonomy", "scaffold", "harness", "llm", "codex", "claude"]
 classifiers = [
@@ -12,24 +12,26 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Build Tools",
 ]
 dependencies = [
-    "packaging>=26.2",
+    "packaging",
     "pydantic",
-    "tomlkit>=0.15.0",
-    "typer>=0.26.7",
+    "tomlkit",
+    "typer"
 ]
 [dependency-groups]
 dev = [
+    "hypothesis",
     "pylint",
+    "pyright",
     "pytest",
     "pytest-cov",
     "ruff",
-    "pyright",
-    "semgrep",
-    "hypothesis"
+    "semgrep"
 ]
 
 [project.scripts]
@@ -45,10 +47,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = [
-    "harness",
-]
+packages = ["harness"]
 
+# ==============================================================================
+# Pyright Configuration
+# ==============================================================================
 [tool.pyright]
 typeCheckingMode = "strict"
 # Silences third-party untyped library noise
@@ -58,45 +61,86 @@ reportUnknownMemberType = "none"
 reportUnknownParameterType = "none"
 reportUntypedFunctionDecorator = "none"
 reportMissingTypeStubs = "none"
-reportAssertAlwaysTrue = "none"       # Handled by Ruff S101 or B011
+reportAssertAlwaysTrue = "error"
 reportUnusedImport = "none"           # Handled by Ruff F401
 reportUnusedVariable = "none"         # Handled by Ruff F841
+verboseOutput = true
+include = ["src", "harness"]
 
+# ==============================================================================
+# Pytest Configuration
+# ==============================================================================
 [tool.pytest.ini_options]
 minversion = "9.0"
-addopts = [
-    "-ra"
+addopts = ["-ra"]
+testpaths = ["tests", "harness/tests"]
+pythonpath = ["src", "harness"]
+
+# ==============================================================================
+# Test Coverage Configuration
+# ==============================================================================
+[tool.coverage]
+# Add every directory that ships code here to ensure 100% coverage
+run.source = ["src", "harness"]
+report.show_missing = true
+report.skip_covered = false
+report.fail_under = 100
+skip_covered = false
+
+# ==============================================================================
+# Pylint Configuration
+# ==============================================================================
+[tool.pylint]
+main.load-plugins = ["pylint.extensions.docparams"]
+main.ignore = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "migrations",
+    "build",
+    "dist",
+    "scratchpad",
+    "tests",
+    "harness/tests"
 ]
-testpaths = ["tests"]
-pythonpath = ["src"]
 
-[tool.coverage.run]
-# Add every directory that ships runnable code here (e.g. "src") as the
-# project grows; the gate enforces 100% coverage on all of it.
-source = ["harness", "src"]
+format.max-line-length = 110         # Keep Pylint line accounting aligned with Ruff E501
+format.max-module-lines = 500        # Enable Pylint C0302 because Ruff has no equivalent
+parameter_documentation.accept-no-param-doc = false
+reports.reports = "yes"
+reports.score = true
+"messages control".enable = ["F", "I", "R0022", "missing-param-doc"]
 
-[tool.coverage.report]
-show_missing = true
-skip_covered = true
-fail_under = 100
-
+# ==============================================================================
+# Unified Ruff Configuration
+# ==============================================================================
 [tool.ruff]
-target-version = "py313"
+target-version = "py311"
 preview = true
 line-length = 110
 force-exclude = true
-
-[tool.ruff.lint.pycodestyle]
-max-doc-length = 110          # Enforce W505 for comments and docstrings
-ignore-overlong-task-comments = false  # Do not exempt TODO/FIXME/XXX comments
-
-[tool.pylint.format]
-max-line-length = 110         # Keep Pylint line accounting aligned with Ruff E501
-max-module-lines = 500        # Enable Pylint C0302 because Ruff has no equivalent
-ignore = ["tests"]
-
-# Enforce strict backend rule sets
+exclude = [
+    "*.md",
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "scratchpad",
+    "node_modules",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".uv",
+    "**/.pylint_bits/**",  # Stops Ruff from fighting Pylint's internal cache
+]
 [tool.ruff.lint]
+fixable = ["ALL"]
+unfixable = []
+mccabe.max-complexity = 8  # Prevent structural bloat, path-count limit for functions
+pycodestyle.max-doc-length = 110  # Enforce W505 for comments and docstrings
+pycodestyle.ignore-overlong-task-comments = true
+pydocstyle.convention = "google"
+pydoclint.ignore-one-line-docstrings = true
 select = [
     "A",       # flake8-builtins (prevents shadowing Python builtins)
     "ARG",     # flake8-unused-arguments (dead params and fake extension points)
@@ -108,11 +152,15 @@ select = [
     "C4",      # flake8-comprehensions (.e.g unnecessary list comprehensions)
     "C90",     # Enables McCabe cyclomatic complexity checks
     "COM",     # flake8-commas. Trailing comma added.
-    "D100",    # Files must have module docstrings
-    "D101",    # Classes must have docstrings
-    "D102",    # Methods must have docstrings
-    "D103",    # Functions must have docstrings
-    "D104",    # Packages must have docstrings
+    "DOC",     # Validates parameter & return documentation
+    "D300",    # Use """ triple quotes for docstrings """
+    "DOC102",  # Documented parameter {id} must be in the function's signature
+    "D102",    # No missing docstring in public method
+    "D103",    # No missing docstring in public function
+    "D202",    # No return s in docstring if function doesn't return anything
+    "D417",    # No missing arg description in docstring for {definition}: {name}
+    "D419",    # No empty docstrings
+    "DOC501",  # Raised exception {id} missing from docstring
     "DTZ",     # flake8-datetimez (forbid naive datetime usage)
     "E",       # pycodestyle: Catches objective syntax rule violations
     "EM",      # flake8-errmsg (keep exception messages clean and reusable)
@@ -135,6 +183,7 @@ select = [
     "PLW",     # Pylint warning rules
     "PT",      # flake8-pytest-style (idiomatic pytest without docstring noise) e.g. pytest.raise not try/except
     "PTH",     # flake8-use-pathlib (prefer Path over error-prone os/path string handling)
+    "PYI",     # Prevents bad practices in files that handle interfaces/architecture
     "RET",     # Cleaner return flow, fewer lazy else chains.
     "RSE",     # flake8-raise (clean raise statements)
     "RUF",     # Ruff-specific rules
@@ -153,15 +202,7 @@ ignore = [
     "PLR2004",  # Allow 'magic values" (unnamed numbers)
     "S607",     # Allow resolving git/uv from PATH
 ]
-fixable = ["ALL"]
-unfixable = []
-
-# Prevent structural bloat
-[tool.ruff.lint.mccabe]
-max-complexity = 8           # Hard path-count limit for functions
-
-# Prevent unreadable complexity and code
-[tool.ruff.lint.pylint]
+[tool.ruff.lint.pylint]      # Prevent unreadable complexity and code
 max-nested-blocks = 4        # Stop indentation madness
 max-positional-args = 4      # Max total params, to prevent big initializers. Match max-args so no def(*)
 max-args = 4                 # Do not build big object initializers.
@@ -173,23 +214,22 @@ max-locals = 10              # Cap local variable sprawl per function/method
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"  # Enforce absolute imports
-
-[tool.ruff.lint.flake8-tidy-imports.banned-api]
-"typing.cast".msg = "Do not use cast(); fix the type at the boundary instead."
-"re".msg = "Regex is slow. Use Python built-in string manipulation operations."
+banned-api."typing.cast".msg = "Do not use cast(); fix the type at the boundary instead."
+banned-api."re".msg = "Regex is slow. Use Python built-in string manipulation operations."
 
 [tool.ruff.lint.per-file-ignores]
-"**/__init__.py" = ["D104"]  # remove if you add logic to these files
-"tests/**/*.py" = [
+"**/__init__.py" = ["D104"]
+"**/tests/**/*.py" = [
     "D100",  # Test modules do not need noisy docstrings
     "D101",  # Test classes do not need noisy docstrings
     "D102",  # Test helper methods do not need noisy docstrings
     "D103",  # Test functions describe behavior through test names
     "D104",  # Test package boundaries do not need package docstrings
+    "DOC201", # Tests don't need docstring-missing-returns
     "S101",  # Allow 'assert' statements (needed for pytest)
 ]
 "harness/**/*.py" = [
     "S404", # Triggers when code imports subprocess or os related to process spawn
     "S603"  # Flags execution without a shell
 ]
-"tests/harness/{conftest,test_ralph,test_cli,test_integration}.py" = ["S404", "S603"]    # allow shell execution
+"tests/harness/{conftest,test_ralph,test_cli,test_integration}.py" = ["S404", "S603"]  # allow shell execution

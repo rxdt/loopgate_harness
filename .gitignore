@@ -12,13 +12,12 @@ dist/
 docs/launch.md
 test-results/
 **/node_modules/
+.python-version
+uv.lock
 
 .env
 .env.*
 
-# in-repo worker worktrees (isolated agent workspaces; never /tmp)
+# in-repo worker worktrees (isolated agent workspaces, never /tmp)
 .worktrees/
 scratchpad/
-
-# internal dev notes / deferred TODOs — not shipped, not user-facing
-harness.md

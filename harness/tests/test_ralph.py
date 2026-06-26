@@ -1,7 +1,7 @@
 """Tests for the Ralph loop script.
 
 Ralph is deliberately dumb: it reads PROMPT.md, runs the worker under a timeout, prints a line, and
-loops. It does not install hooks, verify the gate, or record runs — `set -eu` simply propagates the
+loops. It does not install hooks, verify the gate, or record runs. `set -eu` simply propagates the
 worker's exit code and stops the loop on any failure. The install/gate-active behavior that used to
 live here now lives in the `ralph` CLI and is tested in test_cli.py / test_integration.py.
 """
@@ -29,9 +29,7 @@ def fake_timeout(path: Path) -> None:
 
 
 def run_ralph(
-    tmp_path: Path,
-    worker: Path,
-    ralph_args: list[str] | None = None,
+    tmp_path: Path, worker: Path, ralph_args: list[str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Run Ralph in a temp repo with a fake timeout that delegates to the worker."""
     (tmp_path / "PROMPT.md").write_text("do the most important thing\n", encoding="utf-8")
@@ -136,8 +134,7 @@ def test_gtimeout_is_preferred(tmp_path: Path) -> None:
     bin_dir.mkdir()
     fake_timeout(bin_dir / "timeout")
     write_executable(
-        bin_dir / "gtimeout",
-        "#!/bin/sh\nprintf 'gtimeout\\n' > used-timeout\nshift\nexec \"$@\"\n",
+        bin_dir / "gtimeout", "#!/bin/sh\nprintf 'gtimeout\\n' > used-timeout\nshift\nexec \"$@\"\n"
     )
     worker = tmp_path / "worker.sh"
     write_executable(worker, "#!/bin/sh\nexit 0\n")
@@ -157,7 +154,8 @@ def test_gtimeout_is_preferred(tmp_path: Path) -> None:
 
 def test_worker_args_pass_through_verbatim_without_substitution(tmp_path: Path) -> None:
     """Ralph does no token substitution: worker args (e.g. a literal {{PROMPT}}) reach the worker
-    byte-for-byte. The prompt is delivered only on stdin, never injected into argv."""
+    byte-for-byte. The prompt is delivered only on stdin, never injected into argv.
+    """
     (tmp_path / "PROMPT.md").write_text("do the most important thing\n", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -229,7 +227,7 @@ def test_zero_minutes_rejected(tmp_path: Path) -> None:
 
 
 def test_ralph_loop_env_reaches_worker(tmp_path: Path) -> None:
-    """RALPH_LOOP=1 is exported into the worker's environment — the containment marker."""
+    """RALPH_LOOP=1 is exported into the worker's environment as the containment marker."""
     worker = tmp_path / "worker.sh"
     write_executable(worker, '#!/bin/sh\nprintf "%s" "$RALPH_LOOP" > loop.txt\n')
     result = run_ralph(tmp_path, worker, ["1", "1"])

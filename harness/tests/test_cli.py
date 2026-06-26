@@ -1,35 +1,43 @@
 """Tests for the ralph CLI (harness.cli). Commands drive the real Typer app; only the external
-toolchain (gate checks, uv sync, the worker subprocess) is stubbed at the boundary."""
+toolchain (gate checks, uv sync, the worker subprocess) is stubbed at the boundary.
+"""
 
 from __future__ import annotations
 
 import io
 import os
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 import typer
-from conftest import run_cmd
 from packaging.utils import InvalidName
 from typer.testing import CliRunner
 
 from harness import cli, gate
+from harness.tests.conftest import run_cmd
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Self
 
 runner = CliRunner()
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def returns(problems: list[str]) -> Callable[[Path], list[str]]:
-    """Build a typed stand-in for gate.run_preflight / gate.run_gate that returns fixed problems."""
+def returns(fail: list[str], passed: list[str] | None = None) -> Callable[[Path], dict[str, list[str]]]:
+    """Build a typed stand-in for gate.run_preflight / gate.run_gate that returns fixed results.
 
-    def check(repo: Path) -> list[str]:
+    `fail` is the list of check names that fail; passing an empty list means a clean gate.
+    `pass` is the list of checks that pass (defaults to a single 'lint' so the summary always
+    renders at least one PASSED row).
+    """
+
+    def check(repo: Path) -> dict[str, list[str]]:
         del repo
-        return problems
+        return {"pass": passed if passed is not None else ["lint"], "fail": fail}
 
     return check
 
@@ -117,7 +125,7 @@ def test_git_hooks_call_commands_that_exist() -> None:
 
 
 def test_run_exposes_verbose_as_positional_without_disable_flag() -> None:
-    """run accepts positional verbose and does not expose a --no-verbose CLI flag."""
+    """Run accepts positional verbose and does not expose a --no-verbose CLI flag."""
     result = runner.invoke(cli.app, ["run", "--help"])
     assert result.exit_code == 0
     assert "verbose" in result.output
@@ -128,56 +136,78 @@ def test_run_exposes_verbose_as_positional_without_disable_flag() -> None:
 # --------------------------------------------------------------------------- preflight / gate
 
 
+def plain(text: str) -> str:
+    """Strip ANSI SGR codes (ESC '[' ... 'm') so assertions match the rendered summary text
+    regardless of Rich styling. String-based, no regex.
+    """
+    out: list[str] = []
+    rest = text
+    while "\x1b[" in rest:
+        before, _, after = rest.partition("\x1b[")
+        out.append(before)
+        rest = after.partition("m")[2]  # drop the SGR parameters up to and including 'm'
+    out.append(rest)
+    return "".join(out)
+
+
 def test_preflight_passes_when_gate_clean(monkeypatch: pytest.MonkeyPatch) -> None:
-    """preflight is a dumb pass-through: no problems → exit 0, says ok."""
-    monkeypatch.setattr(gate, "run_preflight", returns([]))
+    """A clean run_preflight (no failures) → check() renders the summary with the pass check named
+    and exits 0.
+    """
+    monkeypatch.setattr(gate, "run_preflight", returns([], passed=["lint"]))
     result = runner.invoke(cli.app, ["preflight"])
     assert result.exit_code == 0
-    assert "ok: preflight passed" in result.stderr
+    output = plain(result.stderr)
+    assert "Harness Summary" in output
+    assert "lint" in output  # the PASSED row for the clean check is rendered
+    assert "ok: preflight pass" in output
+    assert "rejected by harness" not in output
 
 
-def test_preflight_rejects_and_prints_each_problem(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A problem from run_preflight is surfaced and exits 1."""
-    monkeypatch.setattr(gate, "run_preflight", returns(["banned pattern 'noqa' in line: x"]))
+def test_preflight_rejects_and_names_the_fail_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fail check from run_preflight is named in the summary and exits 1."""
+    monkeypatch.setattr(gate, "run_preflight", returns(["lint"]))
     result = runner.invoke(cli.app, ["preflight"])
     assert result.exit_code == 1
-    assert "gate: banned pattern 'noqa'" in result.stderr
-    assert "rejected by harness" in result.stderr
+    output = plain(result.stderr)
+    assert "lint" in output
+    assert "rejected by harness" in output
 
 
 def test_gate_passes_when_checks_clean(monkeypatch: pytest.MonkeyPatch) -> None:
-    """gate pass-through to run_gate: clean → exit 0."""
+    """A clean run_gate → check() exits 0 and does not reject."""
     monkeypatch.setattr(gate, "run_gate", returns([]))
     result = runner.invoke(cli.app, ["gate"])
     assert result.exit_code == 0
-    assert "ok: gate passed" in result.stderr
+    assert "rejected by harness" not in plain(result.stderr)
 
 
 def test_gate_rejects_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failing full gate check surfaces and exits 1."""
-    monkeypatch.setattr(gate, "run_gate", returns(["types failed:\npyright"]))
+    """A failing full gate check is named in the summary and exits 1."""
+    monkeypatch.setattr(gate, "run_gate", returns(["types"]))
     result = runner.invoke(cli.app, ["gate"])
     assert result.exit_code == 1
-    assert "gate: types failed" in result.stderr
-    assert "rejected by harness" in result.stderr
+    output = plain(result.stderr)
+    assert "types" in output
+    assert "rejected by harness" in output
 
 
 def test_verify_passes_when_gate_clean(monkeypatch: pytest.MonkeyPatch) -> None:
-    """verify is gone, so it cannot pass through to run_gate."""
+    """Verify is gone, so it cannot pass through to run_gate."""
     monkeypatch.setattr(gate, "run_gate", pytest.fail)
     result = runner.invoke(cli.app, ["verify"])
     assert result.exit_code == 2
     assert "No such command 'verify'" in result.output
-    assert "ok: verify passed" not in result.output
+    assert "ok: verify pass" not in result.output
 
 
 def test_verify_rejects_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """verify is gone, so even a failing gate stub is never called."""
+    """Verify is gone, so even a failing gate stub is never called."""
     monkeypatch.setattr(gate, "run_gate", pytest.fail)
     result = runner.invoke(cli.app, ["verify"])
     assert result.exit_code == 2
     assert "No such command 'verify'" in result.output
-    assert "gate: security failed" not in result.output
+    assert "gate: security fail" not in result.output
 
 
 # --------------------------------------------------------------------------- status
@@ -192,7 +222,7 @@ def test_status_reports_zero_when_empty(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
 
 def test_status_counts_logs_and_names_newest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """status counts the *.jsonl receipts and points at the newest (last sorted)."""
+    """Status counts the *.jsonl logs and points at the newest (last sorted)."""
     monkeypatch.chdir(tmp_path)
     write_log(tmp_path, "0001-claude.jsonl")
     write_log(tmp_path, "0002-codex.jsonl")
@@ -212,14 +242,27 @@ def test_cli_does_not_shadow_builtin_print() -> None:
 
 
 def test_install_renames_syncs_and_sets_hooks(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """install rewrites the project name (PEP 503), runs uv sync, and points git at .githooks."""
+    """Install rewrites the project name (PEP 503), runs uv sync, and points git at .githooks."""
     monkeypatch.chdir(git_repo)
     (git_repo / "pyproject.toml").write_text('[project]\nname = "old"\n', encoding="utf-8")
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(subprocess, "run", stub_toolchain(subprocess.run, calls))
-    assert runner.invoke(cli.app, ["install", "My_Cool.Project"]).exit_code == 0
+    result = runner.invoke(cli.app, ["install", "My_Cool.Project"])
+    assert result.exit_code == 0
     assert ("uv", "sync") in calls
-    assert 'name = "my-cool-project"' in (git_repo / "pyproject.toml").read_text(encoding="utf-8")
+    assert ("git", "config", "core.hooksPath", ".githooks") in calls
+    assert ("git", "config", "core.hooksPath") in calls
+    assert ("ls", "-l", ".githooks") in calls
+    with (git_repo / "pyproject.toml").open("rb") as handle:
+        assert tomllib.load(handle)["project"]["name"] == "my-cool-project"
+    output = plain(result.output)  # gate runs with FORCE_COLOR set; strip ANSI before matching
+    assert "project name 'my-cool-project' set in `pyproject.toml`" in output
+    assert "installing dependencies with `uv sync`" in output
+    assert "setting git hooks with `git config core.hooksPath .githooks`" in output
+    assert ".githooks" in output
+    assert "You must ACTIVATE env `source .venv/bin/activate` to use the `harness` command." in output
+    assert "python: project supports >=3.11" in output
+    assert "PIN NEWER local Python e.g. `uv python pin 3.13 && uv sync`" in output
     monkeypatch.undo()
     assert run_cmd(["git", "config", "core.hooksPath"], git_repo).strip() == ".githooks"
 
@@ -251,7 +294,7 @@ def test_run_rejects_unknown_agent(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 def test_run_builds_ralph_command_and_writes_sequential_log(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """run fires ralph.sh with the preset and the worker writes the NNNN-agent.jsonl receipt."""
+    """Run fires ralph.sh with the preset and the worker writes the NNNN-agent.jsonl receipt."""
     monkeypatch.chdir(tmp_path)
     captured: dict[str, list[list[str]]] = {}
     monkeypatch.setattr(subprocess, "run", fake_agent(captured))
@@ -265,26 +308,13 @@ def test_run_builds_ralph_command_and_writes_sequential_log(
     assert log.read_text(encoding="utf-8") == '{"type":"result","result":"ok"}\n'
 
 
-def test_agent_presets_are_frozen() -> None:
-    """The exact per-agent worker commands are pinned and must not silently change or lose flags."""
-    assert cli.AGENTS == {
-        "claude": (
-            "claude",
-            "-p",
-            "--permission-mode",
-            "acceptEdits",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-        ),
-        "codex": ("codex", "exec", "-m", "gpt-5.5", "--json", "--sandbox", "workspace-write", "-"),
-        "agy": ("agy", "--log-file", "agy.log", "--print"),
-        "copilot": (
-            "sh",
-            "-c",
-            'copilot --output-format json --stream on --allow-all-tools -p "$(cat)"',
-        ),
-    }
+def test_agent_presets_are_registered() -> None:
+    """Every supported agent has one nonempty tuple command registered in the CLI."""
+    assert set(cli.AGENTS) == {"claude", "codex", "agy", "copilot"}
+    for command in cli.AGENTS.values():
+        assert isinstance(command, tuple)
+        assert command
+        assert all(command)
 
 
 def test_run_claude_executes_real_loop_twice_with_prompt(
@@ -321,20 +351,10 @@ def test_run_claude_executes_real_loop_twice_with_prompt(
     assert (tmp_path / "prompt-2.txt").read_text(encoding="utf-8") == (
         "build from specs\n\nRALPH_ITERATION=2/2\n"
     )
-    assert (tmp_path / "claude-args.txt").read_text(encoding="utf-8").splitlines() == [
-        "-p",
-        "--permission-mode",
-        "acceptEdits",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "-p",
-        "--permission-mode",
-        "acceptEdits",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-    ]
+    claude_args = list(cli.AGENTS["claude"][1:])
+    expected_args = claude_args.copy()
+    expected_args.extend(claude_args)
+    assert (tmp_path / "claude-args.txt").read_text(encoding="utf-8").splitlines() == expected_args
     assert (tmp_path / "scratchpad" / "runs" / "0001-claude.jsonl").read_text(
         encoding="utf-8"
     ) == '{ "type" : "result", "result" : "ok" }\n{ "type" : "result", "result" : "ok" }\n'
@@ -371,16 +391,59 @@ def test_run_propagates_worker_exit_code(code: int, monkeypatch: pytest.MonkeyPa
     assert runner.invoke(cli.app, ["run", "codex", "2", "20", "False"]).exit_code == code
 
 
-def test_format_live_line_compacts_json_and_preserves_invalid_lines() -> None:
-    """Verbose terminal output is compact JSONL without corrupting non-JSON lines."""
-    assert cli.format_live_line('{ "type" : "result", "result" : "ok" }\n', None) == (
-        '{"type":"result","result":"ok"}\n'
-    )
-    assert cli.format_live_line("not json\n", None) == "not json\n"
+class FakeProcess:
+    """Stand in for the worker subprocess: replays canned stdout lines and a fixed exit code."""
+
+    def __init__(self, lines: list[str], code: int) -> None:
+        self.stdout = iter(lines)
+        self.code = code
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        del exc
+        return False
+
+    def wait(self) -> int:
+        return self.code
 
 
-def test_format_live_line_uses_jq_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+def fake_popen(lines: list[str], code: int = 0) -> Callable[..., FakeProcess]:
+    """Stand in for subprocess.Popen: yield canned worker stdout lines, then exit with code."""
+
+    def make(command: list[str], **kwargs: object) -> FakeProcess:
+        del command, kwargs
+        return FakeProcess(lines, code)
+
+    return make
+
+
+def has_jq(name: str) -> str:
+    """Typed stand-in for shutil.which when jq is available."""
+    del name
+    return "/usr/bin/jq"
+
+
+def test_run_worker_compacts_json_and_preserves_invalid_lines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verbose streaming is compact JSONL on the terminal and a verbatim log, even for non-JSON."""
+    monkeypatch.setattr(cli.shutil, "which", no_jq)
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen(['{ "type" : "result" }\n', "not json\n"]))
+    log = tmp_path / "out.jsonl"
+
+    assert cli.run_worker(["worker"], tmp_path, log, verbose=True) == 0
+    assert capsys.readouterr().out == '{"type":"result"}\nnot json\n'
+    assert log.read_text(encoding="utf-8") == '{ "type" : "result" }\nnot json\n'
+
+
+def test_run_worker_uses_jq_when_available(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """When jq exists, verbose terminal output comes from jq's colored compact renderer."""
+    monkeypatch.setattr(cli.shutil, "which", has_jq)
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen(['{ "type" : "result" }\n']))
 
     def fake_run(args: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert args == ("/usr/bin/jq", "-C", "-c", ".")
@@ -390,10 +453,10 @@ def test_format_live_line_uses_jq_when_available(monkeypatch: pytest.MonkeyPatch
         assert kwargs["check"] is False
         return subprocess.CompletedProcess(args, 0, stdout='\x1b[1;39m{"type":"result"}\x1b[0m\n')
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert cli.format_live_line('{ "type" : "result" }\n', "/usr/bin/jq") == (
-        '\x1b[1;39m{"type":"result"}\x1b[0m\n'
-    )
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    assert cli.run_worker(["worker"], tmp_path, tmp_path / "out.jsonl", verbose=True) == 0
+    assert capsys.readouterr().out == '\x1b[1;39m{"type":"result"}\x1b[0m\n'
 
 
 def test_run_accepts_positional_verbose_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -21,7 +21,9 @@ Rules:
 - If forbidden paths block a commit, run `git restore --staged <path>` and leave those working-tree edits for human review.
 - If a spec is wrong or missing, update the spec instead of guessing.
 - Never delete tests or assertions to make checks pass.
-- Do not edit forbidden paths: `AGENTS.md`, `harness/`, `tests/harness/`, `.githooks/`, `.github/`, or `pyproject.toml`.
+- Do not edit forbidden paths: `AGENTS.md`, `harness/`, `tests/harness/`, `.githooks/`, `.github/`, or `pyproject.toml`, `PROMPT.md`.
+- Pass `harness gate` and `harness preflight`
+- Use tests for code behavior and API contracts. Do not test for `.md` contents.
 
 Commit message:
 ```

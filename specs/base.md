@@ -1,27 +1,56 @@
 # Base Spec
 
-> **PRIORITY 1 (active).** Keep the reusable Ralph harness ready for fresh-context loop iterations.
+> **PRIORITY <1|2|3>.** Replace with 1–2 sentence context outlining the core problem this spec solves.
 
-## Vision
+## Scope
 
-This repository is a Python Ralph harness scaffold. A fresh agent should be able to pick an active spec, make one bounded change, and leave the repo resumable without touching human-owned guardrail files.
+Clear definitions of what the agent should focus on. Detail APIs, frameworks, data schemas, or libraries the agent must use.
 
-## Prioritize These Items
+## Priorities
 
-- Replace the template spec with concrete Ralph harness direction.
-- Add a test that fails if the active spec regresses into a template.
+1. Milestone <name>
+  - Description
+  - Link to which [docs/plan.md] **Milestone** this addresses
+  - Sub-tasks
+    - <sub-task-1>
+    - <sub-task-2>
+    - <additional sub-tasks>
+  - Files created or updated
+  - Definition of done: <command/test that exits 0 when met, e.g. `pytest tests/test_x.py::test_y`>
 
-## If The Items Above Are Complete, Do These
+<fill in additional milestones>
 
-- Add product code only after the human plan names a concrete downstream project.
-- Keep harness behavior changes out of agent-owned iterations unless a human assigns them.
+## Guardrails
 
-## Acceptance Signals
+Examples:
+- Structure
+- Style
+- Behavioral tests
+- Dependencies to use
+- Compatibilities to support
 
-- `specs/base.md` has an active priority banner and no template markers.
-- A non-harness test protects the active spec from template regression.
+## Acceptance Criteria
 
-## Non-goals
+Measurable criteria for success. Instead of vague quality terms like "should be fast," use verifiable metrics (e.g., "P95 latency < 100ms", or "npx prisma generate succeeds").
 
-- Changing `harness/`, `tests/harness/`, `.githooks/`, `.github/`, `pyproject.toml`, or `AGENTS.md`.
-- Inventing downstream product behavior before the plan asks for it.
+- <measurable criterion>
+- <measurable criterion>
+- <fill in additional criterion as needed>
+
+## Out of Scope
+(Features/scope the agent must not start.)
+
+- <explicit non-goal>
+- <explicit non-goal>
+- <fill in additional non-goals as needed>
+
+## Blockers
+
+- <List specific item preventing completion of this spec>
+- <List specific item preventing completion of this spec>
+- <fill in additional blockers as needed>
+
+## Changelog
+
+_Keep brief and to the latest items to keep spec < 100 lines_
+- Each agent adds their name + iteration info, what the current agent tried, and what worked or did not work
