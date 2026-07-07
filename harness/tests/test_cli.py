@@ -54,7 +54,8 @@ def stub_toolchain(real: Callable[..., object], calls: list[tuple[str, ...]]) ->
         calls.append(tuple(args))
         if tuple(args)[:1] == ("git",):
             return real(args, **kwargs)
-        return subprocess.CompletedProcess(list(args), 0)
+        completed: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(list(args), 0)
+        return completed
 
     return fake
 
@@ -67,7 +68,8 @@ def fake_agent(captured: dict[str, list[list[str]]], code: int = 0) -> Callable[
         captured.setdefault("commands", []).append(list(command))
         if stdout is not None:
             stdout.write('{"type":"result","result":"ok"}\n')  # the "agent" emits one line
-        return subprocess.CompletedProcess(list(command), code)
+        completed: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(list(command), code)
+        return completed
 
     return fake
 

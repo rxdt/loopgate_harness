@@ -11,6 +11,7 @@ Describe the final outcome, e.g. a one page web app that does X for Y users. Des
 Describe the strategy for reaching the goal. Prefer concrete direction over vague quality words. For example, name required frameworks, storage choices, APIs, user flows, performance targets, compatibility requirements, or things the project must avoid.
 
 List things like:
+
 - Major technical choices
 - Workflows
 - Libraries

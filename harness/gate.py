@@ -65,6 +65,18 @@ FORBIDDEN_PATTERNS = {
 COMMIT_CHECKS = {
     "ruff lint": ["uv", "run", "--no-cache", "--no-sync", "ruff", "check", "--show-fixes", "."],
     "ruff format (no fail)": ["uv", "run", "--no-sync", "ruff", "format", "--check"],
+    "complexipy": [
+        "uv",
+        "run",
+        "--no-sync",
+        "complexipy",
+        ".",
+        "--no-ignore",
+        "--report-ignored",
+        "--suggest-refactors",
+        "--sort",
+        "file_name",
+    ],
 }
 FULL_CHECKS = COMMIT_CHECKS | {
     "types": ["uv", "run", "--no-sync", "pyright", "--outputjson"],
@@ -124,7 +136,28 @@ def colorize(name: str, command: str) -> None:
     console.print(f"[dim italic]{command}[/dim italic]\n", justify="center")
 
 
-def run_checks(repo: Path, checks: dict[str, list[str]]) -> dict[str, list[str]]:
+def run_one_check(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
+    """Launch one check command under a phase header and return its exit code.
+
+    The ONLY place Popen is used to run a tool. Tests fake the tool boundary by patching this
+    seam by name, so no test needs to stub stdlib Popen (which would also hijack run_git).
+
+    Args:
+        name: Phase name shown in the rule header.
+        command: The argv to launch.
+        repo: Working directory the command runs in.
+        env: Environment for the launched process.
+
+    Returns:
+        The command's exit code.
+    """
+    colorize(name, " ".join(command))
+    sys.stdout.flush()
+    with subprocess.Popen(command, cwd=repo, env=env) as process:
+        return process.wait()
+
+
+def call_tools(repo: Path, checks: dict[str, list[str]]) -> dict[str, list[str]]:
     """Run each named command, streaming its output live under a phase header.
     Reports what each command did and leaves the verdict to the caller.
 
@@ -133,18 +166,16 @@ def run_checks(repo: Path, checks: dict[str, list[str]]) -> dict[str, list[str]]
         checks: Mapping of check name to the argv that runs it.
 
     Returns:
-        {"pass": [...], "fail": [...]} bucketing each check name by exit code.
+        { "pass": [...], "fail": [ problems ] } bucketing each check name by exit code.
+        if anything is in "fail", a commit is not allowed
     """
     clean_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     clean_env.update({"FORCE_COLOR": "1", "CLICOLOR_FORCE": "1", "SEMGREP_FORCE_COLOR": "1"})
     results: dict[str, list[str]] = {"pass": [], "fail": []}
     for name, command in checks.items():
-        colorize(name, " ".join(command))
-        sys.stdout.flush()
-        with subprocess.Popen(command, cwd=repo, env=clean_env) as process:
-            exit_code = process.wait()
-            key = "pass" if exit_code == 0 or "format" in name else "fail"
-            results[key].append(name)
+        exit_code = run_one_check(name, command, repo, clean_env)
+        key = "pass" if exit_code == 0 or "format" in name else "fail"
+        results[key].append(name)
     if os.environ.get("RALPH_LOOP"):
         results["fail"].extend(run_non_human_checks(repo))
 
@@ -153,7 +184,7 @@ def run_checks(repo: Path, checks: dict[str, list[str]]) -> dict[str, list[str]]
 
 def run_non_human_checks(repo: Path) -> list[str]:
     """Runs checks on non-humans only. Checks things that linters or other chekcs to do not check.
-    Calls the human `preferences` checks and ensures non-empty commit is committed. Unstages
+    Unstages files that should never be touched.
 
     Args:
         repo: Working directory the non-human is working in.
@@ -161,59 +192,97 @@ def run_non_human_checks(repo: Path) -> list[str]:
     Returns:
         list of problems not caught by lint, type-checking, testing
     """
-    problems = []
+    problems: list[str] = []
     staged = run_git(
         repo, ["diff", "--cached", "--name-only", "--no-renames", "--diff-filter=ACMRD"]
     ).splitlines()
-    lower_to_upper_file_map = {sf.casefold(): sf for sf in staged}
-    lower_set = set(lower_to_upper_file_map)
-    forbidden = lower_set & FORBIDDEN_FILES | {f for f in lower_set if f.startswith(FORBIDDEN_DIRS)}
+    forbidden = [
+        path
+        for path in staged
+        if path.casefold() in FORBIDDEN_FILES or path.casefold().startswith(FORBIDDEN_DIRS)
+    ]
     if forbidden:
-        unstage = ["reset", "-q", "HEAD", "--"] + [lower_to_upper_file_map[f] for f in forbidden]
-        run_git(repo, unstage)
+        run_git(repo, ["reset", "-q", "HEAD", "--", *forbidden])
         colorize("EJECTED", f"kept forbidden paths out of the commit: {', '.join(forbidden)}")
-    remaining_staged_lines = run_git(repo, ["diff", "--cached", "--unified=0"]).splitlines()
+    problems.extend(check_for_bad_patterns(repo))
+    return problems
+
+
+def scan_for_banned_patterns(staged_lines: list[str]) -> list[str]:
+    """Flag every banned escape-hatch pattern on an ADDED diff line (a '+' line, never a '+++' header).
+
+    Args:
+        staged_lines: Lines of `git diff --cached --unified=0` output to scan.
+
+    Returns:
+        One problem per (pattern, added line) hit; empty when the staged lines carry no banned pattern.
+    """
     colorize("BANNED PATTERNS CHECK", "checking for banned patterns in staged files")
-    for line in remaining_staged_lines:
-        problems.extend(
-            f"'{pattern}' line: {line[1:].strip()}"
-            for pattern in FORBIDDEN_PATTERNS
-            if line.startswith("+") and not line.startswith("+++") and pattern in line.casefold()
-        )
-    if prefs and remaining_staged_lines:
-        colorize("USER PREFERENCES", "checking that user's preferences.py are respected")
-        remaining = run_git(
-            repo, ["diff", "--cached", "--name-only", "--diff-filter=d", "--", "*.py"]
-        ).splitlines()
-        for path in remaining:
-            violation = prefs(path, run_git(repo, ["show", f":{path}"]))
-            if violation:
-                problems.append(violation)
+    return [
+        f"'{pattern}' line: {line[1:].strip()}"
+        for line in staged_lines
+        for pattern in FORBIDDEN_PATTERNS
+        if line.startswith("+") and not line.startswith("+++") and pattern.casefold() in line.casefold()
+    ]
+
+
+def check_for_user_preferences(repo: Path) -> list[str]:
+    """Run the user's preferences.py over each staged (non-deleted) Python file.
+
+    Args:
+        repo: Working directory the checks run in.
+
+    Returns:
+        One problem per preference a staged .py file breaks; empty when prefs is absent or all pass.
+    """
+    colorize("USER PREFERENCES", "checking that user's preferences.py are respected")
+    staged_python = run_git(
+        repo, ["diff", "--cached", "--name-only", "--diff-filter=d", "--", "*.py"]
+    ).splitlines()
+    violations = (prefs(path, run_git(repo, ["show", f":{path}"])) for path in staged_python) if prefs else ()
+    return [violation for violation in violations if violation]
+
+
+def check_for_bad_patterns(repo: Path) -> list[str]:
+    """Check staged files for banned patterns and user-preference breaks (agent-in-loop containment).
+    Does not unstage anything; later, if any problem lands in { "fail": ... } the commit is blocked.
+
+    Args:
+        repo: Working directory the non-human is working in.
+
+    Returns:
+        The banned-pattern hits plus any preference violations found in the staged files.
+    """
+    staged_lines = run_git(repo, ["diff", "--cached", "--unified=0"]).splitlines()
+    problems = scan_for_banned_patterns(staged_lines)
+    if prefs and staged_lines:
+        problems.extend(check_for_user_preferences(repo))
     else:
         console.print("[yellow]No files staged after preflight. Stage real work.[/]\n", justify="center")
     return problems
 
 
 def run_preflight(repo: Path) -> dict[str, list[str]]:
-    """Pre-commit: fast lint (blocking) plus an informational format report for everyone. For agents
-    in the loop also drop forbidden staged filepaths and flag banned patterns + human-preference breaks.
+    """Pre-commit: lint (blocking) plus an informational format report. For agents in the loop also unstages
+    forbidden filepaths and flags banned patterns + human-preferences not honored.
 
     Args:
         repo: Repository root to inspect and run checks against.
 
     Returns:
-        The COMMIT_CHECKS result with any containment problems appended to "fail".
+        The COMMIT_CHECKS result with any containment problems appended to "fail" list.
     """
-    return run_checks(repo, COMMIT_CHECKS)
+    return call_tools(repo, COMMIT_CHECKS)
 
 
 def run_gate(repo: Path) -> dict[str, list[str]]:
-    """Pre-push / CI: lint, types, pylint, security, tests (blocking), plus an informational format report.
+    """Pre-push / CI: lint, types, pylint, security, pytest/hypothesis (blocking), complexipy, plus an
+    informational format report.
 
     Args:
         repo: Repository root to run the full check suite against.
 
     Returns:
-        The FULL_CHECKS result bucketing each check name into "pass"/"fail".
+        The FULL_CHECKS result bucketing each check name into "pass"/"fail" lists.
     """
-    return run_checks(repo, FULL_CHECKS)
+    return call_tools(repo, FULL_CHECKS)

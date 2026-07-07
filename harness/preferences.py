@@ -21,28 +21,45 @@ Check = Callable[[ast.AST], "str | None"]
 
 
 def chaotic_continue_statements(node: ast.AST) -> str | None:
-    """Catch continue statements inside nested blocks.
+    """Catch continue statements that are hard to follow: inside a while loop, or buried two or more
+    if/for blocks deep. A single `if` guard directly inside a loop is fine -- that is normal Python.
+
+    Example:
+        for x in xs:              -> fine: a plain continue in its loop
+            continue
+        for x in xs:              -> flagged: two `if` blocks deep
+            if a:
+                if b:
+                    continue
+        for x in xs:              -> flagged: nested loops
+            for y in ys:
+                continue
+        while cond:               -> flagged: any continue in a while loop (freeze risk)
+            continue
 
     Args:
-        node: The AST node under inspection.
+        node: One piece of the parsed code to look at.
 
     Returns:
-        A complaint if the node is a banned/nested `continue`, else None.
+        A short message if the continue is in a while loop or over-nested, otherwise None.
     """
-    # Ban continue inside while loops to prevent infinite freezes
-    if isinstance(node, ast.While):
-        for child in ast.walk(node):
-            if isinstance(child, ast.Continue):
-                return "'continue' inside a while loop banned to prevent infinite freezes"
-    # Stop 'continue' hiding inside nested if-statements
-    if isinstance(node, ast.Continue):
-        parent = getattr(node, "parent", None)
-        if isinstance(parent, (ast.If, ast.For)):
-            grandparent = getattr(parent, "parent", None)
-            great_grand = getattr(grandparent, "parent", None)
-            # if the grandparent or great-grand is also an if/for node, we are nested
-            if isinstance(grandparent, (ast.If, ast.For)) or isinstance(great_grand, (ast.If, ast.For)):
-                return "Overly-nested 'continue' detected inside multiple if-statements"
+    # Ban continue inside while loops to prevent infinite freezes.
+    if isinstance(node, ast.While) and any(isinstance(child, ast.Continue) for child in ast.walk(node)):
+        return "'continue' inside a while loop banned to prevent infinite freezes"
+    # Only continue statements can be over-nested; a guard here keeps the walk below un-nested.
+    if not isinstance(node, ast.Continue):
+        return None
+    # A continue is over-nested when it sits two or more if/for blocks deep. One 'if' guard directly
+    # inside its loop (the common `for ...: if ...: continue`) is fine; anything deeper is not.
+    blocks: list[str] = []
+    ancestor = getattr(node, "parent", None)
+    while ancestor is not None:
+        if isinstance(ancestor, ast.If | ast.For | ast.While):
+            blocks.append(type(ancestor).__name__)
+        ancestor = getattr(ancestor, "parent", None)
+    # Every continue needs one enclosing loop; a single 'if' above that loop is still fine.
+    if len(blocks) >= 2 and blocks not in (["If", "For"], ["If", "While"]):
+        return "Overly-nested 'continue' detected inside multiple if/for blocks"
     return None
 
 
@@ -55,17 +72,14 @@ def lazy_any_type_hints(node: ast.AST) -> str | None:
     Returns:
         A complaint if the arg is annotated `Any`/`typing.Any`, else None.
     """
-    if isinstance(node, ast.arg):
-        item_is_any = (
-            node.annotation and isinstance(node.annotation, ast.Name) and node.annotation.id == "Any"
-        )  # matches item Any
+    if isinstance(node, ast.arg) and node.annotation:
+        item_is_any = isinstance(node.annotation, ast.Name) and node.annotation.id == "Any"  # matches Any
         uses_typing_dot_any = (
-            node.annotation
-            and isinstance(node.annotation, ast.Attribute)
+            isinstance(node.annotation, ast.Attribute)
             and isinstance(node.annotation.value, ast.Name)
             and node.annotation.value.id == "typing"
             and node.annotation.attr == "Any"
-        )  # matches item typing.Any
+        )  # matches typing.Any
         if item_is_any or uses_typing_dot_any:
             return f"Lazy 'Any' type hint detected for argument '{node.arg}'"
     return None
@@ -106,21 +120,64 @@ def function_argument_assignment_underscore_lead(node: ast.AST) -> str | None:
     if name.startswith("_") and not name.endswith("__"):
         # Check if def, arg, assigment target name starts with a lone underscore
         return f"Name '{name}' starts with underscore"
-
     return None
 
 
-def star_unpacking(node: ast.AST) -> str | None:
-    """A *seq splat, or a **mapping splat (a keyword with no argument name).
+def hidden_signature_star_args(node: ast.AST) -> str | None:
+    """Spell out a function's arguments instead of using *args or **kwargs.
+
+    When the arguments are named, anyone reading the function knows what to pass, and their editor can
+    suggest the arguments for them. We flag this everywhere, even for wrappers and decorators, because
+    the code alone can't tell us whether *args is a real need or just a shortcut.
+
+    Example:
+        def send(*args, **kwargs): ...  -> flagged: the caller can't see what to pass
+        def send(to, subject): ...      -> fine: the arguments are spelled out
 
     Args:
-        node: The AST node under inspection.
+        node: One piece of the parsed code to look at.
 
     Returns:
-        A complaint if the node is a star/double-star unpack, else None.
+        A short message if the function uses *args or **kwargs, otherwise None.
     """
-    if isinstance(node, ast.Starred) or (isinstance(node, ast.keyword) and node.arg is None):
-        return "Star unpacking pass explicit values"
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and (node.args.vararg or node.args.kwarg):
+        return "'*args'/'**kwargs' hide the function signature; use explicit parameters"
+    return None
+
+
+def dynamic_star_call(node: ast.AST) -> str | None:
+    """Do not spread a variable in a call's arguments with *, e.g. f(*items).
+
+    When you write f(*items), you can't tell how many arguments f is really getting, and the call breaks
+    if the list is the wrong length. Spreading a list or tuple written out right there, like f(*[1, 2, 3]),
+    is fine because its length is plain to see. A variable, or a list that spreads something else inside
+    it like f(*[1, *items]), is not.
+
+    We only look at '*', not '**'. Keyword unpacking like f(**opts) is a normal, readable Python idiom
+    (passing config through, or super().__init__(**kwargs)), and the one wasteful case, f(**{"a": 1}),
+    is already caught by ruff's PIE804. Positional '*' is the riskier one: the wrong length is a crash.
+
+    Example:
+        f(*items)        -> flagged: 'items' could be any length
+        f(*[1, *items])  -> flagged: the list grows with 'items'
+        f(*[1, 2, 3])    -> fine: exactly three arguments always
+        f(**kwargs)      -> left alone on purpose: keyword unpacking is a normal, readable pattern
+
+    Args:
+        node: One piece of the parsed code to look at.
+
+    Returns:
+        A short message if a * argument is not a plain, fixed-length list or tuple, otherwise None.
+    """
+    if isinstance(node, ast.Call):
+        for arg in node.args:
+            # A '*' spread is fine only on a written-out list/tuple whose length you can see.
+            # A variable, or a literal that spreads something inside (like [1, *more]), hides it.
+            if isinstance(arg, ast.Starred) and not (
+                isinstance(arg.value, ast.List | ast.Tuple)
+                and not any(isinstance(element, ast.Starred) for element in arg.value.elts)
+            ):
+                return "Dynamic '*' call hides positional arguments; pass explicit arguments"
     return None
 
 
@@ -134,11 +191,10 @@ def pointless_class(node: ast.AST) -> str | None:
     Returns:
         A complaint if the node is such a pointless class, else None.
     """
-    if not isinstance(node, ast.ClassDef) or node.bases or node.keywords or node.decorator_list:
-        return None
-    methods = [item for item in node.body if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)]
-    if len(methods) <= 1:
-        return f"'{node.name}': no base, decorator, or behavior: use function or Pydantic"
+    if isinstance(node, ast.ClassDef) and not (node.bases or node.keywords or node.decorator_list):
+        methods = [item for item in node.body if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)]
+        if len(methods) <= 1:
+            return f"'{node.name}': no base, decorator, or behavior: use function or Pydantic"
     return None
 
 
@@ -199,10 +255,11 @@ def complex_comprehension(node: ast.AST) -> str | None:
 
 # To add a style rule: write a dumb one-node function above and register it here under its kind.
 CHECKS: dict[str, Check] = {
-    "function_argument_assignment_has_star": function_argument_assignment_underscore_lead,
-    "star": star_unpacking,
-    "class": pointless_class,
-    "lasy_assert": lazy_assert,
+    "function_argument_assignment_underscore_lead": function_argument_assignment_underscore_lead,
+    "hidden_signature_star_args": hidden_signature_star_args,
+    "dynamic_star_call": dynamic_star_call,
+    "pointless_class": pointless_class,
+    "lazy_assert": lazy_assert,
     "objects_injected_into_runtime_memory": objects_injected_into_runtime_memory,
     "lambda_found": lambda_found,
     "lazy_any_type_hints": lazy_any_type_hints,
@@ -221,11 +278,11 @@ def preferences_violations(path: str, source: str) -> str:
     Returns:
         Newline-joined violation messages, or "" when the file is clean.
     """
-    violations = []
+    violations: list[str] = []
     tree = ast.parse(source)
     for parent in ast.walk(tree):  # link each node to its parent so checks can inspect nesting
         for child in ast.iter_child_nodes(parent):
-            child.__dict__["parent"] = parent  # ast nodes carry no 'parent'; add it for nesting checks
+            child.__dict__["parent"] = parent  # nodes are parent->child, add parent<-child for nested checks
     for node in ast.walk(tree):
         lineno = getattr(node, "lineno", "?")
         for check in CHECKS.values():

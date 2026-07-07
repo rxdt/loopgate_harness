@@ -17,7 +17,7 @@ def test_prompt_drives_loop_work_instead_of_one_off_diagnostics() -> None:
 
     assert "Report on your current config/permission settings" not in prompt
     assert "Do NOT edit, create, or commit" not in prompt
-    assert "Read `specs/`" in prompt
+    assert "Read `specs/*.md`" in prompt
     assert "harness gate" in prompt
     assert "Keep history linear" in prompt
     assert "uv run ralph" not in prompt

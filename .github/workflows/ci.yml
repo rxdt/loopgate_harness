@@ -54,7 +54,10 @@ jobs:
 
       - name: Ruff Format Check
         run: uv run --no-sync ruff format --check
-        continue-on-error: true  # never fail the build
+        continue-on-error: true # never fail the build
+
+      - name: Complexipy Cognitive Check
+        run: uv run --no-sync complexipy . --no-ignore --report-ignored --suggest-refactors --sort file_name
 
       - name: Pylint Structural Rules
         run: uv run --no-sync pylint src harness

@@ -9,20 +9,22 @@ Clear definitions of what the agent should focus on. Detail APIs, frameworks, da
 ## Priorities
 
 1. Milestone <name>
-  - Description
-  - Link to which [docs/plan.md] **Milestone** this addresses
-  - Sub-tasks
-    - <sub-task-1>
-    - <sub-task-2>
-    - <additional sub-tasks>
-  - Files created or updated
-  - Definition of done: <command/test that exits 0 when met, e.g. `pytest tests/test_x.py::test_y`>
+
+- Description
+- Link to which [docs/plan.md] **Milestone** this addresses
+- Sub-tasks
+  - <sub-task-1>
+  - <sub-task-2>
+  - <additional sub-tasks>
+- Files created or updated
+- Definition of done: <command/test that exits 0 when met, e.g. `pytest tests/test_x.py::test_y`>
 
 <fill in additional milestones>
 
 ## Guardrails
 
 Examples:
+
 - Structure
 - Style
 - Behavioral tests
@@ -38,6 +40,7 @@ Measurable criteria for success. Instead of vague quality terms like "should be 
 - <fill in additional criterion as needed>
 
 ## Out of Scope
+
 (Features/scope the agent must not start.)
 
 - <explicit non-goal>
@@ -53,4 +56,5 @@ Measurable criteria for success. Instead of vague quality terms like "should be 
 ## Changelog
 
 _Keep brief and to the latest items to keep spec < 100 lines_
+
 - Each agent adds their name + iteration info, what the current agent tried, and what worked or did not work

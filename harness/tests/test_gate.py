@@ -27,18 +27,9 @@ def staged(repo: Path) -> list[str]:
     return gate.run_git(repo, ["diff", "--cached", "--name-only"]).splitlines()
 
 
-TOOL_CHECK_NAMES = set(gate.COMMIT_CHECKS)
-
-
 def containment_fail(repo: Path) -> list[str]:
-    """Real run_preflight, keeping only containment problems from fail.
-
-    Drives the true entry point (real git, real ruff, real prefs) under the loop, then drops the tool
-    check NAMES (ruff lint / format) so assertions judge containment alone, not ruff's own verdict on
-    the deliberately-dirty fixtures.
-    """
-    fail = gate.run_preflight(repo)["fail"]
-    return [problem for problem in fail if problem not in TOOL_CHECK_NAMES]
+    """Run only the loop-containment checks against the staged index."""
+    return gate.run_non_human_checks(repo)
 
 
 # --------------------------------------------------------------------------- run_git
@@ -60,118 +51,111 @@ def test_run_git_ignores_poisoned_hook_env(monkeypatch: pytest.MonkeyPatch, git_
     assert staged(git_repo) == ["pkg/a.py"]  # real index read despite the poisoned GIT_DIR
 
 
-# --------------------------------------------------------------------------- run_checks (break cases)
+# --------------------------------------------------------------------------- tool dispatch
 
 
-def test_run_checks_reports_fully(git_repo: Path) -> None:
-    """Each check is recorded by name under 'pass' or 'fail' by its exit code.
+def test_call_tools_reports_fully(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Each check is recorded by name under 'pass' or 'fail' from the seam's exit code."""
 
-    Runs in a real repo (as the gate always does), so under the loop run_checks' containment finds an
-    empty index and stays silent: only the command exit codes bucket the result, in either env.
-    """
-    captured = gate.run_checks(git_repo, {"boom": ["false"], "fine": ["true"]})
+    def fake_run(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
+        del command, repo, env
+        return 1 if name == "boom" else 0
+
+    monkeypatch.setattr(gate, "run_one_check", fake_run)
+    captured = gate.call_tools(git_repo, {"boom": ["tool"], "fine": ["tool"]})
     assert captured == {"pass": ["fine"], "fail": ["boom"]}
 
 
-def test_run_checks_messages_what_happened(git_repo: Path) -> None:
-    """A passing check is recorded under 'pass' with nothing in 'fail' (a clean gate)."""
-    assert gate.run_checks(git_repo, {"ok": ["true"]}) == {"pass": ["ok"], "fail": []}
+def test_call_tools_messages_what_happened(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """A passing check is recorded under 'pass' with nothing in 'fail'."""
+
+    def fake_run(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
+        del name, command, repo, env
+        return 0
+
+    monkeypatch.setattr(gate, "run_one_check", fake_run)
+    assert gate.call_tools(git_repo, {"ok": ["tool"]}) == {"pass": ["ok"], "fail": []}
 
 
-def test_run_checks_records_a_failing_check_by_name(git_repo: Path) -> None:
+def test_call_tools_records_a_failing_check_by_name(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """A failing check lands under 'fail' by its name, with nothing in 'pass'."""
-    captured = gate.run_checks(git_repo, {"random_check": ["false"]})
+
+    def fake_run(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
+        del name, command, repo, env
+        return 1
+
+    monkeypatch.setattr(gate, "run_one_check", fake_run)
+    captured = gate.call_tools(git_repo, {"random_check": ["tool"]})
     assert captured == {"pass": [], "fail": ["random_check"]}
 
 
-def test_run_checks_streams_command_output_live(git_repo: Path, capfd: pytest.CaptureFixture[str]) -> None:
-    """run_checks streams each command's stdout through as it runs, so humans and agents watch it."""
-    captured = gate.run_checks(git_repo, {"echoer": ["printf", "hello from the check\n"]})
-    assert captured == {"pass": ["echoer"], "fail": []}
-    assert "hello from the check" in capfd.readouterr().out  # the line was streamed live
-
-
-def test_types_check_actually_catches_a_type_error(git_repo: Path) -> None:
-    """The 'types' check really runs pyright and fails on a type error anywhere in the tree,
-    proving it is not narrowed to selected paths. Runs in a real staged repo, as the gate does: the
-    type error is the only violation, so containment adds nothing and 'types' is the lone failure.
-    """
-    stage(git_repo, "pyrightconfig.json", '{"typeCheckingMode": "strict"}\n')
-    stage(git_repo, "boom.py", "x: int = 'not an int'\n")
-
-    result = gate.run_checks(git_repo, {"types": gate.FULL_CHECKS["types"]})
-    assert result["fail"] == ["types"]
-    assert result["pass"] == []
-
-
-def test_lint_command_shows_fixes_and_passes_clean_code(
-    git_repo: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
-    """The lint command runs `ruff check --show-fixes .`; clean code passes with no failures."""
-    assert "--show-fixes" in gate.COMMIT_CHECKS["ruff lint"]
-    stage(git_repo, "ok.py", "x = 1\n")
-
-    result = gate.run_checks(git_repo, {"ruff lint": gate.COMMIT_CHECKS["ruff lint"]})
-    assert result["pass"] == ["ruff lint"]
-    assert result["fail"] == []
-    assert "All checks passed!" in capfd.readouterr().out
-
-
-def test_types_check_prints_pyright_summary_line(git_repo: Path, capfd: pytest.CaptureFixture[str]) -> None:
-    """The 'types' check runs pyright, so a clean tree streams its clean report through run_checks —
-    either the JSON summary (with --outputjson) or the plain text line if a user simplifies the flags.
-    """
-    stage(git_repo, "ok.py", "x: int = 1\n")
-    gate.run_checks(git_repo, {"types": gate.FULL_CHECKS["types"]})
-    output = capfd.readouterr().out  # read once: readouterr() drains the buffer, a second call is empty
-    assert '"summary"' in output or "0 errors, 0 warnings, 0 informations" in output
-
-
-def test_types_check_passes_on_clean_code(git_repo: Path) -> None:
-    """The same 'types' check passes when the tree is well-typed."""
-    stage(git_repo, "ok.py", "x: int = 1\n")
-    result = gate.run_checks(git_repo, {"types": gate.FULL_CHECKS["types"]})
-    assert result["pass"] == ["types"]
-    assert result["fail"] == []
-
-
-# ------------------------------------------------- real tool failures propagate through run_checks
-
-
-def test_lint_check_really_fails_on_an_error(git_repo: Path) -> None:
-    """The lint command runs real ruff and puts 'lint' in fail on an actual error. The staged F401 is
-    not a containment violation (no banned pattern, not a forbidden path), so 'ruff lint' stands alone.
-    """
-    stage(git_repo, "bad.py", "import os\nx = 1\n")  # F401 unused import
-    result = gate.run_checks(git_repo, {"ruff lint": gate.COMMIT_CHECKS["ruff lint"]})
-    assert result["fail"] == ["ruff lint"]
-    assert result["pass"] == []
-
-
-def test_security_error_flag_propagates_nonzero_exit(git_repo: Path) -> None:
-    """Semgrep's --error makes a finding a nonzero exit, so run_checks records the check as fail.
-
-    Uses a local inline rule (deterministic, offline) to prove the --error/exit-code wiring.
-    FULL_CHECKS['security'] uses --config auto, which needs the network and cannot be forced to
-    fail in an isolated test; that command's real flags are guarded by
-    test_full_gate_keeps_the_semgrep_security_check. Staged in a real repo as the gate runs it: the
-    fixtures carry no containment violation, so 'security' is the only failure.
-    """
-    stage(
+def test_run_one_check_streams_command_output_live(git_repo: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    """The production seam streams the child process output and returns its exit code."""
+    exit_code = gate.run_one_check(
+        "echoer",
+        ["/bin/sh", "-c", "printf 'hello from the check\\n'"],
         git_repo,
-        "rule.yaml",
-        "rules:\n"
-        "  - id: no-eval\n"
-        "    pattern: eval(...)\n"
-        "    message: eval is forbidden\n"
-        "    languages: [python]\n"
-        "    severity: ERROR\n",
+        {},
     )
-    stage(git_repo, "bad.py", 'x = eval("1 + 1")\n')
-    rule = git_repo / "rule.yaml"
-    command = ["uv", "run", "--no-sync", "semgrep", "scan", "--config", str(rule), "--error", "--quiet", "."]
-    result = gate.run_checks(git_repo, {"security": command})
-    assert result["fail"] == ["security"]
+    assert exit_code == 0
+    assert "hello from the check" in capfd.readouterr().out
+
+
+def test_run_one_check_returns_nonzero_exit_code(git_repo: Path) -> None:
+    """The production seam returns the child process status without translating it."""
+    assert gate.run_one_check("failing", ["/bin/sh", "-c", "exit 7"], git_repo, {}) == 7
+
+
+def test_call_tools_appends_containment_only_under_loop(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Loop containment is appended only when RALPH_LOOP is present."""
+
+    def fake_run(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
+        del name, command, repo, env
+        return 0
+
+    def fake_containment(repo: Path) -> list[str]:
+        del repo
+        return ["containment problem"]
+
+    monkeypatch.setattr(gate, "run_one_check", fake_run)
+    monkeypatch.setattr(gate, "run_non_human_checks", fake_containment)
+    monkeypatch.delenv("RALPH_LOOP", raising=False)
+    assert gate.call_tools(git_repo, {"ok": ["tool"]}) == {"pass": ["ok"], "fail": []}
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    assert gate.call_tools(git_repo, {"ok": ["tool"]}) == {
+        "pass": ["ok"],
+        "fail": ["containment problem"],
+    }
+
+
+def test_lint_command_keeps_show_fixes_flag() -> None:
+    """The lint command asks ruff to show applied and suggested fixes."""
+    assert gate.COMMIT_CHECKS["ruff lint"] == [
+        "uv",
+        "run",
+        "--no-cache",
+        "--no-sync",
+        "ruff",
+        "check",
+        "--show-fixes",
+        ".",
+    ]
+
+
+def test_types_check_uses_pyright_json_output() -> None:
+    """The types check runs pyright in JSON mode for stable machine-readable output."""
+    assert gate.FULL_CHECKS["types"] == ["uv", "run", "--no-sync", "pyright", "--outputjson"]
+
+
+def test_security_check_uses_semgrep_auto_and_secrets_configs() -> None:
+    """The security check includes both Semgrep auto rules and the secrets ruleset."""
+    command = gate.FULL_CHECKS["security"]
+    assert command[:5] == ["uv", "run", "--no-sync", "semgrep", "scan"]
+    assert "--config" in command
+    assert "auto" in command
+    assert "p/secrets" in command
 
 
 # ------------------------------------------------------------------------- local gate ⊇ CI parity
@@ -199,69 +183,61 @@ def test_ci_runs_the_format_report() -> None:
 # --------------------------------------------------------------------- run_gate vs run_preflight routing
 
 
-def covered_project(git_repo: Path, module_body: str, test_body: str) -> Path:
-    """A real staged repo whose pyproject drives the REAL coverage command: no --cov target on the CLI,
-    so pytest must read [tool.coverage] run.source from pyproject to know what to measure. That is the
-    wiring the gate's bare `--cov` relies on. Files are staged so run_checks' loop containment runs for
-    real against a true index, exactly as the gate calls it.
+def test_gate_pytest_command_enforces_full_coverage_and_buckets_failures() -> None:
+    """The gate's pytest command keeps coverage reporting and the 100% coverage threshold."""
+    pytest_command = gate.FULL_CHECKS["pytest"]
+    assert pytest_command[:5] == ["uv", "run", "--no-cache", "--no-sync", "pytest"]
+    assert "--cov" in pytest_command
+    assert "--cov-report=term-missing" in pytest_command
+    assert "--cov-fail-under=100" in pytest_command
+
+
+def test_gate_buckets_a_failing_pytest_check(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """When the pytest command exits nonzero (e.g. a coverage gap), call_tools records it under 'fail'.
+    Faking the run_one_check seam proves the bucketing without a real, recursive pytest subprocess.
     """
-    stage(
-        git_repo,
-        "pyproject.toml",
-        "[tool.coverage.run]\nsource = ['pkg']\n[tool.coverage.report]\nfail_under = 100\n",
-    )
-    stage(git_repo, "pkg/__init__.py", "")
-    stage(git_repo, "pkg/m.py", module_body)
-    stage(git_repo, "test_m.py", test_body)
-    return git_repo
 
+    def pytest_fails(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
+        del command, repo, env
+        return 1 if name == "tests" else 0
 
-def test_gate_pytest_check_fails_on_a_pyproject_driven_coverage_gap(git_repo: Path) -> None:
-    """The gate's ACTUAL pytest command (real FULL_CHECKS['pytest'], bare `--cov` with no target) FAILS
-    on an uncovered line, and fails ONLY because pytest resolved [tool.coverage] run.source from the
-    staged pyproject and applied --cov-fail-under=100 (not because a string contains a flag).
-
-    Only the FAILING direction lives here (one real pytest run). The passing direction — the same bare
-    `--cov` reading run.source and going green at full coverage — is already proven end-to-end by
-    test_integration's test_full_gate_end_to_end_and_pre_push_hook_blocks, so it is not repeated.
-
-    NESTED PYTEST (session 2 of 3 in a full run): this test spawns one real `pytest` subprocess. It is
-    unavoidable — proving that --cov-fail-under actually BLOCKS on an uncovered line can only be done by
-    running pytest for real. It is scoped to the throwaway `covered_project` repo (its own single test),
-    so it cannot recurse into this suite. Do not add a second spawn here for the passing case.
-    """
-    uncovered = covered_project(
-        git_repo,
-        "def used():\n    return 1\n\n\ndef never():\n    return 2\n",  # `never` is uncovered
-        "from pkg.m import used\n\n\ndef test_used():\n    assert used() == 1\n",
-    )
-    result = gate.run_checks(uncovered, {"tests": gate.FULL_CHECKS["pytest"]})
-    assert result["fail"] == ["tests"]  # the pyproject-driven 100% coverage gate bit
+    monkeypatch.setattr(gate, "run_one_check", pytest_fails)
+    result = gate.call_tools(git_repo, {"tests": gate.FULL_CHECKS["pytest"]})
+    assert result["fail"] == ["tests"]
 
 
 def test_preflight_invokes_only_lint_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Integrated routing: run_preflight (no loop) runs the commit checks (lint + format report). Real
-    ruff on a clean tree: lint passes and format always passes; the heavy gate checks do not run.
-    """
+    """Integrated routing: run_preflight runs only the commit checks."""
+    ran: list[str] = []
+
+    def pass_check(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
+        del command, repo, env
+        ran.append(name)
+        return 0
+
     monkeypatch.delenv("RALPH_LOOP", raising=False)
-    (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "run_one_check", pass_check)
     result = gate.run_preflight(tmp_path)
-    ran = set(result["pass"]) | set(result["fail"])
-    assert ran == {"ruff lint", "ruff format (no fail)"}  # only fast commit checks run; format is a report
-    assert result["fail"] == []  # clean tree, real ruff passes
+    assert set(ran) == {
+        "ruff lint",
+        "ruff format (no fail)",
+        "complexipy",
+    }
+    assert result["pass"] == ran
+    assert result["fail"] == []
 
 
-def test_run_gate_delegates_to_run_checks_with_full_checks(
+def test_run_gate_delegates_to_call_tools_with_full_checks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """run_gate is a thin router: it runs exactly FULL_CHECKS on the given repo and returns that result.
 
     The real end-to-end behaviour of every gate check is proven in test_integration's single full-gate
-    test; here we only pin the routing (repo + FULL_CHECKS in, run_checks' result out) without paying
+    test; here we only pin the routing (repo + FULL_CHECKS in, call_tools' result out) without paying
     for real tools or risking the pytest check recursively collecting this suite.
 
-    NO NESTED PYTEST: run_checks is stubbed with `spy`, so run_gate spawns nothing. This is the pattern
-    to copy for any new routing assertion — stub run_checks instead of adding a real-pytest spawn.
+    NO NESTED PYTEST: call_tools is stubbed with `spy`, so run_gate spawns nothing. This is the pattern
+    to copy for any new routing assertion — stub call_tools instead of adding a real-pytest spawn.
     """
     seen: dict[str, object] = {}
 
@@ -269,7 +245,7 @@ def test_run_gate_delegates_to_run_checks_with_full_checks(
         seen["repo"], seen["checks"] = repo, checks
         return {"pass": ["types"], "fail": []}
 
-    monkeypatch.setattr(gate, "run_checks", spy)
+    monkeypatch.setattr(gate, "call_tools", spy)
     result = gate.run_gate(tmp_path)
     assert seen == {"repo": tmp_path, "checks": gate.FULL_CHECKS}
     assert result == {"pass": ["types"], "fail": []}
@@ -358,9 +334,15 @@ def test_preflight_ejects_staged_deletion_of_forbidden(
 
 def test_preflight_skips_containment_without_loop(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Without RALPH_LOOP, a human may stage forbidden paths: nothing is ejected."""
+
+    def pass_check(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
+        del name, command, repo, env
+        return 0
+
     monkeypatch.delenv("RALPH_LOOP", raising=False)
+    monkeypatch.setattr(gate, "run_one_check", pass_check)
     stage(git_repo, "harness/util.py", "value = 1\n")
-    assert containment_fail(git_repo) == []
+    assert gate.run_preflight(git_repo)["fail"] == []
     assert "harness/util.py" in staged(git_repo)  # left staged: containment is loop-only
 
 
@@ -433,7 +415,7 @@ def test_preflight_preferences_read_one_file_at_a_time(
     monkeypatch.setattr(gate, "prefs", record)
     stage(git_repo, "src/a.py", "a = 1\n")
     stage(git_repo, "src/b.py", "b = 2\n")
-    gate.run_preflight(git_repo)
+    containment_fail(git_repo)
     # each call gets exactly one file's staged source (git show preserves the trailing newline)
     assert sorted(s.rstrip("\n") for s in sources) == ["a = 1", "b = 2"]
 
@@ -478,6 +460,40 @@ def test_gate_imports_cleanly_without_preferences(monkeypatch: pytest.MonkeyPatc
     monkeypatch.undo()
     importlib.reload(gate)
     assert gate.prefs is not None
+
+
+# ------------------------------------------------- check_for_bad_patterns (direct, no ejection wrapper)
+
+
+def test_check_for_bad_patterns_flags_a_banned_pattern(git_repo: Path) -> None:
+    """Called directly, it returns a banned-pattern problem for a staged added line carrying one."""
+    stage(git_repo, "src/x.py", "value = 1  # noqa\n")
+    problems = gate.check_for_bad_patterns(git_repo)
+    assert any(problem.startswith("'noqa' line:") for problem in problems)
+
+
+def test_check_for_bad_patterns_appends_a_preference_violation(git_repo: Path) -> None:
+    """A staged .py file that breaks a preference contributes its violation to the returned problems."""
+    stage(git_repo, "src/mod.py", "_bad = 1\n")  # lone-underscore name trips a preference
+    problems = gate.check_for_bad_patterns(git_repo)
+    assert any("'_bad'" in problem for problem in problems)
+
+
+def test_check_for_bad_patterns_clean_staged_file_has_no_problems(git_repo: Path) -> None:
+    """A staged file with no banned patterns and no preference breaks yields an empty problem list."""
+    stage(git_repo, "src/ok.py", "value = 1\n")
+    assert gate.check_for_bad_patterns(git_repo) == []
+
+
+def test_check_for_bad_patterns_empty_index_warns_and_returns_no_problems(
+    git_repo: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """With nothing staged, the diff is empty so the prefs branch is skipped: it warns to stage real
+    work and returns no problems (the else branch that prints the stage-real-work notice).
+    """
+    problems = gate.check_for_bad_patterns(git_repo)  # clean index: seed commit only, nothing staged
+    assert problems == []
+    assert "Stage real work" in capfd.readouterr().out
 
 
 # --------------------------------------------------------- spec tests (FAIL against the current bugs)

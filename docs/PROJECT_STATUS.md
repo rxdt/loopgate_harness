@@ -15,8 +15,8 @@
 
 ## Checks
 
-- `harness preflight`  <status>
-- `harness gate`  <status>
+- `harness preflight` <status>
+- `harness gate` <status>
 - <another-check-to-use>
 - <another-check-to-use>
 
@@ -29,6 +29,7 @@
 ## Last Attempt + Result
 
 _Most recent loop_
+
 - <what the previous iteration tried, and whether it worked or failed (with the error/check)>
 
 ## Blockers

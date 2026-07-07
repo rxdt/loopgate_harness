@@ -3,9 +3,9 @@
 You are one fresh-context iteration of the loop. The repo is your memory.
 Specs say what to build. You decide what is the next most useful change.
 
-1. Read `specs/` and identify the single most important unfinished item.
+1. Read `specs/*.md` and `docs/plan.md` and identify the most important unfinished items.
 2. Inspect the relevant code and tests before editing.
-3. Implement one tightly scoped change that advances that item.
+3. Implement the tightly scoped change that advances the specs.
 4. Add or update tests that prove behavior and challenge the source; use durable, behavior-focused names and docstrings.
 5. Run `harness gate`. If `harness` is not on PATH, run `.venv/bin/harness gate`.
 6. Fix failures without weakening tests, coverage, typing, security checks, or the gate.
@@ -14,6 +14,7 @@ Specs say what to build. You decide what is the next most useful change.
 9. Push the current branch so the iteration is saved remotely.
 
 Rules:
+
 - Do not create a branch or worktree unless the human explicitly asked for one.
 - Keep the change small enough to finish in this iteration.
 - Do not batch unrelated work.
@@ -26,6 +27,7 @@ Rules:
 - Use tests for code behavior and API contracts. Do not test for `.md` contents.
 
 Commit message:
+
 ```
 One sentence summary
 

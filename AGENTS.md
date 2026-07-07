@@ -18,7 +18,7 @@
 - The quality minimum is code in `harness/gate.py` (forbidden to agents). Leave it unchallenged.
 - Strengthen tests and coverage. Pass lint, type, and gate checks.
 - Avoid lint suppressions, type-ignores, skipped/xfail tests, or broad exception swallowing.
-- Never run destructive git commands (`rm -rf`, `git reset --hard`, `git branch -D`) unless the user  explicitly asks; verify each risky step.
+- Never run destructive git commands (`rm -rf`, `git reset --hard`, `git branch -D`) unless the user explicitly asks; verify each risky step.
 - Never bypass or reconfigure git hooks.
 
 ## Commit and gate
@@ -35,10 +35,10 @@
 ## Session handoff
 
 - At <=40% of your context window, stop expanding scope.
-    - Update `docs/PROJECT_STATUS.md` with new state, checks, commit/branch, blockers, and next steps.
-    - Update your spec.
-    - Leave the repo resumable.
-    - Commit through the gate, push, then merge when safe.
+  - Update `docs/PROJECT_STATUS.md` with new state, checks, commit/branch, blockers, and next steps.
+  - Update your spec.
+  - Leave the repo resumable.
+  - Commit through the gate, push, then merge when safe.
 
 # RULES
 
@@ -47,6 +47,7 @@
 **Verify assumptions. Surface confusion. Note tradeoffs.**
 
 Before implementing:
+
 - State assumptions explicitly. If uncertain, ask.
 - If multiple interpretations exist, present them - don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.

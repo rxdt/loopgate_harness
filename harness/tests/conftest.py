@@ -19,14 +19,8 @@ def run_cmd(args: list[str], cwd: Path) -> str:
 
 
 @pytest.fixture
-def real_hook_repo(tmp_path: Path) -> Path:
-    """A git repo wired to the REAL tracked hooks and the repo's REAL harness.
-
-    The tracked hooks run `.venv/bin/harness`, whose shim hardcodes this repo's interpreter and
-    imports `harness` from its sys.path. Symlinking `.venv` makes that command resolve, so a commit
-    or push here drives the true chain: git hook -> .venv/bin/harness -> run_preflight/run_gate ->
-    run_checks -> real tools. Nothing is stubbed.
-    """
+def fake_hook_repo(tmp_path: Path) -> Path:
+    """A git repo wired to the tracked hooks and a fake harness executable."""
     run_cmd(["git", "init", "-q"], tmp_path)
     run_cmd(["git", "config", "user.email", "harness@test.local"], tmp_path)
     run_cmd(["git", "config", "user.name", "harness-test"], tmp_path)
@@ -36,7 +30,20 @@ def real_hook_repo(tmp_path: Path) -> Path:
         target = hooks / hook
         target.write_text((REPO_ROOT / ".githooks" / hook).read_text(encoding="utf-8"), encoding="utf-8")
         target.chmod(0o755)
-    (tmp_path / ".venv").symlink_to(REPO_ROOT / ".venv")
+    bin_dir = tmp_path / ".venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    harness = bin_dir / "harness"
+    harness.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$@\" > harness.args\n"
+        "printf '%s\\n' \"${RALPH_LOOP:-}\" > harness.loop\n"
+        "if test -f harness.exit; then\n"
+        '    exit "$(cat harness.exit)"\n'
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
     run_cmd(["git", "config", "core.hooksPath", ".githooks"], tmp_path)
     (tmp_path / "seed.py").write_text("x = 1\n", encoding="utf-8")
     run_cmd(["git", "add", "seed.py", ".githooks"], tmp_path)

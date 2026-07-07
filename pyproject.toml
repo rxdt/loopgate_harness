@@ -31,7 +31,8 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
-    "semgrep"
+    "semgrep",
+    "complexipy"
 ]
 
 [project.scripts]
@@ -53,26 +54,19 @@ packages = ["harness"]
 # Pyright Configuration
 # ==============================================================================
 [tool.pyright]
-typeCheckingMode = "strict"
-# Silences third-party untyped library noise
-reportUnknownVariableType = "none"
-reportUnknownArgumentType = "none"
-reportUnknownMemberType = "none"
-reportUnknownParameterType = "none"
-reportUntypedFunctionDecorator = "none"
-reportMissingTypeStubs = "none"
-reportAssertAlwaysTrue = "error"
-reportUnusedImport = "none"           # Handled by Ruff F401
-reportUnusedVariable = "none"         # Handled by Ruff F841
-verboseOutput = true
-include = ["src", "harness"]
+typeCheckingMode = "strict"             # Pyright's strictest mode.
+reportAssertAlwaysTrue = "error"        # Catch asserts that are always true.
+reportUnusedImport = "none"             # Handled by Ruff F401
+reportUnusedVariable = "none"           # Handled by Ruff F841
+verboseOutput = true                    # JSON report output when Pyright is run
+include = ["src", "harness"]            # Type-check only code shipped by this template.
 
 # ==============================================================================
 # Pytest Configuration
 # ==============================================================================
 [tool.pytest.ini_options]
 minversion = "9.0"
-addopts = ["-ra"]
+addopts = ["-ra"]                       # print useful short reasons for outcomes
 testpaths = ["tests", "harness/tests"]
 pythonpath = ["src", "harness"]
 
@@ -82,10 +76,23 @@ pythonpath = ["src", "harness"]
 [tool.coverage]
 # Add every directory that ships code here to ensure 100% coverage
 run.source = ["src", "harness"]
-report.show_missing = true
-report.skip_covered = false
-report.fail_under = 100
-skip_covered = false
+report.show_missing = true             # Show exact missed lines when coverage fails.
+report.skip_covered = false            # Keep fully covered files visible in reports.
+report.fail_under = 100                # Block merges unless all shipped code is covered.
+skip_covered = false                   # Same behavior for older coverage config readers.
+
+# ==============================================================================
+# Complexipy Configuration
+# ==============================================================================
+[tool.complexipy]
+paths = ["src", "harness"]
+exclude = ["**/tests/**"]    # Test code can be more branching and example-heavy than production code.
+max-complexity-allowed = 10  # Cognitive complexity cap catches deeply nested, hard-to-read flow.
+no-ignore = true             # Disallow `# complexipy: ignore`, fix complexity instead of suppressing it.
+report-ignored = true
+failed = true                # Show only functions over the threshold so gate output stays actionable.
+sort = "file_name"
+quiet = false
 
 # ==============================================================================
 # Pylint Configuration
@@ -103,22 +110,21 @@ main.ignore = [
     "tests",
     "harness/tests"
 ]
-
 format.max-line-length = 110         # Keep Pylint line accounting aligned with Ruff E501
 format.max-module-lines = 500        # Enable Pylint C0302 because Ruff has no equivalent
-parameter_documentation.accept-no-param-doc = false
-reports.reports = "yes"
-reports.score = true
-"messages control".enable = ["F", "I", "R0022", "missing-param-doc"]
+parameter_documentation.accept-no-param-doc = false  # Require Args docs when Pylint docparams sees params.
+reports.reports = "yes"              # Print detailed Pylint reports so humans see why score changed.
+reports.score = true                 # Keep Pylint's score visible as a coarse trend signal.
+"messages control".enable = ["F", "I", "R0022", "missing-param-doc"]  # Fatal/info, stale options, param docs.
 
 # ==============================================================================
 # Unified Ruff Configuration
 # ==============================================================================
 [tool.ruff]
 target-version = "py311"
-preview = true
-line-length = 110
-force-exclude = true
+preview = true                      # Enable newer Ruff rules before they are fully stable.
+line-length = 110                   # Keep code readable without forcing narrow wrapping.
+force-exclude = true                # Respect excluded paths even when they are passed directly.
 exclude = [
     "*.md",
     ".git",
@@ -131,20 +137,19 @@ exclude = [
     ".pytest_cache",
     ".ruff_cache",
     ".uv",
-    "**/.pylint_bits/**",  # Stops Ruff from fighting Pylint's internal cache
+    "**/.pylint_bits/**",          # Stops Ruff from fighting Pylint's internal cache
 ]
 [tool.ruff.lint]
 fixable = ["ALL"]
-unfixable = []
-mccabe.max-complexity = 8  # Prevent structural bloat, path-count limit for functions
-pycodestyle.max-doc-length = 110  # Enforce W505 for comments and docstrings
-pycodestyle.ignore-overlong-task-comments = true
-pydocstyle.convention = "google"
-pydoclint.ignore-one-line-docstrings = true
+unfixable = []                                    # Allow Ruff to safely auto-fix what it can
+mccabe.max-complexity = 8                         # Prevent structural bloat, path-count limit for functions
+pycodestyle.max-doc-length = 110                  # Enforce W505 for comments and docstrings
+pycodestyle.ignore-overlong-task-comments = true  # Let TODO-style tracker lines exceed max doc length.
+pydocstyle.convention = "google"  # Interpret Args/Returns/Raises sections as Google-style docstrings.
+pydoclint.ignore-one-line-docstrings = true       # Allow obvious one-line docstrings light
 select = [
     "A",       # flake8-builtins (prevents shadowing Python builtins)
     "ARG",     # flake8-unused-arguments (dead params and fake extension points)
-    "ASYNC",   # flake8-async (catches blocks/misuse in async frameworks)
     "ASYNC",   # flake8-async (catches blocks/misuse in async frameworks)
     "B",       # flake8-bugbear (catches common backend design flaws)
     "BLE",     # flake8-blind-except (blocks quiet 'except Exception: pass')
@@ -152,15 +157,16 @@ select = [
     "C4",      # flake8-comprehensions (.e.g unnecessary list comprehensions)
     "C90",     # Enables McCabe cyclomatic complexity checks
     "COM",     # flake8-commas. Trailing comma added.
-    "DOC",     # Validates parameter & return documentation
     "D300",    # Use """ triple quotes for docstrings """
-    "DOC102",  # Documented parameter {id} must be in the function's signature
     "D102",    # No missing docstring in public method
     "D103",    # No missing docstring in public function
-    "D202",    # No return s in docstring if function doesn't return anything
+    "D202",    # No blank line between a function docstring and the function body
     "D417",    # No missing arg description in docstring for {definition}: {name}
     "D419",    # No empty docstrings
-    "DOC501",  # Raised exception {id} missing from docstring
+    "DOC",     # Global. Validates parameter & return documentation
+    "DOC102",  # Redundancy of "DOC". Documented parameter {id} must be in the function's signature
+    "DOC201",  # Redundancy of "DOC". Structured docstrings must include Returns when code returns.
+    "DOC501",  # Redundancy of "DOC". Raised exception {id} missing from docstring
     "DTZ",     # flake8-datetimez (forbid naive datetime usage)
     "E",       # pycodestyle: Catches objective syntax rule violations
     "EM",      # flake8-errmsg (keep exception messages clean and reusable)
@@ -172,7 +178,6 @@ select = [
     "I",       # isort (clean, predictable import sorting)
     "ISC",     # flake8-implicit-str-concat, Catch missing commas in lists
     "LOG",     # flake8-logging (logging misuse and avoidable root logger use)
-    "LOG",     # Prevents common logging bugs.
     "N",       # Enable pep8-naming rules globally
     "PERF",    # Avoids inefficient loop/allocation patterns
     "PGH",     # pygrep-hooks (blanket suppression hygiene) Bans generic # noqa or # type: ignore
@@ -218,18 +223,17 @@ banned-api."typing.cast".msg = "Do not use cast(); fix the type at the boundary 
 banned-api."re".msg = "Regex is slow. Use Python built-in string manipulation operations."
 
 [tool.ruff.lint.per-file-ignores]
-"**/__init__.py" = ["D104"]
+"**/__init__.py" = ["D104"]  # Package marker files do not need package docstrings.
 "**/tests/**/*.py" = [
     "D100",  # Test modules do not need noisy docstrings
     "D101",  # Test classes do not need noisy docstrings
     "D102",  # Test helper methods do not need noisy docstrings
     "D103",  # Test functions describe behavior through test names
     "D104",  # Test package boundaries do not need package docstrings
-    "DOC201", # Tests don't need docstring-missing-returns
-    "S101",  # Allow 'assert' statements (needed for pytest)
+    "DOC201", # Tests explain behavior through assertions; no Returns section needed.
+    "S101",   # Allow 'assert' statements (needed for pytest)
 ]
 "harness/**/*.py" = [
-    "S404", # Triggers when code imports subprocess or os related to process spawn
-    "S603"  # Flags execution without a shell
+    "S404", # Harness code intentionally imports subprocess to run local tools.
+    "S603"  # Harness code intentionally executes trusted local tool commands without a shell.
 ]
-"tests/harness/{conftest,test_ralph,test_cli,test_integration}.py" = ["S404", "S603"]  # allow shell execution
