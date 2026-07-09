@@ -2,7 +2,7 @@
 <img src="banner.svg" alt="Blue infinity loop" width="360">
 
 <h1>L∞PS: A Python Ralph Harness</h1>
-<p>Loosely opinionated scaffold for a gated autonomous agent loop ("Ralph"). A dumb Ralph tells an agent "Go!" and hands it a PROMPT. You set the tasks. No pre-defined, orchestrator. Agents loop on specs. Each iteration a worker commits with guardrails and updates its own specs.</p>
+<p>Loosely opinionated scaffold for a gated autonomous agent loop ("Ralph"). A dumb Ralph tells an agent to "Go!" and hands it a PROMPT. You set the tasks. No pre-defined, orchestrator. Agents loop on specs. Each iteration a worker commits with guardrails and updates its own specs.</p>
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Status](https://img.shields.io/badge/github-repo-blue?logo=github)
@@ -19,7 +19,7 @@
 
 ---
 
-## TLDR; Getting Started.
+## TL;DR: Getting Started.
 
 1. Use as a project template or drop into your project
 2. `uv run harness install <your-project-name>`
@@ -51,7 +51,7 @@ harness run <agent> [max_iterations] [max_minutes]  # agent: claude/codex/agy/co
 
 ![L∞PS Architecture Engine Flow](.loops.svg)
 
-## A l∞p
+## A L∞PS Loop
 
 The repo is the only memory. Each iteration is a fresh-context agent.
 
@@ -70,7 +70,7 @@ The repo is the only memory. Each iteration is a fresh-context agent.
 - There is NO worktree/branch creation by design. Agent duties can be contained to a part of the repo. e.g. Codex-1-frontend uses `specs/frontend.md`, Claude-2-researcher `specs/backend`...
 - Intentional:
   1. For simplicity and maintainability of the framework.
-  2. Because a fresh iteration can't see unmerged work in another worktree, so agents miss context and scramble to merge while conflicts pile up.
+  2. Because a fresh iteration can't see the unmerged work in another worktree, so agents miss context and scramble to merge while conflicts pile up.
   3. Change this behavior if you're comfortable with granting agents machine access, feeding context to agents, and managing rapidly moving git history.
   4. You can create branches/trees and run a loop in each, then merge.
 - If you don't like _ANYTHING_ in this framework, remove it.
@@ -89,7 +89,7 @@ Ruff lint + check format for everyone, _plus_ **containment** for the agents. Se
 
 ✅ `harness gate` (CI/PR pre-push). Local checks mirror CI → ruff lint + format report-only, pyright, pylint, semgrep, complexipy, hypothesis, pytest @ 100% cov.
 
-Humans ONLY can bypass triggered gates and commit by adding flag `--no-verify`.
+Only humans can bypass triggered gates and commit by adding flag `--no-verify`.
 
 ## Layout
 
@@ -118,7 +118,7 @@ If an agent edits a forbidden file, the file will be unstaged (not allowed to co
 
 2. **The gate is a guardrail, not a jail.** Agents are crafty, like people. They will find a way to complete a task at all costs. **Trust nothing and no one.**
 
-3. **Mind your usage limits.** `ralph.sh` works agents to the cap set. You can easily burn through your tokens, context windows, and provider usage limits. **Workers keep working as long as there is work to do.**
+3. **Mind your usage limits.** `ralph.sh` works agents to the cap set. You can easily burn through your tokens, context windows, and provider usage limits. **Workers continue running as long as there is work to do.**
 
 4. **`PROMPT.md` tells the worker to push every iteration** Protect `main` and run the loop on its own branch.
 
