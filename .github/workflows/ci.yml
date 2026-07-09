@@ -66,7 +66,7 @@ jobs:
         run: uv run --no-sync pyright --outputjson
 
       - name: Semgrep Security Scan
-        run: uv run --no-sync semgrep scan --config auto --config p/secrets --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag .
+        run: uv run --no-sync semgrep scan --error --config auto --config p/secrets --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag .
 
       - name: Tests with Coverage Gate
         run: uv run --no-cache --no-sync pytest --cov --cov-report=term-missing --cov-fail-under=100

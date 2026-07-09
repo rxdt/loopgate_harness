@@ -325,6 +325,16 @@ def test_repeated_violations_of_one_kind_each_get_a_line() -> None:
     assert violations.count("\n") == 1  # two messages, one joining newline
 
 
+def test_lambda_in_a_test_file_is_flagged() -> None:
+    """A test file gets no path-based exemption: a lambda in test_gate.py is flagged like any other file.
+    Regression guard — the gate unstages harness test files, so preferences never scanned them there and
+    lambdas slipped in; this proves preferences_violations itself flags them regardless of the path.
+    """
+    source = "def test_x() -> None:\n    fake(lambda command: 0)\n"
+    violations = preferences_violations("harness/tests/test_gate.py", source)
+    assert "harness/tests/test_gate.py:2: Lambda found" in violations
+
+
 def test_syntax_error_raises() -> None:
     """Unparseable source raises SyntaxError; preferences does not swallow it."""
     with pytest.raises(SyntaxError):

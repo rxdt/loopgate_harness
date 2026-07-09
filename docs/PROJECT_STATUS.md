@@ -1,10 +1,10 @@
 # Project Status
 
-> Current truth of the repo. Keep it short and current. Human-agent interface point.
+> Current truth of the repo. Keep it short and current < 100 lines. Human-agent interface document.
 
 ## Current Focus
 
-- Active spec + milestone: <e.g. specs/base.md → Milestone 2>
+- Active spec + milestone: <e.g. docs/specs/base.md → Milestone 2>
 
 ## Current State
 
@@ -26,11 +26,10 @@
 2. <next concrete action>
 3. <next concrete action>
 
-## Last Attempt + Result
+## Changelog
 
-_Most recent loop_
-
-- <what the previous iteration tried, and whether it worked or failed (with the error/check)>
+- <what a previous iteration tried, and enduring changes or failures (with the error/check) example>
+-  <what THIS iteration tried, and whether it worked or failures (with the error/check) example>
 
 ## Blockers
 

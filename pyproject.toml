@@ -1,22 +1,7 @@
 [project]
 name = "ralph-harness"
-version = "0.1.0"
-description = "Gated, harnessed, single-worker autonomy loop (Ralph) scaffold for starting new Python projects."
-authors = [{ name = "rxdt" }]
-readme = "README.md"
+version = "0.0.0"
 requires-python = ">=3.11"
-license = { text = "MIT" }
-keywords = ["ralph", "agent", "autonomy", "scaffold", "harness", "llm", "codex", "claude"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Software Development :: Build Tools",
-]
 dependencies = [
     "packaging",
     "pydantic",
@@ -37,11 +22,6 @@ dev = [
 
 [project.scripts]
 harness = "harness.cli:main"
-
-[project.urls]
-Homepage = "https://github.com/rxdt/py_ralph_frame"
-Repository = "https://github.com/rxdt/py_ralph_frame"
-Issues = "https://github.com/rxdt/py_ralph_frame/issues"
 
 [build-system]
 requires = ["hatchling"]

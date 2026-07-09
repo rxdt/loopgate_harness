@@ -32,7 +32,6 @@ def run_ralph(
     tmp_path: Path, worker: Path, ralph_args: list[str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Run Ralph in a temp repo with a fake timeout that delegates to the worker."""
-    (tmp_path / "PROMPT.md").write_text("do the most important thing\n", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     # Shadow both: ralph prefers gtimeout, which exists for real on dev machines and would otherwise
@@ -41,6 +40,7 @@ def run_ralph(
     fake_timeout(bin_dir / "gtimeout")
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env.setdefault("RALPH_PROMPT", "do the most important thing")  # harness passes the prompt string
     command = [str(RALPH), *(ralph_args or []), str(worker)]
     return subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, check=False, env=env)
 
@@ -156,7 +156,6 @@ def test_worker_args_pass_through_verbatim_without_substitution(tmp_path: Path) 
     """Ralph does no token substitution: worker args (e.g. a literal {{PROMPT}}) reach the worker
     byte-for-byte. The prompt is delivered only on stdin, never injected into argv.
     """
-    (tmp_path / "PROMPT.md").write_text("do the most important thing\n", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake_timeout(bin_dir / "timeout")
@@ -165,6 +164,7 @@ def test_worker_args_pass_through_verbatim_without_substitution(tmp_path: Path) 
     write_executable(worker, '#!/bin/sh\nprintf "%s\\n" "$@" > args.txt\ncat > stdin.txt\n')
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["RALPH_PROMPT"] = "do the most important thing"
     result = subprocess.run(
         [str(RALPH), "1", "1", str(worker), "-i", "{{PROMPT}}"],
         cwd=tmp_path,
@@ -185,27 +185,6 @@ def test_script_has_no_bashisms() -> None:
     assert shutil.which("sh") is not None
     result = subprocess.run(["sh", "-n", str(RALPH)], capture_output=True, text=True, check=False)
     assert result.returncode == 0
-
-
-def test_missing_prompt_stops_the_loop(tmp_path: Path) -> None:
-    """A missing PROMPT.md fails the iteration instead of recording a successful empty run."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    fake_timeout(bin_dir / "timeout")
-    worker = tmp_path / "worker.sh"
-    write_executable(worker, "#!/bin/sh\nexit 0\n")
-    env = os.environ.copy()
-    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
-    result = subprocess.run(
-        [str(RALPH), "1", "1", str(worker)],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-    )
-    assert result.returncode != 0
-    assert "completed" not in result.stderr
 
 
 def test_zero_iterations_rejected(tmp_path: Path) -> None:

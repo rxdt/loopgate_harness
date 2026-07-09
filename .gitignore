@@ -21,4 +21,10 @@ uv.lock
 
 # in-repo worker worktrees (isolated agent workspaces, never /tmp)
 .worktrees/
-scratchpad/
+
+# scratchpad: ship the dir + agent doc, ignore everything agents/runs write into it
+scratchpad/*
+!scratchpad/README.md
+!scratchpad/runs/
+scratchpad/runs/*
+!scratchpad/runs/.gitkeep

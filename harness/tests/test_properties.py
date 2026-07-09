@@ -70,10 +70,10 @@ IDENTIFIERS = identifiers()
 def scan_banned(diff: str, patterns: set[str] | None = None) -> list[str]:
     """Drive run_non_human_checks' banned-pattern scan over a canned unified diff, no real git.
 
-    Stubs run_git so the only staged content the scan sees is `diff` (returned for the
-    `--unified=0` call); every other git call (the name-only lists that drive ejection and prefs)
-    returns "", so nothing is ejected and the prefs branch is skipped. prefs is forced to None so
-    the scan under test is the sole source of problems.
+    Stubs run_git so the banned-pattern scan sees `diff` (returned for the `--unified=0` call). The
+    name-only ACMRD call returns one non-forbidden path so the empty-commit guard treats the index as
+    non-empty and nothing is ejected; every other git call returns "". prefs is forced to None so the
+    scan under test is the sole source of problems.
 
     Args:
         diff: The `git diff --cached --unified=0` output the scan should read.
@@ -84,7 +84,11 @@ def scan_banned(diff: str, patterns: set[str] | None = None) -> list[str]:
     """
 
     def fake_git(_repo: Path, args: list[str]) -> str:
-        return diff if "--unified=0" in args else ""
+        if "--unified=0" in args:
+            return diff
+        if "--name-only" in args and "--diff-filter=ACMRD" in args:
+            return "src/x.py\n"  # a real staged file, so the empty-commit guard doesn't short-circuit
+        return ""
 
     with (
         mock.patch.object(gate, "run_git", fake_git),
@@ -116,7 +120,7 @@ def added_line_with_pattern(draw: st.DrawFn) -> tuple[str, str]:
 
 @settings(max_examples=50)
 @given(case=added_line_with_pattern())
-@example(case=("noqa", "+value = 1  # noqa"))  # lowercase-alpha pattern
+@example(case=("# noqa", "+value = 1  # noqa"))  # lowercase-alpha pattern
 @example(case=("--no-verify", "+value = 1  # --NO-verify"))  # symbol-heavy pattern
 def test_banned_pattern_detected_across_arbitrary_line_casing(case: tuple[str, str]) -> None:
     """Every forbidden pattern is flagged on a '+value = 1  # {pattern}' add line however that line is

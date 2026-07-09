@@ -25,21 +25,21 @@
 2. `uv run harness install <your-project-name>`
 3. Write your project goal in [docs/plan.md](docs/plan.md)
 4. `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
-5. Not what you wanted? Refine `plan.md` / `PROMPT.md` and re-run
+5. Not what you wanted? Refine `docs/plan.md` / `docs/PROMPT.md` and re-run
 
 ---
 
 ## Details
 
-`PROMPT.md` tells each agent to pick a `spec` and build. `specs/` say _what_ to build. The agent decides _what next_. You keep `docs/plan.md` current, and specs get rewritten from it (agent is told in `PROMPT.md` to update the specs). Each iteration the agent updates its spec and `PROJECT_STATUS`. Ideas from [ghuntley](https://github.com/ghuntley), How to Ralph Wiggum.
+`docs/PROMPT.md` tells each agent to pick a `spec` and build. `docs/specs/` say _what_ to build. The agent decides _what next_. You keep `docs/plan.md` current, and specs get rewritten from it (agent is told in `docs/PROMPT.md` to update the specs). Each iteration the agent updates its spec and `PROJECT_STATUS`. Ideas from [ghuntley](https://github.com/ghuntley), How to Ralph Wiggum.
 
 ## Start a new project
 
-Use with new Python projects or drop `harness/` and dependencies into an existing project.
+Use with new Python projects.
 
 1. From inside the checkout, run `harness install <your-project-name>`. Names the project, installs dependencies, and sets up the git hook.
 2. Write your grand vision into `docs/plan.md`.
-3. Optionally add the first spec in `specs/`, or have an agent draft the first specs.
+3. Optionally add the first spec in `docs/specs/`, or have an agent draft the first specs.
 4. Put product code under `src/` and list new source directories in `pyproject.toml [tool.coverage.run]`.
 5. Strict Ruff rules, type checking, pyright, complexipy, and pytest coverage are set in `pyproject.toml`.
 6. Your coding quirks go in `harness/preferences.py`.
@@ -55,8 +55,8 @@ harness run <agent> [max_iterations] [max_minutes]  # agent: claude/codex/agy/co
 
 The repo is the only memory. Each iteration is a fresh-context agent.
 
-- `specs/` say WHAT to build
-- constant `PROMPT.md` tells the agent: read `specs/`, review `src/`, build the most important unfinished thing
+- `docs/specs/` say WHAT to build
+- constant `docs/PROMPT.md` tells the agent: read `docs/specs/`, review `src/`, build the most important unfinished thing
 - agent builds
 - agent commits
 - every git commit passes the fast preflight (lint, format, plus loop containment for the agent)
@@ -67,12 +67,12 @@ The repo is the only memory. Each iteration is a fresh-context agent.
 
 ![L∞PS Agents](.loops_agents.svg)
 
-- There is NO worktree/branch creation by design. Agent duties can be contained to a part of the repo. e.g. Codex-1-frontend uses `specs/frontend.md`, Claude-2-researcher `specs/backend`...
-- Intentional:
+- There is NO worktree/branch creation by design. You can create branches/trees and run a loop in each, then merge if you feel like managing that.
+- Agent duties can be contained to a part of the repo. e.g. Codex-1-frontend uses `docs/specs/frontend.md`, Claude-2-researcher `docs/specs/backend`...
+- No branch/worktree creation in this harness was intentional:
   1. For simplicity and maintainability of the framework.
   2. Because a fresh iteration can't see the unmerged work in another worktree, so agents miss context and scramble to merge while conflicts pile up.
   3. Change this behavior if you're comfortable with granting agents machine access, feeding context to agents, and managing rapidly moving git history.
-  4. You can create branches/trees and run a loop in each, then merge.
 - If you don't like _ANYTHING_ in this framework, remove it.
 
 ## Safety
@@ -103,10 +103,10 @@ harness/        the gate, loop (ralph.sh), CLI, custom user checks   (🤖 forbi
 .github/        CI that re-runs the gate                             (🤖 forbidden)
 pyproject.toml  project + tooling config                             (🤖 forbidden)
 AGENTS.md       rules for agents working in the repo                 (🤖 forbidden)
-PROMPT.md       the standing per-iteration instruction               (human maintained)
-docs/           PLAN, PROJECT_STATUS                                 (human maintained plan.md)
+docs/PROMPT.md  the standing per-iteration instruction               (human maintained)
+docs/           PLAN, PROJECT_STATUS, PROMPT                          (human maintained plan.md)
 scratchpad/     scratch dir agents can use for temp files            (For the 🤖 to play)
-specs/          WHAT to build, one PRIORITY-bannered file per track
+docs/specs/     WHAT to build, one PRIORITY-bannered file per track
 src/            your product/source code (add to coverage source)
 ```
 
@@ -120,9 +120,11 @@ If an agent edits a forbidden file, the file will be unstaged (not allowed to co
 
 3. **Mind your usage limits.** `ralph.sh` works agents to the cap set. You can easily burn through your tokens, context windows, and provider usage limits. **Workers continue running as long as there is work to do.**
 
-4. **`PROMPT.md` tells the worker to push every iteration** Protect `main` and run the loop on its own branch.
+4. **`docs/PROMPT.md` tells the worker to push every iteration** Protect `main` and run the loop on its own branch.
 
 5. **100% coverage does not mean good tests.** That is quantity, not quality. (Upcoming feature: mutation testing)
+
+6. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
 
 ## Commands
 
@@ -139,7 +141,7 @@ harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/
 ruff check . && ruff format --check .  # lint. --check verifies formatting only, no auto-fix
 pyright  # static type checker: flags type errors without running code
 pylint harness src  # deeper lint: dead code, bad patterns, style beyond ruff
-semgrep scan --config auto --config p/secrets --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag .  # SAST. exclude-rule allows the template's floating action tags
+semgrep scan --error --config auto --config p/secrets --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag .  # SAST. exclude-rule allows the template's floating action tags
 pytest --cov --cov-report=term-missing --cov-fail-under=100  # Note: Pydantic is included. Use it.
 
 # UNDERLYING AGENT CALLS (presets defined in AGENTS object at harness/cli.py:30)

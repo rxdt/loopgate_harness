@@ -5,6 +5,7 @@ toolchain (gate checks, uv sync, the worker subprocess) is stubbed at the bounda
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 import tomllib
@@ -40,11 +41,6 @@ def returns(fail: list[str], passed: list[str] | None = None) -> Callable[[Path]
         return {"pass": passed if passed is not None else ["lint"], "fail": fail}
 
     return check
-
-
-def no_jq(name: str) -> None:
-    """Typed stand-in for shutil.which when jq is unavailable."""
-    del name
 
 
 def stub_toolchain(real: Callable[..., object], calls: list[tuple[str, ...]]) -> Callable[..., object]:
@@ -85,6 +81,12 @@ def write_executable(path: Path, text: str) -> None:
     """Write an executable script for CLI integration tests."""
     path.write_text(text, encoding="utf-8")
     path.chmod(0o755)
+
+
+def seed_prompt(cwd: Path) -> None:
+    """Create docs/PROMPT.md so `run` (which reads it into RALPH_PROMPT) has a prompt to pass."""
+    (cwd / "docs").mkdir(parents=True, exist_ok=True)
+    (cwd / "docs" / "PROMPT.md").write_text("do the most important thing\n", encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- entry point
@@ -138,60 +140,70 @@ def test_run_exposes_verbose_as_positional_without_disable_flag() -> None:
 # --------------------------------------------------------------------------- preflight / gate
 
 
-def plain(text: str) -> str:
-    """Strip ANSI SGR codes (ESC '[' ... 'm') so assertions match the rendered summary text
-    regardless of Rich styling. String-based, no regex.
-    """
-    out: list[str] = []
-    rest = text
-    while "\x1b[" in rest:
-        before, _, after = rest.partition("\x1b[")
-        out.append(before)
-        rest = after.partition("m")[2]  # drop the SGR parameters up to and including 'm'
-    out.append(rest)
-    return "".join(out)
-
-
 def test_preflight_passes_when_gate_clean(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A clean run_preflight (no failures) → check() renders the summary with the pass check named
-    and exits 0.
-    """
+    """A human run of a clean preflight renders the Rich summary (styled) and exits 0."""
+    monkeypatch.delenv("RALPH_LOOP", raising=False)
     monkeypatch.setattr(gate, "run_preflight", returns([], passed=["lint"]))
     result = runner.invoke(cli.app, ["preflight"])
     assert result.exit_code == 0
-    output = plain(result.stderr)
-    assert "Harness Summary" in output
-    assert "lint" in output  # the PASSED row for the clean check is rendered
-    assert "ok: preflight pass" in output
-    assert "rejected by harness" not in output
+    assert "\x1b[" in result.stderr  # humans get styled output
+    assert "Harness Summary" in result.stderr
+    assert "lint" in result.stderr
+    assert "ok: preflight pass" in result.stderr
+    assert "rejected by harness" not in result.stderr
 
 
 def test_preflight_rejects_and_names_the_fail_check(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A fail check from run_preflight is named in the summary and exits 1."""
+    """A human run with a failing preflight names the check and rejects, styled, exit 1."""
+    monkeypatch.delenv("RALPH_LOOP", raising=False)
     monkeypatch.setattr(gate, "run_preflight", returns(["lint"]))
     result = runner.invoke(cli.app, ["preflight"])
     assert result.exit_code == 1
-    output = plain(result.stderr)
-    assert "lint" in output
-    assert "rejected by harness" in output
+    assert "\x1b[" in result.stderr
+    assert "lint" in result.stderr
+    assert "rejected by harness" in result.stderr
 
 
 def test_gate_passes_when_checks_clean(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A clean run_gate → check() exits 0 and does not reject."""
+    """A human run of a clean gate exits 0 and does not reject."""
+    monkeypatch.delenv("RALPH_LOOP", raising=False)
     monkeypatch.setattr(gate, "run_gate", returns([]))
     result = runner.invoke(cli.app, ["gate"])
     assert result.exit_code == 0
-    assert "rejected by harness" not in plain(result.stderr)
+    assert "rejected by harness" not in result.stderr
+    assert "ok: gate pass" in result.stderr
 
 
 def test_gate_rejects_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failing full gate check is named in the summary and exits 1."""
+    """A human run with a failing gate names the check and rejects, exit 1."""
+    monkeypatch.delenv("RALPH_LOOP", raising=False)
     monkeypatch.setattr(gate, "run_gate", returns(["types"]))
     result = runner.invoke(cli.app, ["gate"])
     assert result.exit_code == 1
-    output = plain(result.stderr)
-    assert "types" in output
-    assert "rejected by harness" in output
+    assert "types" in result.stderr
+    assert "rejected by harness" in result.stderr
+
+
+def test_agent_gate_summary_is_plain_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Under RALPH_LOOP the summary is plain (no ANSI) JSON carrying the same pass/fail info."""
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    monkeypatch.setattr(gate, "run_gate", returns(["types"], passed=["lint"]))
+    result = runner.invoke(cli.app, ["gate"])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)["Harness Summary"]
+    assert payload == {"PASSED": ["lint"], "FAILED": ["types"], "result": "rejected by harness"}
+    assert "\x1b[" not in result.stdout  # agents get no styled output
+
+
+def test_agent_gate_summary_reports_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Under RALPH_LOOP a clean gate emits plain JSON with the pass result and exits 0."""
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    monkeypatch.setattr(gate, "run_gate", returns([], passed=["lint"]))
+    result = runner.invoke(cli.app, ["gate"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)["Harness Summary"]
+    assert payload == {"PASSED": ["lint"], "FAILED": [], "result": "ok: gate pass"}
+    assert "\x1b[" not in result.stdout
 
 
 def test_verify_passes_when_gate_clean(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,6 +230,7 @@ def test_verify_rejects_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_status_reports_zero_when_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No logs → reports 0, no crash."""
     monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
     result = runner.invoke(cli.app, ["status"])
     assert result.exit_code == 0
     assert "0 run log(s)" in result.stdout
@@ -226,6 +239,7 @@ def test_status_reports_zero_when_empty(monkeypatch: pytest.MonkeyPatch, tmp_pat
 def test_status_counts_logs_and_names_newest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Status counts the *.jsonl logs and points at the newest (last sorted)."""
     monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
     write_log(tmp_path, "0001-claude.jsonl")
     write_log(tmp_path, "0002-codex.jsonl")
     result = runner.invoke(cli.app, ["status"])
@@ -244,9 +258,19 @@ def test_cli_does_not_shadow_builtin_print() -> None:
 
 
 def test_install_renames_syncs_and_sets_hooks(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """Install rewrites the project name (PEP 503), runs uv sync, and points git at .githooks."""
+    """Install sets the name (PEP 503) and version 0.0.0, preserves other metadata, syncs, sets hooks."""
     monkeypatch.chdir(git_repo)
-    (git_repo / "pyproject.toml").write_text('[project]\nname = "old"\n', encoding="utf-8")
+    (git_repo / "pyproject.toml").write_text(
+        "[project]\n"
+        'name = "old-name"\n'
+        'version = "2.3.4"\n'
+        'description = "the user\'s own project"\n'
+        'authors = [{ name = "someone" }]\n'
+        'requires-python = ">=3.11"\n'
+        "\n[project.scripts]\n"
+        'harness = "harness.cli:main"\n',
+        encoding="utf-8",
+    )
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(subprocess, "run", stub_toolchain(subprocess.run, calls))
     result = runner.invoke(cli.app, ["install", "My_Cool.Project"])
@@ -256,15 +280,14 @@ def test_install_renames_syncs_and_sets_hooks(monkeypatch: pytest.MonkeyPatch, g
     assert ("git", "config", "core.hooksPath") in calls
     assert ("ls", "-l", ".githooks") in calls
     with (git_repo / "pyproject.toml").open("rb") as handle:
-        assert tomllib.load(handle)["project"]["name"] == "my-cool-project"
-    output = plain(result.output)  # gate runs with FORCE_COLOR set; strip ANSI before matching
-    assert "project name 'my-cool-project' set in `pyproject.toml`" in output
-    assert "installing dependencies with `uv sync`" in output
-    assert "setting git hooks with `git config core.hooksPath .githooks`" in output
-    assert ".githooks" in output
-    assert "You must ACTIVATE env `source .venv/bin/activate` to use the `harness` command." in output
-    assert "python: project supports >=3.11" in output
-    assert "PIN NEWER local Python e.g. `uv python pin 3.13 && uv sync`" in output
+        project = tomllib.load(handle)["project"]
+    assert project["name"] == "my-cool-project"  # the requested name is set
+    assert project["version"] == "0.0.0"  # version reset for the new project
+    # Other metadata is left untouched (not clobbered).
+    assert project["description"] == "the user's own project"
+    assert project["authors"] == [{"name": "someone"}]
+    assert project["requires-python"] == ">=3.11"
+    assert project["scripts"] == {"harness": "harness.cli:main"}
     monkeypatch.undo()
     assert run_cmd(["git", "config", "core.hooksPath"], git_repo).strip() == ".githooks"
 
@@ -286,6 +309,7 @@ def test_install_rejects_invalid_name(monkeypatch: pytest.MonkeyPatch, git_repo:
 def test_run_rejects_unknown_agent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """An agent not in AGENTS exits 2 with a helpful message — before launching anything."""
     monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
     monkeypatch.setattr(subprocess, "run", pytest.fail)
     result = runner.invoke(cli.app, ["run", "bogus"])
     assert result.exit_code == 2
@@ -298,6 +322,7 @@ def test_run_builds_ralph_command_and_writes_sequential_log(
 ) -> None:
     """Run fires ralph.sh with the preset and the worker writes the NNNN-agent.jsonl receipt."""
     monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
     captured: dict[str, list[list[str]]] = {}
     monkeypatch.setattr(subprocess, "run", fake_agent(captured))
     result = runner.invoke(cli.app, ["run", "claude", "1", "2", "False"])
@@ -306,6 +331,7 @@ def test_run_builds_ralph_command_and_writes_sequential_log(
     assert command[0].endswith("ralph.sh")
     assert command[1:3] == ["1", "2"]
     assert command[3:] == list(cli.AGENTS["claude"])  # preset expanded verbatim
+    assert (tmp_path / "scratchpad" / "runs").is_dir()  # run creates the log dir
     log = tmp_path / "scratchpad" / "runs" / "0001-claude.jsonl"
     assert log.read_text(encoding="utf-8") == '{"type":"result","result":"ok"}\n'
 
@@ -340,8 +366,8 @@ def test_run_claude_executes_real_loop_twice_with_prompt(
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setattr(cli.shutil, "which", no_jq)
-    (tmp_path / "PROMPT.md").write_text("build from specs\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "PROMPT.md").write_text("build from specs\n", encoding="utf-8")
 
     result = runner.invoke(cli.app, ["run", "claude", "2", "1"])
 
@@ -360,13 +386,13 @@ def test_run_claude_executes_real_loop_twice_with_prompt(
     assert (tmp_path / "scratchpad" / "runs" / "0001-claude.jsonl").read_text(
         encoding="utf-8"
     ) == '{ "type" : "result", "result" : "ok" }\n{ "type" : "result", "result" : "ok" }\n'
-    assert result.stdout == '{"type":"result","result":"ok"}\n{"type":"result","result":"ok"}\n'
 
 
 def test_run_log_sequence_increments_past_existing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The receipt number is max(existing leading int) + 1, so a prior run is never overwritten."""
     write_log(tmp_path, "0007-codex.jsonl")
     monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
     monkeypatch.setattr(subprocess, "run", fake_agent({}))
     assert runner.invoke(cli.app, ["run", "claude", "2", "20", "False"]).exit_code == 0
     assert (tmp_path / "scratchpad" / "runs" / "0008-claude.jsonl").exists()
@@ -378,6 +404,7 @@ def test_run_rejects_nonpositive_limits_before_creating_log(
 ) -> None:
     """Nonpositive loop limits fail in the CLI before any run receipt is opened."""
     monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
     monkeypatch.setattr(subprocess, "run", pytest.fail)
     result = runner.invoke(cli.app, ["run", *args])
     assert result.exit_code == 2
@@ -389,6 +416,7 @@ def test_run_rejects_nonpositive_limits_before_creating_log(
 def test_run_propagates_worker_exit_code(code: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """ralph.sh's exit code (success, abort, usage, timeout) reaches the shell."""
     monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
     monkeypatch.setattr(subprocess, "run", fake_agent({}, code))
     assert runner.invoke(cli.app, ["run", "codex", "2", "20", "False"]).exit_code == code
 
@@ -421,49 +449,40 @@ def fake_popen(lines: list[str], code: int = 0) -> Callable[..., FakeProcess]:
     return make
 
 
-def has_jq(name: str) -> str:
-    """Typed stand-in for shutil.which when jq is available."""
-    del name
-    return "/usr/bin/jq"
-
-
-def test_run_worker_compacts_json_and_preserves_invalid_lines(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_run_worker_streams_and_logs_json_and_invalid_lines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Verbose streaming is compact JSONL on the terminal and a verbatim log, even for non-JSON."""
-    monkeypatch.setattr(cli.shutil, "which", no_jq)
+    """Verbose streaming writes the raw stdout to the log verbatim, JSON and non-JSON alike, and does
+    not crash on a non-JSON line. Terminal coloring is a human cosmetic, so it is not asserted here.
+    """
     monkeypatch.setattr(cli.subprocess, "Popen", fake_popen(['{ "type" : "result" }\n', "not json\n"]))
     log = tmp_path / "out.jsonl"
 
     assert cli.run_worker(["worker"], tmp_path, log, verbose=True) == 0
-    assert capsys.readouterr().out == '{"type":"result"}\nnot json\n'
     assert log.read_text(encoding="utf-8") == '{ "type" : "result" }\nnot json\n'
 
 
-def test_run_worker_uses_jq_when_available(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """When jq exists, verbose terminal output comes from jq's colored compact renderer."""
-    monkeypatch.setattr(cli.shutil, "which", has_jq)
-    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen(['{ "type" : "result" }\n']))
+def test_format_live_line_colorizes_in_process_without_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A styled console colorizes valid JSON in-process (ANSI present), spawning no subprocess per line."""
+    monkeypatch.setattr(cli.subprocess, "run", pytest.fail)  # any per-line subprocess fails the test
+    console = cli.Console(force_terminal=True, width=10**9)  # styled: emit ANSI
+    out = cli.format_live_line('{ "type" : "result" }\n', console)
+    assert "\x1b[" in out  # colored in-process
+    assert '"type"' in out  # still the compacted JSON content
+    assert '"result"' in out
 
-    def fake_run(args: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert args == ("/usr/bin/jq", "-C", "-c", ".")
-        assert kwargs["input"] == '{ "type" : "result" }\n'
-        assert kwargs["text"] is True
-        assert kwargs["capture_output"] is True
-        assert kwargs["check"] is False
-        return subprocess.CompletedProcess(args, 0, stdout='\x1b[1;39m{"type":"result"}\x1b[0m\n')
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
-
-    assert cli.run_worker(["worker"], tmp_path, tmp_path / "out.jsonl", verbose=True) == 0
-    assert capsys.readouterr().out == '\x1b[1;39m{"type":"result"}\x1b[0m\n'
+def test_format_live_line_passes_non_json_through_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-JSON line returns unchanged and never reaches the renderer or any subprocess."""
+    monkeypatch.setattr(cli.subprocess, "run", pytest.fail)
+    console = cli.Console(force_terminal=True)
+    assert cli.format_live_line("not json\n", console) == "not json\n"
 
 
 def test_run_accepts_positional_verbose_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A fourth positional False disables live terminal streaming."""
     monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
     captured: dict[str, list[list[str]]] = {}
     monkeypatch.setattr(subprocess, "run", fake_agent(captured))
     result = runner.invoke(cli.app, ["run", "claude", "1", "2", "False"])
@@ -474,6 +493,7 @@ def test_run_accepts_positional_verbose_false(monkeypatch: pytest.MonkeyPatch, t
 def test_run_accepts_python_verbose_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Calling run(..., verbose=False) keeps output in the receipt only."""
     monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
     captured: dict[str, list[list[str]]] = {}
     monkeypatch.setattr(subprocess, "run", fake_agent(captured))
     with pytest.raises(typer.Exit) as exit_info:

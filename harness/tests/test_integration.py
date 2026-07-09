@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from harness import gate
-from harness.tests.conftest import run_cmd
+from harness.tests.conftest import fake_popen, run_cmd
 
 
 def attempt_commit(repo: Path, message: str, loop: bool, no_verify: bool) -> subprocess.CompletedProcess[str]:
@@ -126,21 +126,14 @@ def test_no_verify_bypasses_the_hook(fake_hook_repo: Path) -> None:
 def test_full_gate_end_to_end_and_pre_push_hook_blocks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Full gate dispatch goes through the tool seam and buckets every configured check."""
-    calls: list[tuple[str, list[str], Path, dict[str, str]]] = []
-
-    def all_pass(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
-        calls.append((name, command, repo, env))
-        return 0
-
+    """Full gate dispatch runs the real header/bucket path and faults only the tool seam."""
     monkeypatch.delenv("RALPH_LOOP", raising=False)
-    monkeypatch.setattr(gate, "run_one_check", all_pass)
-    result = gate.call_tools(tmp_path, gate.FULL_CHECKS)
+    calls = fake_popen(monkeypatch)
+    result = gate.run_checks(tmp_path, gate.FULL_CHECKS)
 
-    assert [name for name, command, repo, env in calls] == list(gate.FULL_CHECKS)
-    assert all(command == gate.FULL_CHECKS[name] for name, command, repo, env in calls)
-    assert all(repo == tmp_path for name, command, repo, env in calls)
-    assert all(env["FORCE_COLOR"] == "1" for name, command, repo, env in calls)
+    assert [command for command, cwd, env in calls] == list(gate.FULL_CHECKS.values())
+    assert all(cwd == tmp_path for command, cwd, env in calls)
+    assert all(env["FORCE_COLOR"] == "1" for command, cwd, env in calls)
     assert set(result["pass"]) | set(result["fail"]) == set(gate.FULL_CHECKS)
     assert result["fail"] == []
     assert "ruff format (no fail)" in result["pass"]
@@ -150,14 +143,9 @@ def test_format_report_stays_pass_when_runner_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Format reports are informational, so a nonzero format check is still bucketed as pass."""
-
-    def fail_format(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
-        del command, repo, env
-        return 1 if "format" in name else 0
-
     monkeypatch.delenv("RALPH_LOOP", raising=False)  # dispatch-only test: skip the containment git branch
-    monkeypatch.setattr(gate, "run_one_check", fail_format)
-    result = gate.call_tools(tmp_path, {"ruff lint": ["tool"], "ruff format (no fail)": ["tool"]})
+    fake_popen(monkeypatch, fails=[["fmt"]])
+    result = gate.run_checks(tmp_path, {"ruff lint": ["lint"], "ruff format (no fail)": ["fmt"]})
     assert result == {"pass": ["ruff lint", "ruff format (no fail)"], "fail": []}
 
 

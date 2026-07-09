@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from harness import gate
-from harness.tests.conftest import run_cmd
+from harness.tests.conftest import fake_popen, run_cmd
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -54,80 +54,75 @@ def test_run_git_ignores_poisoned_hook_env(monkeypatch: pytest.MonkeyPatch, git_
 # --------------------------------------------------------------------------- tool dispatch
 
 
-def test_call_tools_reports_fully(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """Each check is recorded by name under 'pass' or 'fail' from the seam's exit code."""
+def test_run_checks_reports_fully(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Each check is recorded by name under 'pass' or 'fail' from the tool's exit code.
 
-    def fake_run(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
-        del command, repo, env
-        return 1 if name == "boom" else 0
+    Fakes the Popen seam (the external tool) so the real header + bucketing run.
+    """
+    monkeypatch.delenv("RALPH_LOOP", raising=False)  # bucketing-only: skip the loop containment git path
+    fake_popen(monkeypatch, fails=[["boom"]])
+    captured = gate.run_checks(git_repo, {"boom check": ["boom"], "fine check": ["fine"]})
+    assert captured == {"pass": ["fine check"], "fail": ["boom check"]}
 
-    monkeypatch.setattr(gate, "run_one_check", fake_run)
-    captured = gate.call_tools(git_repo, {"boom": ["tool"], "fine": ["tool"]})
-    assert captured == {"pass": ["fine"], "fail": ["boom"]}
 
-
-def test_call_tools_messages_what_happened(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+def test_run_checks_messages_what_happened(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """A passing check is recorded under 'pass' with nothing in 'fail'."""
-
-    def fake_run(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
-        del name, command, repo, env
-        return 0
-
-    monkeypatch.setattr(gate, "run_one_check", fake_run)
-    assert gate.call_tools(git_repo, {"ok": ["tool"]}) == {"pass": ["ok"], "fail": []}
+    monkeypatch.delenv("RALPH_LOOP", raising=False)  # bucketing-only: skip the loop containment git path
+    fake_popen(monkeypatch)
+    assert gate.run_checks(git_repo, {"ok": ["tool"]}) == {"pass": ["ok"], "fail": []}
 
 
-def test_call_tools_records_a_failing_check_by_name(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+def test_run_checks_records_a_failing_check_by_name(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """A failing check lands under 'fail' by its name, with nothing in 'pass'."""
-
-    def fake_run(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
-        del name, command, repo, env
-        return 1
-
-    monkeypatch.setattr(gate, "run_one_check", fake_run)
-    captured = gate.call_tools(git_repo, {"random_check": ["tool"]})
+    monkeypatch.delenv("RALPH_LOOP", raising=False)  # bucketing-only: skip the loop containment git path
+    fake_popen(monkeypatch, fails=[["tool"]])
+    captured = gate.run_checks(git_repo, {"random_check": ["tool"]})
     assert captured == {"pass": [], "fail": ["random_check"]}
 
 
-def test_run_one_check_streams_command_output_live(git_repo: Path, capfd: pytest.CaptureFixture[str]) -> None:
-    """The production seam streams the child process output and returns its exit code."""
-    exit_code = gate.run_one_check(
-        "echoer",
-        ["/bin/sh", "-c", "printf 'hello from the check\\n'"],
-        git_repo,
-        {},
-    )
-    assert exit_code == 0
+def test_run_checks_streams_command_output_live(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The real Popen seam streams the child process output and buckets a zero exit as a pass."""
+    monkeypatch.delenv("RALPH_LOOP", raising=False)  # dispatch-only: skip the loop containment git path
+    result = gate.run_checks(git_repo, {"echo": ["/bin/sh", "-c", "printf 'hello from the check\\n'"]})
+    assert result == {"pass": ["echo"], "fail": []}
     assert "hello from the check" in capfd.readouterr().out
 
 
-def test_run_one_check_returns_nonzero_exit_code(git_repo: Path) -> None:
-    """The production seam returns the child process status without translating it."""
-    assert gate.run_one_check("failing", ["/bin/sh", "-c", "exit 7"], git_repo, {}) == 7
+def test_run_checks_buckets_nonzero_exit_as_fail(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """The real Popen seam reads the child's nonzero status and buckets that check under 'fail'."""
+    monkeypatch.delenv("RALPH_LOOP", raising=False)  # dispatch-only: skip the loop containment git path
+    result = gate.run_checks(git_repo, {"boom": ["/bin/sh", "-c", "exit 7"]})
+    assert result == {"pass": [], "fail": ["boom"]}
 
 
-def test_call_tools_appends_containment_only_under_loop(
+def test_run_checks_prints_phase_header_then_spawns(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """run_checks prints our PHASE header for each check even when the tool itself is faked."""
+    monkeypatch.delenv("RALPH_LOOP", raising=False)  # dispatch-only: skip the loop containment git path
+    fake_popen(monkeypatch)
+    result = gate.run_checks(git_repo, {"ruff lint": ["tool"]})
+    assert result == {"pass": ["ruff lint"], "fail": []}
+    assert "PHASE: RUFF LINT" in capsys.readouterr().out
+
+
+def test_run_checks_appends_containment_only_under_loop(
     monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
     """Loop containment is appended only when RALPH_LOOP is present."""
-
-    def fake_run(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
-        del name, command, repo, env
-        return 0
 
     def fake_containment(repo: Path) -> list[str]:
         del repo
         return ["containment problem"]
 
-    monkeypatch.setattr(gate, "run_one_check", fake_run)
+    fake_popen(monkeypatch)
     monkeypatch.setattr(gate, "run_non_human_checks", fake_containment)
     monkeypatch.delenv("RALPH_LOOP", raising=False)
-    assert gate.call_tools(git_repo, {"ok": ["tool"]}) == {"pass": ["ok"], "fail": []}
+    assert gate.run_checks(git_repo, {"ok": ["tool"]}) == {"pass": ["ok"], "fail": []}
     monkeypatch.setenv("RALPH_LOOP", "1")
-    assert gate.call_tools(git_repo, {"ok": ["tool"]}) == {
-        "pass": ["ok"],
-        "fail": ["containment problem"],
-    }
+    assert gate.run_checks(git_repo, {"ok": ["tool"]}) == {"pass": ["ok"], "fail": ["containment problem"]}
 
 
 def test_lint_command_keeps_show_fixes_flag() -> None:
@@ -149,13 +144,22 @@ def test_types_check_uses_pyright_json_output() -> None:
     assert gate.FULL_CHECKS["types"] == ["uv", "run", "--no-sync", "pyright", "--outputjson"]
 
 
-def test_security_check_uses_semgrep_auto_and_secrets_configs() -> None:
-    """The security check includes both Semgrep auto rules and the secrets ruleset."""
+def test_security_check_uses_semgrep_and_blocks_on_findings(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """The security check runs Semgrep with auto + secrets rules, and --error makes it BLOCKING:
+    a nonzero exit (Semgrep's signal for a finding under --error) buckets 'security' under 'fail',
+    not 'pass'. An advisory scan that reports but never blocks is worse than none.
+    """
     command = gate.FULL_CHECKS["security"]
     assert command[:5] == ["uv", "run", "--no-sync", "semgrep", "scan"]
+    assert "--error" in command  # exit nonzero on findings so the nonzero -> 'fail' rule below can bite
     assert "--config" in command
     assert "auto" in command
     assert "p/secrets" in command
+    monkeypatch.delenv("RALPH_LOOP", raising=False)  # dispatch-only: skip the loop containment git path
+    fake_popen(monkeypatch, fails=[command])  # semgrep --error exits nonzero on a finding
+    assert gate.run_checks(git_repo, {"security": command}) == {"pass": [], "fail": ["security"]}
 
 
 # ------------------------------------------------------------------------- local gate ⊇ CI parity
@@ -193,51 +197,37 @@ def test_gate_pytest_command_enforces_full_coverage_and_buckets_failures() -> No
 
 
 def test_gate_buckets_a_failing_pytest_check(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """When the pytest command exits nonzero (e.g. a coverage gap), call_tools records it under 'fail'.
-    Faking the run_one_check seam proves the bucketing without a real, recursive pytest subprocess.
+    """When the pytest command exits nonzero (e.g. a coverage gap), run_checks records it under 'fail'.
+    Faking the Popen seam proves the bucketing without a real, recursive pytest subprocess.
     """
-
-    def pytest_fails(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
-        del command, repo, env
-        return 1 if name == "tests" else 0
-
-    monkeypatch.setattr(gate, "run_one_check", pytest_fails)
-    result = gate.call_tools(git_repo, {"tests": gate.FULL_CHECKS["pytest"]})
+    monkeypatch.delenv("RALPH_LOOP", raising=False)  # dispatch-only: skip the loop containment git path
+    fake_popen(monkeypatch, fails=[gate.FULL_CHECKS["pytest"]])
+    result = gate.run_checks(git_repo, {"tests": gate.FULL_CHECKS["pytest"]})
     assert result["fail"] == ["tests"]
 
 
 def test_preflight_invokes_only_lint_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Integrated routing: run_preflight runs only the commit checks."""
-    ran: list[str] = []
-
-    def pass_check(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
-        del command, repo, env
-        ran.append(name)
-        return 0
-
     monkeypatch.delenv("RALPH_LOOP", raising=False)
-    monkeypatch.setattr(gate, "run_one_check", pass_check)
+    calls = fake_popen(monkeypatch)
     result = gate.run_preflight(tmp_path)
-    assert set(ran) == {
-        "ruff lint",
-        "ruff format (no fail)",
-        "complexipy",
-    }
-    assert result["pass"] == ran
+    spawned = [launch[0] for launch in calls]
+    assert spawned == list(gate.COMMIT_CHECKS.values())  # preflight runs exactly the commit checks, in order
+    assert result["pass"] == list(gate.COMMIT_CHECKS)
     assert result["fail"] == []
 
 
-def test_run_gate_delegates_to_call_tools_with_full_checks(
+def test_run_gate_delegates_to_run_checks_with_full_checks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """run_gate is a thin router: it runs exactly FULL_CHECKS on the given repo and returns that result.
 
     The real end-to-end behaviour of every gate check is proven in test_integration's single full-gate
-    test; here we only pin the routing (repo + FULL_CHECKS in, call_tools' result out) without paying
+    test; here we only pin the routing (repo + FULL_CHECKS in, run_checks' result out) without paying
     for real tools or risking the pytest check recursively collecting this suite.
 
-    NO NESTED PYTEST: call_tools is stubbed with `spy`, so run_gate spawns nothing. This is the pattern
-    to copy for any new routing assertion — stub call_tools instead of adding a real-pytest spawn.
+    NO NESTED PYTEST: run_checks is stubbed with `spy`, so run_gate spawns nothing. This is the pattern
+    to copy for any new routing assertion — stub run_checks instead of adding a real-pytest spawn.
     """
     seen: dict[str, object] = {}
 
@@ -245,7 +235,7 @@ def test_run_gate_delegates_to_call_tools_with_full_checks(
         seen["repo"], seen["checks"] = repo, checks
         return {"pass": ["types"], "fail": []}
 
-    monkeypatch.setattr(gate, "call_tools", spy)
+    monkeypatch.setattr(gate, "run_checks", spy)
     result = gate.run_gate(tmp_path)
     assert seen == {"repo": tmp_path, "checks": gate.FULL_CHECKS}
     assert result == {"pass": ["types"], "fail": []}
@@ -334,19 +324,15 @@ def test_preflight_ejects_staged_deletion_of_forbidden(
 
 def test_preflight_skips_containment_without_loop(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Without RALPH_LOOP, a human may stage forbidden paths: nothing is ejected."""
-
-    def pass_check(name: str, command: list[str], repo: Path, env: dict[str, str]) -> int:
-        del name, command, repo, env
-        return 0
-
     monkeypatch.delenv("RALPH_LOOP", raising=False)
-    monkeypatch.setattr(gate, "run_one_check", pass_check)
     stage(git_repo, "harness/util.py", "value = 1\n")
-    assert gate.run_preflight(git_repo)["fail"] == []
-    assert "harness/util.py" in staged(git_repo)  # left staged: containment is loop-only
+    assert "harness/util.py" in staged(git_repo)  # read the index before faking Popen (git can't run faked)
+    fake_popen(monkeypatch)
+    result = gate.run_preflight(git_repo)
+    assert result["fail"] == []  # no-loop preflight runs only the faked checks; it has no eject path at all
 
 
-@pytest.mark.parametrize("pattern", ["noqa", "type: ignore", "--no-verify"])
+@pytest.mark.parametrize("pattern", ["# noqa", "type: ignore", "--no-verify"])
 def test_preflight_flags_banned_pattern_under_loop(
     pattern: str, monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
@@ -362,12 +348,12 @@ def test_preflight_banned_pattern_is_case_insensitive(
     """Mixed-case escape hatches are still caught."""
     monkeypatch.setenv("RALPH_LOOP", "1")
     stage(git_repo, "src/x.py", "value = 1  # NoQA\n")
-    assert any("'noqa' line:" in problem for problem in containment_fail(git_repo))
+    assert any("'# noqa' line:" in problem for problem in containment_fail(git_repo))
 
 
 @pytest.mark.parametrize(
     ("typed", "canonical"),
-    [("tS-ignoRe", "ts-ignore"), ("Pylint:", "pylint:"), ("PRAGMA: no cover", "pragma: no cover")],
+    [("tS-ignoRe", "ts-ignore"), ("# Pylint:", "# pylint:"), ("PRAGMA: no cover", "pragma: no cover")],
 )
 def test_preflight_flags_weird_case_banned_patterns(
     typed: str, canonical: str, monkeypatch: pytest.MonkeyPatch, git_repo: Path
@@ -469,7 +455,18 @@ def test_check_for_bad_patterns_flags_a_banned_pattern(git_repo: Path) -> None:
     """Called directly, it returns a banned-pattern problem for a staged added line carrying one."""
     stage(git_repo, "src/x.py", "value = 1  # noqa\n")
     problems = gate.check_for_bad_patterns(git_repo)
-    assert any(problem.startswith("'noqa' line:") for problem in problems)
+    assert any(problem.startswith("'# noqa' line:") for problem in problems)
+
+
+def test_check_for_bad_patterns_ignores_markdown_prose(git_repo: Path) -> None:
+    """A banned token quoted in .md docs is prose, not a bypass, so it is excluded from the scan;
+    the same token in a non-.md file is still flagged (the anti-bypass net stays on code/config).
+    """
+    stage(git_repo, "docs/notes.md", "Run with `# noqa` to silence the linter.\n")  # prose: ignored
+    stage(git_repo, "run.sh", "grep --no-verify\n")  # non-.md: still scanned
+    problems = gate.check_for_bad_patterns(git_repo)
+    assert not any("# noqa" in problem for problem in problems)  # markdown excluded
+    assert any(problem.startswith("'--no-verify' line:") for problem in problems)  # shell still caught
 
 
 def test_check_for_bad_patterns_appends_a_preference_violation(git_repo: Path) -> None:
@@ -485,15 +482,20 @@ def test_check_for_bad_patterns_clean_staged_file_has_no_problems(git_repo: Path
     assert gate.check_for_bad_patterns(git_repo) == []
 
 
-def test_check_for_bad_patterns_empty_index_warns_and_returns_no_problems(
-    git_repo: Path, capfd: pytest.CaptureFixture[str]
+def test_check_for_bad_patterns_empty_index_returns_no_problems(git_repo: Path) -> None:
+    """With nothing staged the diff is empty, so both scans are skipped and no problems are returned."""
+    assert gate.check_for_bad_patterns(git_repo) == []  # clean index: seed commit only, nothing staged
+
+
+def test_empty_commit_is_blocked_under_loop(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """With nothing staged, the diff is empty so the prefs branch is skipped: it warns to stage real
-    work and returns no problems (the else branch that prints the stage-real-work notice).
-    """
-    problems = gate.check_for_bad_patterns(git_repo)  # clean index: seed commit only, nothing staged
-    assert problems == []
-    assert "Stage real work" in capfd.readouterr().out
+    """An empty commit (nothing staged) is blocked with a problem, and the agent-facing banner is plain."""
+    monkeypatch.setenv("RALPH_LOOP", "1")  # loop agents get plain text, no ANSI
+    assert gate.run_non_human_checks(git_repo) == ["empty commit: nothing staged"]  # seed commit only
+    out = capsys.readouterr().out
+    assert "PHASE: EMPTY COMMIT" in out  # the agent sees the yell
+    assert "\x1b[" not in out  # but no ANSI escape codes
 
 
 # --------------------------------------------------------- spec tests (FAIL against the current bugs)
@@ -502,13 +504,13 @@ def test_check_for_bad_patterns_empty_index_warns_and_returns_no_problems(
 def test_staged_noqa_produces_a_noqa_line_message_in_fail(
     monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
-    """A staged `noqa` must land in fail as the scan's own message `'noqa' line: <code>`. FAILS now:
+    """A staged `# noqa` must land in fail as the scan's own message `'# noqa' line: <code>`. FAILS now:
     `found.join(...)` discards its result, so the banned-pattern scan appends nothing.
     """
     monkeypatch.setenv("RALPH_LOOP", "1")
     stage(git_repo, "src/x.py", "value = 1  # noqa\n")
     fail = containment_fail(git_repo)
-    assert any(isinstance(p, str) and p.startswith("'noqa' line:") for p in fail)
+    assert any(isinstance(p, str) and p.startswith("'# noqa' line:") for p in fail)
 
 
 def test_reset_ejects_only_forbidden_keeping_legit_staged(
@@ -562,7 +564,7 @@ def test_banned_scan_flags_added_plus_line(monkeypatch: pytest.MonkeyPatch, git_
     monkeypatch.setenv("RALPH_LOOP", "1")
     stage(git_repo, "src/x.py", "value = 1  # noqa\n")  # a pure addition -> a '+' hunk line
     fail = containment_fail(git_repo)
-    assert any(isinstance(p, str) and p.startswith("'noqa' line:") for p in fail)
+    assert any(isinstance(p, str) and p.startswith("'# noqa' line:") for p in fail)
 
 
 def test_banned_scan_ignores_plus_plus_plus_header_line(

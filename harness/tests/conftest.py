@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Self
 
 import pytest
+
+from harness import gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,6 +19,48 @@ def run_cmd(args: list[str], cwd: Path) -> str:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     result = subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True, env=env)
     return result.stdout
+
+
+class FakePopen:
+    """Stand-in for a subprocess.Popen context manager whose wait() returns a fixed exit code."""
+
+    def __init__(self, exit_code: int) -> None:
+        self._exit_code = exit_code
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
+        del exc_type, exc_value, traceback
+
+    def wait(self) -> int:
+        return self._exit_code
+
+
+def fake_popen(
+    monkeypatch: pytest.MonkeyPatch, fails: list[list[str]] | None = None
+) -> list[tuple[list[str], Path, dict[str, str]]]:
+    """Fake the Popen seam run_checks uses to spawn each check so no real tool runs.
+
+    Every faked check reports exit 0 (pass) unless its exact argv is in fails, which reports exit 1.
+    Every launch is recorded (command, cwd, env) so dispatch tests can assert what run_checks ran.
+
+    This replaces the whole subprocess.Popen used by run_checks. run_git reaches Popen too (via
+    subprocess.run), so a test must do its real git — staging, reading the index — before calling
+    this, and stay off the RALPH_LOOP containment path that would run git after the fake is in place.
+
+    Returns:
+        The live list of recorded launches.
+    """
+    failing = fails or []
+    calls: list[tuple[list[str], Path, dict[str, str]]] = []
+
+    def spawn(command: list[str], *, cwd: Path, env: dict[str, str]) -> FakePopen:
+        calls.append((command, cwd, env))
+        return FakePopen(1 if command in failing else 0)
+
+    monkeypatch.setattr(gate.subprocess, "Popen", spawn)
+    return calls
 
 
 @pytest.fixture

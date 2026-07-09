@@ -1,5 +1,5 @@
 #!/bin/sh
-# Ralph: hand PROMPT.md to a fresh-context agent and loop. The repo is the only memory.
+# Ralph: hand docs/PROMPT.md to a fresh-context agent and loop. The repo is the only memory.
 # Keep Ralph Dumb: start the worker, give it the prompt, print a line, repeat. Nothing else.
 # Setup (deps + git hooks) is `harness install`. The gate runs from the git hooks on commit.
 # Want logs? Redirect this script: `harness/ralph.sh ... > run.log 2>&1`.
@@ -52,8 +52,7 @@ fi
 i=1
 while [ "$i" -le "$MAX_ITERATIONS" ]; do
     echo "ralph: iteration $i/$MAX_ITERATIONS" >&2
-    PROMPT=$(cat PROMPT.md)   # read up front so a missing/unreadable prompt fails the loop (set -e)
-    printf '%s\n\nRALPH_ITERATION=%s/%s\n' "$PROMPT" "$i" "$MAX_ITERATIONS" \
+    printf '%s\n\nRALPH_ITERATION=%s/%s\n' "$RALPH_PROMPT" "$i" "$MAX_ITERATIONS" \
         | "$TIMEOUT" "$((MAX_MINUTES * 60))" "$@"
     i=$((i + 1))
 done

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import shutil
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -15,6 +15,7 @@ import typer
 from packaging.utils import canonicalize_name
 from rich import print as rprint
 from rich.console import Console
+from rich.json import JSON
 from rich.table import Table
 
 from harness import gate as gate_module
@@ -65,6 +66,9 @@ AGENTS: dict[str, tuple[str, ...]] = {
 def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
     """Run the worker command, always saving stdout and optionally streaming it live.
 
+    The worker inherits the current environment, including RALPH_PROMPT set by `run`, so ralph.sh
+    receives the prompt as a string and never reads a prompt file.
+
     Args:
         command: The worker argv to execute.
         cwd: Working directory for the subprocess.
@@ -77,36 +81,37 @@ def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
     with log.open("w", encoding="utf-8") as handle:
         if not verbose:
             return subprocess.run(command, cwd=str(cwd), stdout=handle, check=False).returncode
-        jq = shutil.which("jq")
+        console = Console()
         with subprocess.Popen(command, cwd=str(cwd), stdout=subprocess.PIPE, text=True) as process:
             for line in process.stdout or ():
                 handle.write(line)
                 handle.flush()
-                sys.stdout.write(format_live_line(line, jq))
+                sys.stdout.write(format_live_line(line, console))
                 sys.stdout.flush()
             return process.wait()
 
 
-def format_live_line(line: str, jq: str | None) -> str:
-    """Compact valid JSONL for terminal output; preserve invalid lines exactly.
+def format_live_line(line: str, console: Console) -> str:
+    """Compact and colorize one worker JSONL line for the terminal; pass non-JSON through verbatim.
+
+    Coloring is done in-process with rich (no per-line subprocess); the console's own detection
+    decides whether ANSI is emitted, so agents (no tty) get plain text and humans get color.
 
     Args:
         line: A single raw output line from the worker.
-        jq: Path to the `jq` binary, or None if unavailable.
+        console: Rich console used to render the compact colored JSON.
 
     Returns:
-        The compacted single-line JSON, or the original line if it is not valid JSON.
+        The compacted single-line JSON (colored when the console is styled), or the original line
+        if it is not valid JSON.
     """
-    if jq:
-        rendered = subprocess.run(
-            (jq, "-C", "-c", "."), input=line, text=True, capture_output=True, check=False
-        )
-        if rendered.returncode == 0 and rendered.stdout:
-            return rendered.stdout
     try:
-        return f"{json.dumps(json.loads(line), separators=(',', ':'))}\n"
+        rendered = JSON(line, indent=None)  # JSON() parses the string itself, raises on non-JSON
     except json.JSONDecodeError:
         return line
+    with console.capture() as captured:
+        console.print(rendered, end="\n")
+    return captured.get()
 
 
 def check(name: str, command: Callable[[Path], dict[str, list[str]]]) -> dict[str, list[str]]:
@@ -120,18 +125,31 @@ def check(name: str, command: Callable[[Path], dict[str, list[str]]]) -> dict[st
         typer.Exit: always — code 1 if anything failed, else code 0.
     """
     results = command(Path.cwd())
-
-    table = Table(title="\nHarness Summary\n", title_style="bold grey74", box=None, padding=(0, 5))
-    console = Console(force_terminal=True, stderr=True)
-    table.add_column("PASSED", style="bold dim white")
-    table.add_column("FAILED")
-    for passed in results["pass"]:
-        table.add_row(passed, "[green]✔ PASSED[/]")
-    for fail in results["fail"]:
-        table.add_row(fail, "[bold red]✖ FAILED[/]")
-    console.print(table, justify="center")
-    final = "\n[bold red]rejected by harness[/]" if results["fail"] else f"[green]ok: {name} pass[/]"
-    console.print(final, justify="center")
+    if os.environ.get("RALPH_LOOP"):
+        typer.secho(
+            json.dumps(
+                {
+                    "Harness Summary": {
+                        "PASSED": results["pass"],
+                        "FAILED": results["fail"],
+                        "result": "rejected by harness" if results["fail"] else f"ok: {name} pass",
+                    }
+                },
+                indent=0,
+            )
+        )
+    else:
+        table = Table(title="\nHarness Summary\n", title_style="bold grey74", box=None, padding=(0, 5))
+        console = Console(force_terminal=True, stderr=True)
+        table.add_column("PASSED", style="bold dim white")
+        table.add_column("FAILED")
+        for passed in results["pass"]:
+            table.add_row(passed, "[green]✔ PASSED[/]")
+        for fail in results["fail"]:
+            table.add_row(fail, "[bold red]✖ FAILED[/]")
+        console.print(table, justify="center")
+        final = "\n[bold red]rejected by harness[/]" if results["fail"] else f"[green]ok: {name} pass[/]"
+        console.print(final, justify="center")
 
     raise typer.Exit(code=1 if results["fail"] else 0)
 
@@ -169,7 +187,10 @@ def install(name: str) -> None:
 
     pyproject = cwd / "pyproject.toml"
     document = tomlkit.parse(pyproject.read_text(encoding="utf-8"))
-    document.setdefault("project", tomlkit.table())["name"] = canonicalize_name(name, validate=True)
+    # Set the requested name and reset version for the new project; leave any other metadata untouched.
+    project = document.setdefault("project", tomlkit.table())
+    project["name"] = canonicalize_name(name, validate=True)
+    project["version"] = "0.0.0"
     pyproject.write_text(tomlkit.dumps(document), encoding="utf-8")
     new_name = tomlkit.parse(pyproject.read_text(encoding="utf-8"))["project"]["name"]
     rprint(f"\n[cyan2]project name[/cyan2] '{new_name}' set in `pyproject.toml`")
@@ -231,6 +252,7 @@ def run(
     runs.mkdir(parents=True, exist_ok=True)
     seq = 1 + max((int(p.name.split("-", 1)[0]) for p in runs.glob("[0-9]*-*.jsonl")), default=0)
     log = runs / f"{seq:04d}-{agent}.jsonl"
+    os.environ["RALPH_PROMPT"] = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")
     ralph = Path(__file__).resolve().parent / "ralph.sh"
     command = [str(ralph), str(num_iterations), str(max_minutes)]
     command.extend(AGENTS[agent])
