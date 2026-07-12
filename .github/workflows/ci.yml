@@ -70,3 +70,24 @@ jobs:
 
       - name: Tests with Coverage Gate
         run: uv run --no-cache --no-sync pytest --cov --cov-report=term-missing --cov-fail-under=100
+
+  # The full gate above runs once on Linux.
+  # This job runs on Windows we can't run. It only proves install + collection work.
+  # A Windows dev should add a real ralph.ps1 test.
+  loop-runner:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: uv Sync Dependencies
+        run: uv sync
+      - name: Loop-runner tests (ralph.sh on POSIX; skips on Windows)
+        run: uv run --no-sync pytest harness/tests/test_ralph.py -q

@@ -108,10 +108,10 @@ def test_run_checks_prints_phase_header_then_spawns(
     assert "PHASE: RUFF LINT" in capsys.readouterr().out
 
 
-def test_run_checks_appends_containment_only_under_loop(
+def test_preflight_appends_containment_only_under_loop(
     monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
-    """Loop containment is appended only when RALPH_LOOP is present."""
+    """Containment runs at pre-commit (run_preflight) only under RALPH_LOOP, never for a human."""
 
     def fake_containment(repo: Path) -> list[str]:
         del repo
@@ -120,9 +120,9 @@ def test_run_checks_appends_containment_only_under_loop(
     fake_popen(monkeypatch)
     monkeypatch.setattr(gate, "run_non_human_checks", fake_containment)
     monkeypatch.delenv("RALPH_LOOP", raising=False)
-    assert gate.run_checks(git_repo, {"ok": ["tool"]}) == {"pass": ["ok"], "fail": []}
+    assert gate.run_preflight(git_repo)["fail"] == []  # human: no containment
     monkeypatch.setenv("RALPH_LOOP", "1")
-    assert gate.run_checks(git_repo, {"ok": ["tool"]}) == {"pass": ["ok"], "fail": ["containment problem"]}
+    assert "containment problem" in gate.run_preflight(git_repo)["fail"]  # agent: containment appended
 
 
 def test_lint_command_keeps_show_fixes_flag() -> None:
@@ -487,15 +487,10 @@ def test_check_for_bad_patterns_empty_index_returns_no_problems(git_repo: Path) 
     assert gate.check_for_bad_patterns(git_repo) == []  # clean index: seed commit only, nothing staged
 
 
-def test_empty_commit_is_blocked_under_loop(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """An empty commit (nothing staged) is blocked with a problem, and the agent-facing banner is plain."""
-    monkeypatch.setenv("RALPH_LOOP", "1")  # loop agents get plain text, no ANSI
-    assert gate.run_non_human_checks(git_repo) == ["empty commit: nothing staged"]  # seed commit only
-    out = capsys.readouterr().out
-    assert "PHASE: EMPTY COMMIT" in out  # the agent sees the yell
-    assert "\x1b[" not in out  # but no ANSI escape codes
+def test_empty_commit_does_not_block_under_loop(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """An empty commit (nothing staged) is not blocked: containment is skipped and no problems returned."""
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    assert gate.run_non_human_checks(git_repo) == []  # seed commit only, nothing staged
 
 
 # --------------------------------------------------------- spec tests (FAIL against the current bugs)

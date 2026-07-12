@@ -258,7 +258,7 @@ def test_cli_does_not_shadow_builtin_print() -> None:
 
 
 def test_install_renames_syncs_and_sets_hooks(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """Install sets the name (PEP 503) and version 0.0.0, preserves other metadata, syncs, sets hooks."""
+    """Install sets the name (PEP 503), preserves an existing version + metadata, syncs, sets hooks."""
     monkeypatch.chdir(git_repo)
     (git_repo / "pyproject.toml").write_text(
         "[project]\n"
@@ -282,7 +282,7 @@ def test_install_renames_syncs_and_sets_hooks(monkeypatch: pytest.MonkeyPatch, g
     with (git_repo / "pyproject.toml").open("rb") as handle:
         project = tomllib.load(handle)["project"]
     assert project["name"] == "my-cool-project"  # the requested name is set
-    assert project["version"] == "0.0.0"  # version reset for the new project
+    assert project["version"] == "2.3.4"  # existing version is preserved, never clobbered
     # Other metadata is left untouched (not clobbered).
     assert project["description"] == "the user's own project"
     assert project["authors"] == [{"name": "someone"}]
@@ -290,6 +290,20 @@ def test_install_renames_syncs_and_sets_hooks(monkeypatch: pytest.MonkeyPatch, g
     assert project["scripts"] == {"harness": "harness.cli:main"}
     monkeypatch.undo()
     assert run_cmd(["git", "config", "core.hooksPath"], git_repo).strip() == ".githooks"
+
+
+def test_install_defaults_version_when_absent(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """With no version in pyproject, install sets a starter 0.0.0 (only defaults, never clobbers)."""
+    monkeypatch.chdir(git_repo)
+    (git_repo / "pyproject.toml").write_text('[project]\nname = "old-name"\n', encoding="utf-8")
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(subprocess, "run", stub_toolchain(subprocess.run, calls))
+    result = runner.invoke(cli.app, ["install", "fresh-project"])
+    assert result.exit_code == 0
+    with (git_repo / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+    assert project["name"] == "fresh-project"
+    assert project["version"] == "0.0.0"  # defaulted because none existed
 
 
 def test_install_rejects_invalid_name(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
@@ -373,11 +387,12 @@ def test_run_claude_executes_real_loop_twice_with_prompt(
 
     assert result.exit_code == 0
     assert (tmp_path / "claude-count").read_text(encoding="utf-8") == "2"
+    identity = "Your agent id is `0001-claude`. Use it verbatim.\n\n"  # harness-injected worker id
     assert (tmp_path / "prompt-1.txt").read_text(encoding="utf-8") == (
-        "build from specs\n\nRALPH_ITERATION=1/2\n"
+        f"{identity}build from specs\n\nRALPH_ITERATION=1/2\n"
     )
     assert (tmp_path / "prompt-2.txt").read_text(encoding="utf-8") == (
-        "build from specs\n\nRALPH_ITERATION=2/2\n"
+        f"{identity}build from specs\n\nRALPH_ITERATION=2/2\n"
     )
     claude_args = list(cli.AGENTS["claude"][1:])
     expected_args = claude_args.copy()
@@ -386,6 +401,117 @@ def test_run_claude_executes_real_loop_twice_with_prompt(
     assert (tmp_path / "scratchpad" / "runs" / "0001-claude.jsonl").read_text(
         encoding="utf-8"
     ) == '{ "type" : "result", "result" : "ok" }\n{ "type" : "result", "result" : "ok" }\n'
+
+
+def capture_run_worker(seen: list[list[str]]) -> Callable[..., int]:
+    """A run_worker stand-in that records the command run built and reports a clean exit."""
+
+    def worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
+        del cwd, log, verbose
+        seen.append(command)
+        return 0
+
+    return worker
+
+
+def test_run_uses_shell_script_off_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Off Windows, run launches ralph.sh directly, with the counts then the agent argv."""
+    seed_prompt(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    seen: list[list[str]] = []
+    monkeypatch.setattr(cli, "run_worker", capture_run_worker(seen))
+    runner.invoke(cli.app, ["run", "codex", "3", "8"])
+    assert seen[0][0].endswith("ralph.sh")
+    assert seen[0][1:3] == ["3", "8"]
+
+
+def test_run_uses_powershell_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """On Windows, run launches ralph.ps1 through powershell, keeping ralph.sh untouched."""
+    seed_prompt(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    seen: list[list[str]] = []
+    monkeypatch.setattr(cli, "run_worker", capture_run_worker(seen))
+    runner.invoke(cli.app, ["run", "claude", "2", "5"])
+    assert seen[0][0] == "powershell.exe"
+    assert any(part.endswith("ralph.ps1") for part in seen[0])
+    assert seen[0][seen[0].index("2") : seen[0].index("2") + 2] == ["2", "5"]
+
+
+def which_only(present: str) -> Callable[[str], str | None]:
+    """A shutil.which stand-in that finds only the named tool on PATH."""
+
+    def which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name == present else None
+
+    return which
+
+
+def which_none(name: str) -> None:
+    """A shutil.which stand-in where nothing is on PATH."""
+    del name
+
+
+def say_yes(prompt: str) -> bool:
+    """A typer.confirm stand-in that always confirms."""
+    del prompt
+    return True
+
+
+def say_no(prompt: str) -> bool:
+    """A typer.confirm stand-in that always declines."""
+    del prompt
+    return False
+
+
+def test_ensure_timeout_tool_skips_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With a timeout tool on PATH, install does not prompt or install anything."""
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setattr(cli.shutil, "which", which_only("timeout"))
+    monkeypatch.setattr(cli.subprocess, "run", pytest.fail)  # must not install
+    cli.ensure_timeout_tool()  # returns without error
+
+
+def test_ensure_timeout_tool_skips_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On Windows the ps1 path handles timing, so no coreutils check runs."""
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setattr(cli.shutil, "which", pytest.fail)  # must not even probe PATH
+    cli.ensure_timeout_tool()
+
+
+def test_ensure_timeout_tool_installs_when_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing tool + brew present + user confirms -> it installs coreutils via brew."""
+    installed: list[tuple[str, ...]] = []
+
+    def record_run(cmd: tuple[str, ...], **kwargs: object) -> None:
+        del kwargs
+        installed.append(tuple(cmd))
+
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setattr(cli.shutil, "which", which_only("brew"))
+    monkeypatch.setattr(cli.typer, "confirm", say_yes)
+    monkeypatch.setattr(cli.subprocess, "run", record_run)
+    cli.ensure_timeout_tool()
+    assert ("brew", "install", "coreutils") in installed
+
+
+def test_ensure_timeout_tool_points_to_homebrew_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No timeout tool and no Homebrew -> it never prompts or installs, just points at brew.sh."""
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setattr(cli.shutil, "which", which_none)  # no timeout, no brew
+    monkeypatch.setattr(cli.typer, "confirm", pytest.fail)  # cannot confirm without brew
+    monkeypatch.setattr(cli.subprocess, "run", pytest.fail)  # must not install
+    cli.ensure_timeout_tool()
+
+
+def test_ensure_timeout_tool_skips_install_when_declined(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing tool, brew present, user declines -> nothing is installed, just a hint."""
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setattr(cli.shutil, "which", which_only("brew"))
+    monkeypatch.setattr(cli.typer, "confirm", say_no)
+    monkeypatch.setattr(cli.subprocess, "run", pytest.fail)  # must not install
+    cli.ensure_timeout_tool()
 
 
 def test_run_log_sequence_increments_past_existing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

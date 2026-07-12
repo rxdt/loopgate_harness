@@ -2,7 +2,7 @@
 <img src="banner.svg" alt="Blue infinity loop" width="360">
 
 <h1>L∞PS: A Python Ralph Harness</h1>
-<p>Loosely opinionated scaffold for a gated autonomous agent loop ("Ralph"). A dumb Ralph tells an agent to "Go!" and hands it a PROMPT. You set the tasks. No pre-defined, orchestrator. Agents loop on specs. Each iteration a worker commits with guardrails and updates its own specs.</p>
+<p>Loosely opinionated project template with a built-in gated autonomous agent loop. A dumb Ralph loop runner tells an agent to "Go!" and hands it a PROMPT. You set the tasks. Nothing pre-defined, no orchestrator. Agents loop on specs. Each iteration a worker commits with guardrails and updates its own specs.</p>
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Status](https://img.shields.io/badge/github-repo-blue?logo=github)
@@ -21,17 +21,19 @@
 
 ## TL;DR: Getting Started.
 
-1. Use as a project template or drop into your project
-2. `uv run harness install <your-project-name>`
-3. Write your project goal in [docs/plan.md](docs/plan.md)
-4. `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
-5. Not what you wanted? Refine `docs/plan.md` / `docs/PROMPT.md` and re-run
+1.  `uv run harness install <your-project-name>`
+2.  Write your project goal in [docs/plan.md](docs/plan.md)
+3.  `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
+4.  Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
 
 ---
 
 ## Details
 
 `docs/PROMPT.md` tells each agent to pick a `spec` and build. `docs/specs/` say _what_ to build. The agent decides _what next_. You keep `docs/plan.md` current, and specs get rewritten from it (agent is told in `docs/PROMPT.md` to update the specs). Each iteration the agent updates its spec and `PROJECT_STATUS`. Ideas from [ghuntley](https://github.com/ghuntley), How to Ralph Wiggum.
+
+> [!TIP]
+> If you don't like _ANYTHING_ in this framework, remove it.
 
 ## Start a new project
 
@@ -67,18 +69,12 @@ The repo is the only memory. Each iteration is a fresh-context agent.
 
 ![L∞PS Agents](.loops_agents.svg)
 
-- There is NO worktree/branch creation by design. You can create branches/trees and run a loop in each, then merge if you feel like managing that.
-- Agent duties can be contained to a part of the repo. e.g. Codex-1-frontend uses `docs/specs/frontend.md`, Claude-2-researcher `docs/specs/backend`...
-- No branch/worktree creation in this harness was intentional:
-  1. For simplicity and maintainability of the framework.
-  2. Because a fresh iteration can't see the unmerged work in another worktree, so agents miss context and scramble to merge while conflicts pile up.
-  3. Change this behavior if you're comfortable with granting agents machine access, feeding context to agents, and managing rapidly moving git history.
-- If you don't like _ANYTHING_ in this framework, remove it.
-
 ## Safety
 
-`harness/ralph.sh` launches an autonomous LLM worker with the permissions you grant it (e.g.
-`--permission-mode acceptEdits`). The gate bounds what any **commit** may touch, but the worker itself is **not** sandboxed to this repo. Under a permissive mode it can run arbitrary shell. You are authorizing real changes. Choose the worker and permission mode deliberately. Use `git log --oneline <branch>..HEAD` to show what's unpushed.
+[`harness/ralph.sh`](harness/ralph.sh) launches an autonomous LLM worker with the permissions granted in [cli.py line line 32](harness/cli.py#L42) e.g.
+`--permission-mode acceptEdits` or `--sandbox danger-full-access`.
+
+The gate bounds what any **commit** may touch, but the worker itself is **not** truly sandboxed to this repo. Consider the balance: without access it cannot do much. With machine access it can wreak havoc. Under a permissive mode it can run arbitrary shell. You are authorizing real changes. Choose the worker and permission mode deliberately.
 
 #### The Gate: Tiered Checks
 
@@ -120,7 +116,7 @@ If an agent edits a forbidden file, the file will be unstaged (not allowed to co
 
 3. **Mind your usage limits.** `ralph.sh` works agents to the cap set. You can easily burn through your tokens, context windows, and provider usage limits. **Workers continue running as long as there is work to do.**
 
-4. **`docs/PROMPT.md` tells the worker to push every iteration** Protect `main` and run the loop on its own branch.
+4. **`docs/PROMPT.md` tells the worker to push every iteration**. Protect `main` and run the loop on its own branch.
 
 5. **100% coverage does not mean good tests.** That is quantity, not quality. (Upcoming feature: mutation testing)
 
@@ -128,7 +124,7 @@ If an agent edits a forbidden file, the file will be unstaged (not allowed to co
 
 ## Commands
 
-Tool commands are defined in [harness/gate.py](harness/gate.py#L62-L94).
+Tool commands are defined in [harness/gate.py line 71](harness/gate.py#L71-L115).
 
 ```sh
 harness install <your-project-name>  # rewrite [project] name, uv sync, set core.hooksPath to .githooks
@@ -176,5 +172,48 @@ lazy_any_type_hints  # abolish type `Any` used to bypass strict type-checking
 chaotic_continue_statements  # abolish unecessary nested continue statements, clean code
 complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefer linear code
 ```
+
+## Coordination
+
+- Use `git log --oneline <branch>..HEAD` to show what's unpushed.
+- There is NO worktree/branch creation by design. You can create branches/trees and run a loop in each, then merge _(if you really feel like managing that)_
+- Agent duties can be contained to a part of the repo. e.g. Codex-1-frontend uses `docs/specs/frontend.md`, Claude-2-researcher `docs/specs/backend`...
+
+### If you must be a ringleader
+
+**Recommendations for running several agents at once on one branch (no worktrees):**
+
+- **You (human):** seed each spec once with this exact line near the top:
+
+  ```
+  Spec claimed by agent: <unclaimed>
+  ```
+
+- **The agents:** paste this exact block into [PROMPT.md line 3](docs/PROMPT.md#L3):
+
+  ```
+  Other agents are working this repo. Before touching code, pick a spec whose claim line is
+  <unclaimed>, replace it with your name, and commit that claim first. Own that spec's file and its
+  tests. Set the line back to <unclaimed> on your last commit.
+  ```
+
+- What fails when agents do not claim specs/work: agents all pick the top-priority spec, duplicate work, and leave a half-staged git index.
+- What fails with too little time i.e. MAX_MINUTES too low: a worker dies mid-`gate` before it can commit. Give each iteration enough minutes to finish (the gate itself takes a while). One successful iteration needs ~2-3 min of pure overhead aside from 'real' work.
+  - A worker killed too soon leaves its spec claim STUCK: spec stays locked to its name. No other agent will take it until a human resets the line to `<unclaimed>`.
+  - preflight on git commit: ~ a few seconds
+  - full gate on git push: ~20-48s
+  - push + cleanup: ~ few seconds -
+- Do not rely on agent names for coordination: agents self-name inconsistently and can collide (e.g. two both call themselves the same thing). Names are for human blame/log-matching only; the claim line + committed code are what actually coordinate.
+
+- Which doc does what:
+  - **specs** = the product work
+  - **`docs/PROMPT.md`** = how to operate headlessly
+  - **repo + green gate** = the source of truth
+  - `docs/PROJECT_STATUS.md` is a human-readable record, not authoritative
+
+- No branch/worktree creation in this harness was intentional:
+  1. For simplicity and maintainability of the framework.
+  2. Because a fresh iteration can't see the unmerged work in another worktree, so agents miss context and scramble to merge while conflicts pile up.
+  3. Change this behavior if you're comfortable with granting agents machine access, feeding context to agents, and managing rapidly moving git history.
 
 ![diagram](.diagram.png)

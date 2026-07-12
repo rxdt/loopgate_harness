@@ -11,7 +11,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
+
+# ralph.sh is the POSIX loop runner; Windows uses ralph.ps1 (see test_ralph_ps1.py).
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX ralph.sh; Windows uses ralph.ps1")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RALPH = REPO_ROOT / "harness" / "ralph.sh"
@@ -40,7 +46,7 @@ def run_ralph(
     fake_timeout(bin_dir / "gtimeout")
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
-    env.setdefault("RALPH_PROMPT", "do the most important thing")  # harness passes the prompt string
+    env["RALPH_PROMPT"] = "do the most important thing"  # harness passes the prompt string (hermetic)
     command = [str(RALPH), *(ralph_args or []), str(worker)]
     return subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, check=False, env=env)
 

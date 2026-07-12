@@ -27,7 +27,7 @@ FORBIDDEN_FILES = {
     "agents.md",  # .casefold() for comparison to staged files
     "pyproject.toml",
     "docs/prompt.md",  # .casefold() for comparison to staged files
-    "docs/plan.md",
+    "docs/plan.md",  # delete or comment out if you want agents to manage the vision
     "uv.lock",
     # tooling/config files that would weaken checks in pyproject.toml
     "pytest.ini",
@@ -192,7 +192,7 @@ def run_non_human_checks(repo: Path) -> list[str]:
     ).splitlines()
     if not staged:
         colorize("EMPTY COMMIT", "nothing staged: do real work, do not commit empty")
-        return ["empty commit: nothing staged"]
+        return problems  # yell, but don't block
     forbidden = [
         path
         for path in staged

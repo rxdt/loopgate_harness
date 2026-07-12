@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -34,8 +35,8 @@ AGENTS: dict[str, tuple[str, ...]] = {
         "-p",
         "--permission-mode",
         "acceptEdits",
-        #        "--bare",  # one-shot minimal run. skips MCP, hooks, plugins, CLAUDE.md, reduced startup
-        # sets CLAUDE_CODE_SIMPLE, no use CLAUDE_CODE_OAUTH_TOKEN (ANTHROPIC_API_KEY billed), no ~/.claude log
+        # "--bare",  # one-shot minimal run. skips MCP, hooks, plugins, CLAUDE.md, reduced startup
+        # and sets CLAUDE_CODE_SIMPLE no use CLAUDE_CODE_OAUTH_TOKEN (ANTHROPIC_API_KEY billed) no .claude log
         "--no-session-persistence",  # no-save session data is good for disposable automation tasks
         "--output-format",
         "stream-json",
@@ -176,6 +177,27 @@ def status() -> None:
         typer.secho(f"newest: {logs[-1]}", fg=typer.colors.GREEN, bold=True)
 
 
+@app.command()
+def ensure_timeout_tool() -> None:
+    """Warn (and offer to install) when `harness run` lacks a timeout tool, macOS case.
+    Windows uses ralph.ps1 and has no timeout tool so no-op here.
+
+    Linux ships `timeout`; macOS needs `brew install coreutils` (for `gtimeout`). If neither is on PATH
+    on a non-Windows host, prompt to install via Homebrew.
+    """
+    if sys.platform == "win32" or shutil.which("timeout") or shutil.which("gtimeout"):
+        return
+    rprint("\n[yellow]macOS harness needs timeout/gtimeout from coreutils[/yellow]")
+    if not shutil.which("brew"):
+        rprint(
+            "no Homebrew https://brew.sh then run `brew install coreutils`, or `sudo port install coreutils`"
+        )
+    elif typer.confirm("Allow install now with `brew install coreutils`?"):
+        subprocess.run(("brew", "install", "coreutils"), check=False)
+    else:
+        rprint("[yellow]skipped[/yellow] — run `brew install coreutils` before `harness run`.")
+
+
 @app.command(help="Setup project: inject project name, sync dependencies, set up githooks")
 def install(name: str) -> None:
     """Inject NAME (PEP 503) into pyproject, sync deps, and activate the git hooks.
@@ -187,10 +209,11 @@ def install(name: str) -> None:
 
     pyproject = cwd / "pyproject.toml"
     document = tomlkit.parse(pyproject.read_text(encoding="utf-8"))
-    # Set the requested name and reset version for the new project; leave any other metadata untouched.
+    # Set the requested name; default a missing version to 0.0.0 but never clobber an existing one.
     project = document.setdefault("project", tomlkit.table())
     project["name"] = canonicalize_name(name, validate=True)
-    project["version"] = "0.0.0"
+    if not project.get("version"):
+        project["version"] = "0.0.0"
     pyproject.write_text(tomlkit.dumps(document), encoding="utf-8")
     new_name = tomlkit.parse(pyproject.read_text(encoding="utf-8"))["project"]["name"]
     rprint(f"\n[cyan2]project name[/cyan2] '{new_name}' set in `pyproject.toml`")
@@ -206,6 +229,8 @@ def install(name: str) -> None:
         ).stdout.strip()
     )
     subprocess.run(("ls", "-l", ".githooks"), cwd=str(cwd), check=True)
+
+    ensure_timeout_tool()
 
     rprint(
         "\n[turquoise2]You must ACTIVATE env[/turquoise2] `source .venv/bin/activate`"
@@ -251,14 +276,21 @@ def run(
     runs = cwd / "scratchpad" / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     seq = 1 + max((int(p.name.split("-", 1)[0]) for p in runs.glob("[0-9]*-*.jsonl")), default=0)
-    log = runs / f"{seq:04d}-{agent}.jsonl"
-    os.environ["RALPH_PROMPT"] = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")
-    ralph = Path(__file__).resolve().parent / "ralph.sh"
-    command = [str(ralph), str(num_iterations), str(max_minutes)]
-    command.extend(AGENTS[agent])
+    worker_id = f"{seq:04d}-{agent}"  # harness-assigned identity; agents can't self-name uniquely
+    log = runs / f"{worker_id}.jsonl"
+    # Hand the agent a fixed identity to use verbatim in claims and commit trailers (append its spec).
+    prompt = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")
+    os.environ["RALPH_PROMPT"] = f"Your agent id is `{worker_id}`. Use it verbatim.\n\n{prompt}"
+    loop_dir = Path(__file__).resolve().parent
+    # Windows has no POSIX shell/timeout, so run the PowerShell twin there; ralph.sh everywhere else.
+    launcher = (
+        ["powershell.exe", "-NoProfile", "-File", str(loop_dir / "ralph.ps1")]  # support windows
+        if sys.platform == "win32"
+        else [str(loop_dir / "ralph.sh")]
+    )
+    command = [*launcher, str(num_iterations), str(max_minutes), *AGENTS[agent]]
     typer.echo(f"harness: {' '.join(command)} -> {log}", err=True)
-    returncode = run_worker(command, cwd, log, verbose)
-    raise typer.Exit(code=returncode)
+    raise typer.Exit(code=run_worker(command, cwd, log, verbose))
 
 
 def main(argv: list[str] | None = None) -> None:
