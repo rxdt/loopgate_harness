@@ -1,4 +1,4 @@
-# Contributing to L∞PS
+# Contributing to L∞PGate Harness
 
 Thanks for taking the time to contribute. This project is a Python harness for running agent loops behind local and CI gates. Good contributions scoped, tested, and explicit about the workflow they change.
 
@@ -21,17 +21,17 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 source .venv/bin/activate
 
-harness install ralph-harness
+uv run harness install loopgate  # for first time use. After: `harness install loopgate`
 ```
 
-`harness install <project-name>` is the installation behavior users will experience. It rewrites the template project name and sets up hooks for a downstream project. If you run `harness install ralph-harness` runs `uv sync`, installs/enables git hooks and sets name `ralph-harness`.
+`harness install <project-name>` is the installation behavior users will experience. It rewrites the template project name and sets up hooks for a downstream project. If you run `harness install loopgate`, it runs `uv sync`, installs/enables git hooks, and sets the project name to `loopgate`.
 
 ## Project Layout
 
 Humans edit
 
 - `pyproject.toml`: Python and tool configuration.
-- `harness/`: CLI, gate, loop runner, preferences, and harness tests. Wraps the 'dumb' Ralph loop that starts agents.
+- `harness/`: CLI, gate, loop runner, preferences, and harness tests. Wraps the loop that starts agents.
 - `docs/PROMPT.md`: tells agents how to operate headless in the repo (mechanics)
 
 Humans set, agents update
@@ -58,13 +58,13 @@ Changes to the [`harness/`](harness) itself should preserve the core contract: *
 
 ## Checks
 
-Fast check while working [`harness/gate.py line 242`](harness/gate.py#L242)
+Fast check while working [`harness/gate.py line 164`](harness/gate.py#L164)
 
 ```sh
 harness preflight
 ```
 
-The full gate before a pull request Fast check while working [`harness/gate.py line 255`](harness/gate.py#L255)
+The full gate before a pull request [`harness/gate.py line 177`](harness/gate.py#L177)
 
 ```sh
 harness gate
