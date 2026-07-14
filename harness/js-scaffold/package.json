@@ -1,0 +1,8 @@
+{
+    "name": "js-scaffold" ,
+    "type": "module" ,
+    "scripts": {
+        "test": "node --test test.js"
+    }
+
+}
