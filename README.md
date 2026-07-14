@@ -137,6 +137,12 @@ If an agent edits a forbidden file, the file will be unstaged (not allowed to co
 
 6. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
 
+### FAQ
+
+**What is the difference between a gate and a sandbox?**
+
+A **gate** is a workflow checkpoint that evaluates code and decides whether it is allowed to land in your commits. A **sandbox** is an isolated OS-level environment designed to prevent code from modifying your underlying machine. LoopGate uses gates to control your git history, but it does *not* provide a secure OS sandbox.
+
 ## Commands
 
 Tool commands are defined once, in `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml); the local gate and CI both run them from there.
