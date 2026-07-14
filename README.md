@@ -7,6 +7,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Status](https://img.shields.io/badge/github-repo-blue?logo=github)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat)](https://makeapullrequest.com)
+[![first-timers-only](https://img.shields.io/badge/first--timers--only-friendly-blue.svg?style=flat-square)](https://www.firsttimersonly.com/)
 ![GitHub activity](https://img.shields.io/github/commit-activity/m/rxdt/loopgate-harness)
 ![GitHub Release](https://img.shields.io/github/v/release/rxdt/loopgate-harness?color=pink)
 ![GitHub Repo Size](https://img.shields.io/github/repo-size/rxdt/loopgate-harness)
