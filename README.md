@@ -95,6 +95,18 @@ The gate bounds what any **commit** may touch, but the worker itself is **not** 
 
 `pyproject.toml` is the single source of harness configuration: `[tool.harness.gate]` holds `forbidden_files`, `forbidden_dirs`, `forbidden_patterns`, and every check command; `[tool.harness.agents]` holds the agent presets. `harness/preferences.py` holds human's style checks other tools can't catch. Containment runs during loop execution. Humans own all of it (`pyproject.toml` is agent-forbidden; `harness/preferences.py` is part of `harness/`).
 
+A minimal `[tool.harness.gate]` snippet looks like:
+
+```toml
+[tool.harness.gate]
+forbidden_dirs = ["harness/"]     # agents may not commit changes here
+forbidden_files = ["pyproject.toml"]
+forbidden_patterns = ["# noqa"]   # banned in agent-authored diffs
+
+[tool.harness.gate.checks]
+lint = "ruff check ."             # one check command, run by both the local gate and CI
+```
+
 ⚡ `harness preflight` (pre-commit) → fast checks.
 Ruff lint + check format for everyone, _plus_ **containment** for the agents. Self-heals by un-staging forbidden files.
 
