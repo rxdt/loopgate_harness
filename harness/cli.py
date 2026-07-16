@@ -83,24 +83,48 @@ def _launcher(loop_dir: Path) -> list[str]:
     return [str(loop_dir / "ralph.sh")]
 
 
-def agent_model(agent: str) -> str | None:
-    """The model an agent launches with, read from its argv ``-m`` flag.
+def agent_model(agent: str, override: str | None = None) -> str | None:
+    """The model an agent runs with: the --model override, else its argv ``-m`` value.
 
     Codex logs never carry the model, so the harness supplies it to the context-rot
     scorer from the launch command. Claude passes no ``-m`` (the model is in its
-    log), so this returns None for it.
+    log), so without an override this returns None for it.
 
     Args:
         agent: An agent key present in AGENTS.
+        override: A --model value from the run command, if given.
 
     Returns:
-        The model id following ``-m`` in the agent's command, or None if absent.
+        The effective model id, or None if neither source names one.
     """
-    command = AGENTS[agent]
-    for flag, value in itertools.pairwise(command):
+    if override:
+        return override
+    for flag, value in itertools.pairwise(AGENTS[agent]):
         if flag == "-m":
             return value
     return None
+
+
+def agent_command(agent: str, model: str | None) -> list[str]:
+    """The agent's argv with an optional model override applied.
+
+    Replaces the value after ``-m`` when the command has one (codex); otherwise
+    appends ``--model <model>`` (claude). No model -> the command as configured.
+
+    Args:
+        agent: An agent key present in AGENTS.
+        model: A --model value from the run command, if given.
+
+    Returns:
+        The argv to launch.
+    """
+    command = list(AGENTS[agent])
+    if model is None:
+        return command
+    if "-m" in command:
+        command[command.index("-m") + 1] = model
+        return command
+    return [*command, "--model", model]
 
 
 def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
@@ -285,6 +309,8 @@ def run(
     num_iterations: Annotated[int, typer.Argument()] = 2,
     max_minutes: Annotated[int, typer.Argument()] = 20,
     verbose: Annotated[bool, typer.Argument()] = True,
+    *,
+    model: Annotated[str | None, typer.Option(help="Override the agent's model")] = None,
 ) -> None:
     """ralph.sh runs once for one agent.
 
@@ -293,6 +319,7 @@ def run(
         num_iterations: Number of ralph loop iterations. Must be >= 1.
         max_minutes: Wall-clock budget per run in minutes. Must be >= 1.
         verbose: When True, stream the worker's output live to the terminal.
+        model: Model to run instead of the agent's default; also scored against.
 
     Raises:
         typer.Exit: code 2 for an unknown agent or non-positive counts, else the worker's exit code.
@@ -321,13 +348,13 @@ def run(
     prompt = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")
     os.environ["RALPH_PROMPT"] = f"Your agent id is `{worker_id}`. Use it verbatim.\n\n{prompt}"
     launcher = _launcher(Path(__file__).resolve().parent)
-    command = [*launcher, str(num_iterations), str(max_minutes), *AGENTS[agent]]
+    command = [*launcher, str(num_iterations), str(max_minutes), *agent_command(agent, model)]
     typer.echo(f"harness: {' '.join(command)} -> {log}", err=True)
     code = run_worker(command, cwd, log, verbose)
     # Score the finished log for context-rot pressure and print the verdict. This is
     # out-of-band telemetry: rot_verdict never raises, so it cannot change `code`. It
     # returns "" for agents it can't score (agy/copilot), which we don't print.
-    if verdict := contextrot.rot_verdict(agent, log, model=agent_model(agent)):
+    if verdict := contextrot.rot_verdict(agent, log, model=agent_model(agent, model)):
         typer.echo(verdict, err=True)
     raise typer.Exit(code=code)
 

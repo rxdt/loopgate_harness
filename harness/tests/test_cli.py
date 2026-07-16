@@ -359,6 +359,31 @@ def test_agent_presets_are_registered() -> None:
         assert all(command)
 
 
+def test_run_model_option_rewrites_launched_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--model replaces codex's -m value in the launched command."""
+    monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
+    captured: dict[str, list[list[str]]] = {}
+    monkeypatch.setattr(subprocess, "run", fake_agent(captured))
+    result = runner.invoke(cli.app, ["run", "codex", "1", "2", "False", "--model", "gpt-6"])
+    assert result.exit_code == 0
+    command = captured["commands"][0]
+    assert command[command.index("-m") + 1] == "gpt-6"
+
+
+def test_agent_command_and_model_resolution() -> None:
+    """agent_command applies the override per agent shape; agent_model prefers the override."""
+    assert cli.agent_command("codex", None) == list(cli.AGENTS["codex"])  # untouched without a model
+    rewritten = cli.agent_command("codex", "gpt-6")
+    assert rewritten[rewritten.index("-m") + 1] == "gpt-6"
+    assert cli.agent_command("claude", "claude-haiku-4-5")[-2:] == ["--model", "claude-haiku-4-5"]
+    assert cli.agent_model("codex") == "gpt-5.5"  # parsed from the preset's -m
+    assert cli.agent_model("codex", "gpt-6") == "gpt-6"  # override wins
+    assert cli.agent_model("claude") is None  # claude preset has no -m
+
+
 def test_run_claude_executes_real_loop_twice_with_prompt(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
