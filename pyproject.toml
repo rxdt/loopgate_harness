@@ -5,6 +5,7 @@ requires-python = ">=3.11"
 dependencies = [
     "packaging",
     "pydantic",
+    "tiktoken",
     "tomlkit",
     "typer"
 ]
@@ -189,8 +190,8 @@ ignore = [
 ]
 [tool.ruff.lint.pylint]      # Prevent unreadable complexity and code
 max-nested-blocks = 4        # Stop indentation madness
-max-positional-args = 4      # Max total params, to prevent big initializers. Match max-args so no def(*)
-max-args = 4                 # Do not build big object initializers.
+max-positional-args = 4      # Max positional params, to prevent big initializers.
+max-args = 5                 # Allow one keyword-only extra (e.g. score_log's model/window/count_tokens).
 max-public-methods = 5       # Cap public methods per class
 max-statements = 25          # Cap executable statements per function/method
 max-branches = 6             # Cap branching paths per function/method; long if/elif chains are banned

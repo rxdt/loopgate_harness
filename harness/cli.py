@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import shutil
@@ -19,6 +20,7 @@ from rich.console import Console
 from rich.json import JSON
 from rich.table import Table
 
+from harness import contextrot
 from harness import gate as gate_module
 
 app = typer.Typer(
@@ -62,6 +64,43 @@ AGENTS: dict[str, tuple[str, ...]] = {
     "agy": ("agy", "--log-file", "scratchpad/runs/agy/agy.log", "--print", "--dangerously-skip-permissions"),
     "copilot": ("sh", "-c", 'copilot --output-format json --stream on --allow-all-tools -p "$(cat)"'),
 }
+
+
+def _launcher(loop_dir: Path) -> list[str]:
+    """The ralph launcher argv for this platform.
+
+    Windows has no POSIX shell/timeout, so it runs the PowerShell twin; every
+    other platform runs ralph.sh.
+
+    Args:
+        loop_dir: Directory holding ralph.sh / ralph.ps1 (this module's directory).
+
+    Returns:
+        The launcher argv prefix.
+    """
+    if sys.platform == "win32":
+        return ["powershell.exe", "-NoProfile", "-File", str(loop_dir / "ralph.ps1")]
+    return [str(loop_dir / "ralph.sh")]
+
+
+def agent_model(agent: str) -> str | None:
+    """The model an agent launches with, read from its argv ``-m`` flag.
+
+    Codex logs never carry the model, so the harness supplies it to the context-rot
+    scorer from the launch command. Claude passes no ``-m`` (the model is in its
+    log), so this returns None for it.
+
+    Args:
+        agent: An agent key present in AGENTS.
+
+    Returns:
+        The model id following ``-m`` in the agent's command, or None if absent.
+    """
+    command = AGENTS[agent]
+    for flag, value in itertools.pairwise(command):
+        if flag == "-m":
+            return value
+    return None
 
 
 def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
@@ -281,16 +320,16 @@ def run(
     # Hand the agent a fixed identity to use verbatim in claims and commit trailers (append its spec).
     prompt = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")
     os.environ["RALPH_PROMPT"] = f"Your agent id is `{worker_id}`. Use it verbatim.\n\n{prompt}"
-    loop_dir = Path(__file__).resolve().parent
-    # Windows has no POSIX shell/timeout, so run the PowerShell twin there; ralph.sh everywhere else.
-    launcher = (
-        ["powershell.exe", "-NoProfile", "-File", str(loop_dir / "ralph.ps1")]  # support windows
-        if sys.platform == "win32"
-        else [str(loop_dir / "ralph.sh")]
-    )
+    launcher = _launcher(Path(__file__).resolve().parent)
     command = [*launcher, str(num_iterations), str(max_minutes), *AGENTS[agent]]
     typer.echo(f"harness: {' '.join(command)} -> {log}", err=True)
-    raise typer.Exit(code=run_worker(command, cwd, log, verbose))
+    code = run_worker(command, cwd, log, verbose)
+    # Score the finished log for context-rot pressure and print the verdict. This is
+    # out-of-band telemetry: rot_verdict never raises, so it cannot change `code`. It
+    # returns "" for agents it can't score (agy/copilot), which we don't print.
+    if verdict := contextrot.rot_verdict(agent, log, model=agent_model(agent)):
+        typer.echo(verdict, err=True)
+    raise typer.Exit(code=code)
 
 
 def main(argv: list[str] | None = None) -> None:
