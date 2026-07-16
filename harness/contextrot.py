@@ -111,17 +111,13 @@ def count_tokens_o200k(text: str) -> int:
     return len(_O200K.encode(text))
 
 
-def _objects(text: str) -> list[dict[str, object]]:
-    """Parsed JSON objects from the log, skipping blank and non-JSON lines."""
-    out: list[dict[str, object]] = []
-    for line in text.splitlines():
-        try:
-            parsed = json.loads(line) if line.strip() else None
-        except ValueError:
-            parsed = None
-        if _is_object(parsed):
-            out.append(parsed)
-    return out
+def _parse_line(line: str) -> dict[str, object] | None:
+    """One JSONL line as an object, or None for a blank, non-JSON, or non-object line."""
+    try:
+        parsed = json.loads(line) if line.strip() else None
+    except ValueError:
+        parsed = None
+    return parsed if _is_object(parsed) else None
 
 
 def _str(value: object) -> str | None:
@@ -143,27 +139,6 @@ def _dedup_key(record: dict[str, object], message: dict[str, object], index: int
     return _str(record.get("request_id")) or _str(message.get("id")) or f"line:{index}"
 
 
-def _claude_peak(objects: list[dict[str, object]]) -> tuple[int | None, str | None]:
-    """Peak live tokens over unique Claude requests, and the model from the log.
-
-    Args:
-        objects: Parsed log objects.
-
-    Returns:
-        (peak live tokens or None if no usage, model or None).
-    """
-    by_key: dict[str, int] = {}
-    model: str | None = None
-    for index, record in enumerate(objects):
-        message = _dict(record.get("message"))
-        if record.get("type") != "assistant" or not _is_object(message.get("usage")):
-            continue
-        model = model or _str(message.get("model"))
-        key = _dedup_key(record, message, index)
-        by_key[key] = max(by_key.get(key, 0), _live_tokens(_dict(message.get("usage"))))
-    return (max(by_key.values()) if by_key else None), model
-
-
 def _codex_item(item: dict[str, object], count: TokenCounter) -> int:
     """Reconstructed live tokens for one item; the 12K cap is on tool OUTPUT only."""
     kind = item.get("type")
@@ -178,23 +153,6 @@ def _codex_item(item: dict[str, object], count: TokenCounter) -> int:
     return 0
 
 
-def _codex_peak(objects: list[dict[str, object]], count: TokenCounter) -> int | None:
-    """Summed reconstruction over item.completed events; None if there are none.
-
-    A turn.completed-only log is unscoreable -- we never fall back to the
-    cumulative uncached proxy, which measures run exposure, not live context.
-
-    Args:
-        objects: Parsed log objects.
-        count: Token counter.
-
-    Returns:
-        Summed reconstructed tokens, or None if there are no items.
-    """
-    items = [r for r in objects if r.get("type") == "item.completed"]
-    return sum(_codex_item(_dict(r.get("item")), count) for r in items) if items else None
-
-
 def _window(agent: str, model: str | None, override: int | None) -> tuple[int, WindowSource]:
     """Effective window and its provenance: override -> model -> agent default."""
     if override is not None:
@@ -202,6 +160,104 @@ def _window(agent: str, model: str | None, override: int | None) -> tuple[int, W
     if model in WINDOW_BY_MODEL:
         return WINDOW_BY_MODEL[model], "model-default"
     return WINDOW_BY_AGENT[agent], "agent-default"
+
+
+class RotTracker:
+    """Incremental scorer: feed raw log lines as they stream; peak state is monotonic.
+
+    The same per-record equation as score_log (which folds a whole log through one
+    tracker), so batch and live scoring can never disagree.
+    """
+
+    def __init__(
+        self,
+        agent: str,
+        *,
+        model: str | None = None,
+        window: int | None = None,
+        count_tokens: TokenCounter | None = None,
+    ) -> None:
+        """Start tracking one run's stream.
+
+        Args:
+            agent: Harness agent key; only "claude" and "codex" are scoreable.
+            model: Model id, overriding the log for Claude, required for Codex.
+            window: Explicit window override, else resolved from model/agent.
+            count_tokens: Codex counter override; defaults to o200k_base.
+        """
+        self._agent = agent
+        self._model = model  # the override if given, else filled from the log's first model field
+        self._window_override = window
+        self._injected_count = count_tokens  # non-None also flags codex scores approx-tokens
+        self._by_key: dict[str, int] = {}  # claude: peak live tokens per unique request
+        self._codex_sum: int | None = None  # codex: retained-item sum; None until the first item
+        self._fired: set[int] = set()
+
+    def observe(self, line: str) -> RotScore | None:
+        """Parse one raw log line, update peak state, and return the current score.
+
+        Returns the current score whenever the accumulated state is scoreable (whether
+        or not this line changed it), else None -- so callers can render live state
+        after any line, including blank or non-JSON ones.
+
+        Args:
+            line: One raw line from the worker's stream.
+
+        Returns:
+            The current RotScore, or None while no usable signal has been seen.
+        """
+        record = _parse_line(line)
+        if record is not None and self._agent in WINDOW_BY_AGENT:
+            self._ingest(record)
+        return self._score()
+
+    def crossed(self, threshold: int) -> bool:
+        """True exactly once: the first observe after pressure_risk reaches threshold.
+
+        Edge-detected per threshold value, so each gate cut (WARN, APPROACHED, PASSED)
+        fires its own single warning.
+
+        Args:
+            threshold: A 0-100 pressure_risk cut.
+
+        Returns:
+            True on the first call at-or-past the cut, False before and after.
+        """
+        score = self._score()
+        if score is None or threshold in self._fired or score.pressure_risk < threshold:
+            return False
+        self._fired.add(threshold)
+        return True
+
+    def _ingest(self, record: dict[str, object]) -> None:
+        """Fold one parsed record into the peak state; agent decided at construction."""
+        if self._agent == "claude":
+            self._ingest_claude(record)
+        elif record.get("type") == "item.completed":
+            item_tokens = _codex_item(_dict(record.get("item")), self._injected_count or count_tokens_o200k)
+            self._codex_sum = (self._codex_sum or 0) + item_tokens
+
+    def _ingest_claude(self, record: dict[str, object]) -> None:
+        """Track the running max live-token sum per unique request, and the log's model."""
+        message = _dict(record.get("message"))
+        if record.get("type") != "assistant" or not _is_object(message.get("usage")):
+            return
+        self._model = self._model or _str(message.get("model"))
+        # len(_by_key) only grows on insert, so the fallback key is unique per untagged record.
+        key = _dedup_key(record, message, len(self._by_key))
+        self._by_key[key] = max(self._by_key.get(key, 0), _live_tokens(_dict(message.get("usage"))))
+
+    def _score(self) -> RotScore | None:
+        """The current RotScore; window re-resolved each time (claude's model arrives mid-stream)."""
+        if self._agent == "claude":
+            peak = max(self._by_key.values()) if self._by_key else None
+        else:
+            peak = self._codex_sum
+        if peak is None:
+            return None
+        effective, source = _window(self._agent, self._model, self._window_override)
+        approx = self._agent == "codex" and self._injected_count is not None
+        return RotScore(self._model, peak, effective, source, self._agent == "claude", approx)
 
 
 def score_log(
@@ -212,7 +268,7 @@ def score_log(
     window: int | None = None,
     count_tokens: TokenCounter | None = None,
 ) -> RotScore | None:
-    """Score a finished run log. Pure function of the log text.
+    """Score a finished run log by folding it through a RotTracker. Pure function of the log text.
 
     Codex must pass ``model`` (its log has none); Claude reads it from the log
     unless overridden.
@@ -227,19 +283,11 @@ def score_log(
     Returns:
         A RotScore, or None for an unsupported agent or a log with no usable signal.
     """
-    objects = _objects(text)
-    if agent == "claude":
-        peak, log_model = _claude_peak(objects)
-        model, exact, approx = model or log_model, True, False
-    elif agent == "codex":
-        counter, approx = (count_tokens, True) if count_tokens else (count_tokens_o200k, False)
-        peak, exact = _codex_peak(objects, counter), False
-    else:
-        return None
-    if peak is None:
-        return None
-    effective, source = _window(agent, model, window)
-    return RotScore(model, peak, effective, source, exact, approx)
+    tracker = RotTracker(agent, model=model, window=window, count_tokens=count_tokens)
+    score: RotScore | None = None
+    for line in text.splitlines():
+        score = tracker.observe(line) or score
+    return score
 
 
 def format_rot_score(score: RotScore | None) -> str:

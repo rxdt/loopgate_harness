@@ -257,6 +257,108 @@ def test_unsupported_agent_returns_none() -> None:
     assert contextrot.score_log("copilot", fixture("claude-0002.jsonl")) is None
 
 
+# --------------------------------------------------------------------------- incremental tracker
+
+
+def fold(tracker: contextrot.RotTracker, text: str) -> contextrot.RotScore | None:
+    """Feed a log to a tracker line-by-line and return the last score observed.
+
+    Args:
+        tracker: The tracker under test.
+        text: Full log text to stream one line at a time.
+
+    Returns:
+        The final score, or None if the log never became scoreable.
+    """
+    score: contextrot.RotScore | None = None
+    for line in text.splitlines():
+        score = tracker.observe(line) or score
+    return score
+
+
+def test_tracker_claude_fold_equals_batch_score() -> None:
+    """Streaming the claude fixture line-by-line lands on exactly score_log's score."""
+    text = fixture("claude-0002.jsonl")
+    final = fold(contextrot.RotTracker("claude"), text)
+    assert final == contextrot.score_log("claude", text)
+
+
+def test_tracker_codex_fold_equals_batch_score() -> None:
+    """Streaming the codex fixture line-by-line lands on exactly score_log's score."""
+    text = fixture("codex-0005.jsonl")
+    final = fold(contextrot.RotTracker("codex", model="gpt-5.5"), text)
+    assert final == contextrot.score_log("codex", text, model="gpt-5.5")
+
+
+def test_tracker_crossed_warn_fires_exactly_once() -> None:
+    """crossed(WARN) is False below the cut, True once at first crossing, then False again."""
+    tracker = contextrot.RotTracker("claude")
+    tracker.observe(assistant(input_tokens=100_000))  # risk 2, well below WARN
+    assert tracker.crossed(contextrot.WARN) is False
+    tracker.observe(assistant(input_tokens=320_000))  # risk 51, first crossing
+    assert tracker.crossed(contextrot.WARN) is True
+    tracker.observe(assistant(input_tokens=400_000))  # risk 69, still past the cut
+    assert tracker.crossed(contextrot.WARN) is False
+
+
+def test_tracker_crossed_second_threshold_fires_independently() -> None:
+    """After WARN has fired, APPROACHED still fires exactly once at its own cut."""
+    tracker = contextrot.RotTracker("claude")
+    tracker.observe(assistant(input_tokens=320_000))  # risk 51: past WARN, below APPROACHED
+    assert tracker.crossed(contextrot.WARN) is True
+    assert tracker.crossed(contextrot.APPROACHED) is False
+    tracker.observe(assistant(input_tokens=500_000))  # risk 91: past APPROACHED
+    assert tracker.crossed(contextrot.APPROACHED) is True
+    assert tracker.crossed(contextrot.APPROACHED) is False
+
+
+def test_tracker_unsupported_agent_never_scores_or_crosses() -> None:
+    """agy is not scoreable: observe stays None and crossed stays False, whatever streams in."""
+    tracker = contextrot.RotTracker("agy")
+    assert tracker.observe(assistant(input_tokens=500_000)) is None
+    assert tracker.crossed(contextrot.WARN) is False
+
+
+def test_tracker_non_json_line_returns_current_score() -> None:
+    """A non-JSON line returns None before any signal and the standing score after one."""
+    tracker = contextrot.RotTracker("claude")
+    assert tracker.observe("ralph: iteration 1/1") is None
+    tracker.observe(assistant(input_tokens=42))
+    later = tracker.observe("ERROR boom")
+    assert later is not None
+    assert later.peak_live_tokens == 42
+
+
+def test_tracker_codex_unscoreable_until_first_item() -> None:
+    """Codex observe stays None over non-item records; the first item.completed starts the sum."""
+    tracker = contextrot.RotTracker("codex", model="gpt-5.5")
+    assert tracker.observe('{"type":"turn.completed","usage":{"input_tokens":5}}') is None
+    msg = json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "hello world"}})
+    score = tracker.observe(msg)
+    assert score is not None
+    assert score.peak_live_tokens == contextrot.count_tokens_o200k("hello world")
+
+
+def test_tracker_claude_model_discovered_mid_stream_updates_window() -> None:
+    """Window resolution is lazy: agent-default until the log names a model, model-default after."""
+    tracker = contextrot.RotTracker("claude")
+    before = tracker.observe(assistant(input_tokens=10))
+    assert before is not None
+    assert (before.model, before.effective_window, before.window_source) == (None, 600_000, "agent-default")
+    haiku = {
+        "type": "assistant",
+        "request_id": "r2",
+        "message": {"model": "claude-haiku-4-5", "usage": {"input_tokens": 20}},
+    }
+    after = tracker.observe(json.dumps(haiku))
+    assert after is not None
+    assert (after.model, after.effective_window, after.window_source) == (
+        "claude-haiku-4-5",
+        120_000,
+        "model-default",
+    )
+
+
 # --------------------------------------------------------------------------- formatting + verdict wrapper
 
 

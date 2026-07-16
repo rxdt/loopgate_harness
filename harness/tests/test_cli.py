@@ -17,7 +17,7 @@ import typer
 from packaging.utils import InvalidName
 from typer.testing import CliRunner
 
-from harness import cli, gate
+from harness import cli, contextrot, gate
 from harness.tests.conftest import run_cmd
 
 if TYPE_CHECKING:
@@ -431,8 +431,10 @@ def test_run_claude_executes_real_loop_twice_with_prompt(
 def capture_run_worker(seen: list[list[str]]) -> Callable[..., int]:
     """A run_worker stand-in that records the command run built and reports a clean exit."""
 
-    def worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
-        del cwd, log, verbose
+    def worker(
+        command: list[str], cwd: Path, log: Path, verbose: bool, *, tracker: object = None
+    ) -> int:
+        del cwd, log, verbose, tracker
         seen.append(command)
         return 0
 
@@ -611,6 +613,51 @@ def test_run_worker_streams_and_logs_json_and_invalid_lines(
 
     assert cli.run_worker(["worker"], tmp_path, log, verbose=True) == 0
     assert log.read_text(encoding="utf-8") == '{ "type" : "result" }\nnot json\n'
+
+
+def usage_line(tokens: int) -> str:
+    """A Claude assistant JSONL line whose usage puts `tokens` live in the window.
+
+    Args:
+        tokens: input_tokens for the record.
+
+    Returns:
+        One JSON line, newline-terminated as the worker would emit it.
+    """
+    record = {"type": "assistant", "request_id": "r", "message": {"usage": {"input_tokens": tokens}}}
+    return json.dumps(record) + "\n"
+
+
+def test_run_worker_with_tracker_warns_once_when_warn_crossed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A stream crossing the WARN cut emits exactly one context-rot WARNING on stderr."""
+    lines = [usage_line(100_000), usage_line(400_000), usage_line(410_000)]
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen(lines))
+    tracker = contextrot.RotTracker("claude")
+
+    assert cli.run_worker(["worker"], tmp_path, tmp_path / "out.jsonl", verbose=True, tracker=tracker) == 0
+    stderr = capsys.readouterr().err
+    assert stderr.count("context-rot WARNING: ") == 1
+    assert "pressureRisk=69" in stderr  # the 400K line that crossed, not the later 410K one
+
+
+def test_run_worker_without_tracker_prints_no_warning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With tracker=None (the default), even a huge usage line warns nothing."""
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen([usage_line(500_000)]))
+
+    assert cli.run_worker(["worker"], tmp_path, tmp_path / "out.jsonl", verbose=True) == 0
+    assert "context-rot WARNING" not in capsys.readouterr().err
+
+
+def test_run_unsupported_agent_gets_no_tracker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """run() hands run_worker no tracker for agents the scorer does not support."""
+    monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
+    monkeypatch.setattr(subprocess, "run", fake_agent({}))
+    assert runner.invoke(cli.app, ["run", "agy", "1", "2", "False"]).exit_code == 0
 
 
 def test_format_live_line_colorizes_in_process_without_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:

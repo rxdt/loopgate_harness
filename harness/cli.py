@@ -127,17 +127,29 @@ def agent_command(agent: str, model: str | None) -> list[str]:
     return [*command, "--model", model]
 
 
-def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
+def _tracker(agent: str, model: str | None) -> contextrot.RotTracker | None:
+    """A live rot tracker for scoreable agents, None for the rest (agy/copilot)."""
+    if agent in contextrot.WINDOW_BY_AGENT:
+        return contextrot.RotTracker(agent, model=agent_model(agent, model))
+    return None
+
+
+def run_worker(
+    command: list[str], cwd: Path, log: Path, verbose: bool, *, tracker: contextrot.RotTracker | None = None
+) -> int:
     """Run the worker command, always saving stdout and optionally streaming it live.
 
     The worker inherits the current environment, including RALPH_PROMPT set by `run`, so ralph.sh
-    receives the prompt as a string and never reads a prompt file.
+    receives the prompt as a string and never reads a prompt file. The tracker only sees lines on
+    the verbose path; non-verbose runs write straight to the log file with no line access, so their
+    rot verdict comes solely from the post-run scoring in `run`.
 
     Args:
         command: The worker argv to execute.
         cwd: Working directory for the subprocess.
         log: File path that always receives the raw stdout.
         verbose: When True, also stream compacted output live to the terminal.
+        tracker: Live context-rot tracker; warns on stderr the first time WARN is crossed.
 
     Returns:
         The worker process's exit code.
@@ -152,6 +164,8 @@ def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
                 handle.flush()
                 sys.stdout.write(format_live_line(line, console))
                 sys.stdout.flush()
+                if tracker and (score := tracker.observe(line)) and tracker.crossed(contextrot.WARN):
+                    typer.echo(f"context-rot WARNING: {contextrot.format_rot_score(score)}", err=True)
             return process.wait()
 
 
@@ -350,7 +364,7 @@ def run(
     launcher = _launcher(Path(__file__).resolve().parent)
     command = [*launcher, str(num_iterations), str(max_minutes), *agent_command(agent, model)]
     typer.echo(f"harness: {' '.join(command)} -> {log}", err=True)
-    code = run_worker(command, cwd, log, verbose)
+    code = run_worker(command, cwd, log, verbose, tracker=_tracker(agent, model))
     # Score the finished log for context-rot pressure and print the verdict. This is
     # out-of-band telemetry: rot_verdict never raises, so it cannot change `code`. It
     # returns "" for agents it can't score (agy/copilot), which we don't print.
