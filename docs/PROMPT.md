@@ -1,6 +1,11 @@
 You are a fresh-context iteration in a loop. The repo is your memory.
 Specs say what to build. You decide what is the next most useful change.
 
+0. FIRST, before anything else, read `.harness/context-health.json` if it exists. If its
+   `status` is `wrap_up`: do NOT start new work. Commit your WIP on the current branch,
+   append a short handoff note to `docs/PROJECT_STATUS.md` (what you finished, what is
+   mid-flight, the exact next step), and stop immediately. If the file is missing or
+   `status` is `ok`, continue.
 1. Read `docs/specs/*.md` and `docs/plan.md` and identify the most important unfinished items.
 2. If a spec is wrong or missing, add or update the spec using `plan.md` instead of guessing.
 3. Inspect the relevant code and tests before editing.
