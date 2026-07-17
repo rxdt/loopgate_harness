@@ -18,7 +18,7 @@ from packaging.utils import InvalidName
 from typer.testing import CliRunner
 
 import contextrot
-from harness import cli, gate
+from harness import cli, gate, health
 from harness.tests.conftest import run_cmd
 
 if TYPE_CHECKING:
@@ -651,6 +651,29 @@ def test_run_worker_without_tracker_prints_no_warning(
 
     assert cli.run_worker(["worker"], tmp_path, tmp_path / "out.jsonl", verbose=True) == 0
     assert "context-rot WARNING" not in capsys.readouterr().err
+
+
+def test_run_worker_publishes_health_file_at_approached(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Crossing the APPROACHED cut writes the wrap_up health file under cwd's .harness/."""
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen([usage_line(100_000), usage_line(500_000)]))
+    tracker = contextrot.RotTracker("claude")
+
+    assert cli.run_worker(["worker"], tmp_path, tmp_path / "out.jsonl", verbose=True, tracker=tracker) == 0
+    published = json.loads((tmp_path / health.HEALTH_FILE).read_text(encoding="utf-8"))
+    assert published["status"] == "wrap_up"
+
+
+def test_run_worker_below_approached_writes_no_health_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A run that only crosses WARN (not APPROACHED) leaves no health file behind."""
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen([usage_line(400_000)]))
+    tracker = contextrot.RotTracker("claude")
+
+    assert cli.run_worker(["worker"], tmp_path, tmp_path / "out.jsonl", verbose=True, tracker=tracker) == 0
+    assert not (tmp_path / health.HEALTH_FILE).exists()
 
 
 def test_run_unsupported_agent_gets_no_tracker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

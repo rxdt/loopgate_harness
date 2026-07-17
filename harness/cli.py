@@ -22,6 +22,7 @@ from rich.table import Table
 
 import contextrot
 from harness import gate as gate_module
+from harness import health
 
 app = typer.Typer(
     name="ralph-harness",
@@ -134,6 +135,27 @@ def _tracker(agent: str, model: str | None) -> contextrot.RotTracker | None:
     return None
 
 
+def _live_signal(tracker: contextrot.RotTracker, cwd: Path, line: str) -> None:
+    """React once to each rot knee the streamed line crosses: warn at WARN, publish health at APPROACHED.
+
+    Both crossings are edge-detected by the tracker (fire once per knee), so this warns and
+    writes at most once each per run. The health file flips the NEXT iteration to wrap_up; see
+    docs/PROMPT.md. Publishing never affects the run -- write_health only touches .harness/.
+
+    Args:
+        tracker: The live tracker fed this run's stream.
+        cwd: Repo root, under which the health file is published.
+        line: The raw stream line just observed.
+    """
+    score = tracker.observe(line)
+    if score is None:
+        return
+    if tracker.crossed(contextrot.WARN):
+        typer.echo(f"context-rot WARNING: {contextrot.format_rot_score(score)}", err=True)
+    if tracker.crossed(contextrot.APPROACHED):
+        health.write_health(cwd / health.HEALTH_FILE, score)
+
+
 def run_worker(
     command: list[str], cwd: Path, log: Path, verbose: bool, *, tracker: contextrot.RotTracker | None = None
 ) -> int:
@@ -149,7 +171,8 @@ def run_worker(
         cwd: Working directory for the subprocess.
         log: File path that always receives the raw stdout.
         verbose: When True, also stream compacted output live to the terminal.
-        tracker: Live context-rot tracker; warns on stderr the first time WARN is crossed.
+        tracker: Live context-rot tracker; on the verbose path it warns on stderr at the first
+            WARN crossing and publishes the wrap-up health file at the first APPROACHED crossing.
 
     Returns:
         The worker process's exit code.
@@ -164,8 +187,8 @@ def run_worker(
                 handle.flush()
                 sys.stdout.write(format_live_line(line, console))
                 sys.stdout.flush()
-                if tracker and (score := tracker.observe(line)) and tracker.crossed(contextrot.WARN):
-                    typer.echo(f"context-rot WARNING: {contextrot.format_rot_score(score)}", err=True)
+                if tracker is not None:
+                    _live_signal(tracker, cwd, line)
             return process.wait()
 
 
