@@ -17,7 +17,8 @@ import typer
 from packaging.utils import InvalidName
 from typer.testing import CliRunner
 
-from harness import cli, contextrot, gate
+import contextrot
+from harness import cli, gate
 from harness.tests.conftest import run_cmd
 
 if TYPE_CHECKING:

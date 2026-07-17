@@ -20,7 +20,7 @@ from rich.console import Console
 from rich.json import JSON
 from rich.table import Table
 
-from harness import contextrot
+import contextrot
 from harness import gate as gate_module
 
 app = typer.Typer(

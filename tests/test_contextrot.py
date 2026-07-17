@@ -1,6 +1,6 @@
 """Tests for the context-rot scorer.
 
-Golden peaks are computed from the real fixture logs in harness/tests/data with
+Golden peaks are computed from the real fixture logs in tests/data with
 tiktoken o200k_base + the 12K cap, reproducing the researched anchors exactly
 (codex 91,639 / 53,141 / 105,217; claude 20,942 exact). Windows are model-keyed
 with an agent fallback; every score records which source supplied the window.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from harness import contextrot
+import contextrot
 
 DATA = Path(__file__).resolve().parent / "data"
 
@@ -22,7 +22,7 @@ def fixture(name: str) -> str:
     """Read a fixture log's text.
 
     Args:
-        name: File under harness/tests/data.
+        name: File under tests/data.
 
     Returns:
         The log text.

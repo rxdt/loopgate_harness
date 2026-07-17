@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from harness.contextrot import APPROACHED, RotScore
+from contextrot import APPROACHED, RotScore
 
 HEALTH_FILE = Path(".harness") / "context-health.json"
 

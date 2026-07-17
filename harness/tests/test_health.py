@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from harness.contextrot import RotScore
+from contextrot import RotScore
 from harness.health import HEALTH_FILE, health_status, write_health
 
 
