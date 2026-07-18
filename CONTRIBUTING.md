@@ -33,6 +33,7 @@ Humans edit
 - `pyproject.toml`: Python and tool configuration.
 - `harness/`: CLI, gate, loop runner, preferences, and harness tests. Wraps the loop that starts agents.
 - `docs/PROMPT.md`: tells agents how to operate headless in the repo (mechanics)
+- [A javascript example](harness/js-scaffold) lives in its own directory within [harness](harness) and can be expanded upon.
 
 Humans set, agents update
 
