@@ -2,7 +2,7 @@
 <img src=".banner.svg" alt="Blue infinity loop" width="360">
 
 <h1>L∞pGate</h1>
-<p>A coding-agent loop harness for Claude, Codex, Copilot, or any CLI agent.  A dumb Ralph loop runner tells an agent to "Go!" and hands it a PROMPT. Agents can edit. Gates decide what lands. You set the plan in motion. The loops eat the prompt, and each iteration must update specs and commit through guardrails.</p>
+<p>A coding-agent loop harness for Claude, Codex, Copilot, or any CLI agent.  A dumb Ralph loop runner tells an agent to "Go!" and hands it a PROMPT. Agents can edit. Gates decide what lands. You set the plan in motion. The loops eat the prompt, and each agent iteration must update specs and commit through guardrails.</p>
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Status](https://img.shields.io/badge/github-repo-blue?logo=github)
@@ -15,6 +15,7 @@
 [![](https://img.shields.io/badge/code%20style-mine-999)](https://github.com/sebmestrallet/absurd-badges)
 [![](https://img.shields.io/badge/created%20an%20AGI%20by%20mistake-no-3C1)](https://github.com/sebmestrallet/absurd-badges)
 ![Claude](https://img.shields.io/badge/Claude-D97757?style=for-the-badge&logo=claude&logoColor=white)
+[![gate](https://github.com/rxdt/loopgate_harness/actions/workflows/ci.yml/badge.svg)](https://github.com/rxdt/loopgate_harness/actions/workflows/ci.yml)
 
 </div>
 
@@ -22,10 +23,11 @@
 
 ## TL;DR: Getting Started.
 
-1.  `uv run harness install <your-project-name>`
-2.  Write your project goal in [docs/plan.md](docs/plan.md)
-3.  `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
-4.  Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
+1. `gh repo create my-app --template <your-gh-username>/loopgate_harness --private --clone` **or** ['Use This Template'](https://github.com/new?template_name=loopgate_harness&template_owner=rxdt)
+2. `uv run harness install <your-project-name>`
+3. Write your project goal in [docs/plan.md](docs/plan.md)
+4. `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
+5. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
 
 ---
 
@@ -48,6 +50,9 @@
 
 ## Details
 
+> [!IMPORTANT]
+> Default configurations In [`pyproject.toml`](pyproject.toml) Update tool settings, add agent calls, remove or include checks... or leave as it.
+
 `docs/PROMPT.md` tells each agent to pick a `spec` and build. `docs/specs/` say _what_ to build. The agent decides _what next_. You keep `docs/plan.md` current, and specs get rewritten from it (agent is told in `docs/PROMPT.md` to update the specs). Each iteration the agent updates its spec and `PROJECT_STATUS`. Ideas from [ghuntley](https://github.com/ghuntley), How to Ralph Wiggum.
 
 > [!TIP]
@@ -55,7 +60,7 @@
 
 ## Start a project
 
-1. From inside the checkout, run `harness install <your-project-name>`. Names the project, installs dependencies, and sets up the git hook.
+1. From inside the checkout, run `harness install <your-project-name>` to name the project, installs dependencies, and set up the 3 git hook.
 2. Write your grand vision into `docs/plan.md`.
 3. Optionally add the first spec in `docs/specs/`, or have an agent draft the first specs.
 4. Put product code under `src/` and list new source directories in `pyproject.toml [tool.coverage.run]`.
@@ -90,23 +95,9 @@ The repo is the only memory. Each iteration is a fresh-context agent.
 `harness run` launches an autonomous LLM worker with the configured permissions, e.g.
 `--permission-mode acceptEdits` or `--sandbox danger-full-access`.
 
-The gate bounds what any **commit** may touch, but the worker itself is **not** truly sandboxed to this repo. Consider the balance: without access it cannot do much. With machine access it can wreak havoc. Under a permissive mode it can run arbitrary shell. You are authorizing real changes. Choose the worker and permission mode deliberately.
+The gate bounds what any **commit** may touch, but the worker itself is **not** sandboxed to this repo unless you set that config. Consider the balance: without access it cannot do much. With machine access it can wreak havoc. Under a permissive mode it can run arbitrary shell. You are authorizing real changes. Choose the worker and permission mode deliberately.
 
 #### The Gate: Tiered Checks
-
-`pyproject.toml` is the single source of harness configuration: `[tool.harness.gate]` holds `forbidden_files`, `forbidden_dirs`, `forbidden_patterns`, and every check command; `[tool.harness.agents]` holds the agent presets. `harness/preferences.py` holds human's style checks other tools can't catch. Containment runs during loop execution. Humans own all of it (`pyproject.toml` is agent-forbidden; `harness/preferences.py` is part of `harness/`).
-
-A minimal `[tool.harness.gate]` snippet looks like:
-
-```toml
-[tool.harness.gate]
-forbidden_dirs = ["harness/"]     # agents may not commit changes here
-forbidden_files = ["pyproject.toml"]
-forbidden_patterns = ["# noqa"]   # banned in agent-authored diffs
-
-[tool.harness.gate.checks]
-lint = "ruff check ."             # one check command, run by both the local gate and CI
-```
 
 ⚡ `harness preflight` (pre-commit) → fast checks.
 Ruff lint + check format for everyone, _plus_ **containment** for the agents. Self-heals by un-staging forbidden files.
@@ -115,7 +106,12 @@ Ruff lint + check format for everyone, _plus_ **containment** for the agents. Se
 
 Only humans can bypass triggered gates and commit by adding flag `--no-verify`.
 
-## Layout
+<details>
+  <summary>
+
+## Directory Layout
+
+</summary>
 
 ```
 harness/        the gate, loop runner, CLI, custom user checks       (🤖 forbidden)
@@ -136,6 +132,22 @@ src/            your product/source code (add to coverage source)
 
 If an agent edits a forbidden file, the file will be unstaged (not allowed to commit). A forbidden pattern by an agent (e.g. `# noqa` will also prevent their commit and force them to fix it.)
 
+</details>
+
+[`pyproject.toml`](pyproject.toml) is the single source of harness configuration. Humans own all of it (`pyproject.toml` is agent-forbidden; `harness/preferences.py` is part of `harness/`).
+
+A minimal `[tool.harness.gate]` snippet could look like:
+
+```toml
+[tool.harness.forbidden]
+dirs = ["harness/"]       # agents may not commit changes here
+iles = ["pyproject.toml"]
+patterns = ["# noqa"]     # banned in agent-authored diffs
+
+[tool.harness.gate]
+pytest = "uv sync pytest"  # one check command, run by the local gate AND CI
+```
+
 ## ⚠️ Warnings. Read this before a first run.
 
 1. **This harness does not sandbox agents.** It _tries_ to harness bad code in loops via gates. Sandboxing agents will, e.g. prevent them from maintaining git, running Playwright, being seen as trustworthy by semgrep leading to cyclical failures, etc.
@@ -150,15 +162,9 @@ If an agent edits a forbidden file, the file will be unstaged (not allowed to co
 
 6. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
 
-### FAQ
-
-**What is the difference between a gate and a sandbox?**
-
-A **gate** is a workflow checkpoint that evaluates code and decides whether it is allowed to land in your commits. A **sandbox** is an isolated OS-level environment designed to prevent code from modifying your underlying machine. LoopGate uses gates to control your git history, but it does *not* provide a secure OS sandbox.
-
 ## Commands
 
-Tool commands are defined once, in `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml); the local gate and CI both run them from there.
+Tool commands are defined once, in `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). The local gate and CI both derive them from there.
 
 ```sh
 harness install <your-project-name>  # rewrite [project] name, uv sync, set core.hooksPath to .githooks
@@ -167,24 +173,17 @@ harness gate  # full pass: preferences, ruff, format, pyright, pylint, complexip
 RALPH_LOOP=1 harness gate  # to run as if you are the agent in the loop
 harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/copilot, defaults: 2 20 True
 
-# UNDERLYING TOOLS are run the way CI runs them
-ruff check . && ruff format --check .  # lint. --check verifies formatting only, no auto-fix
-pyright  # static type checker: flags type errors without running code
-pylint harness src  # deeper lint: dead code, bad patterns, style beyond ruff
-semgrep scan --error --config auto --config p/secrets --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag .  # SAST. exclude-rule allows the template's floating action tags
-pytest --cov --cov-report=term-missing --cov-fail-under=100  # Note: Pydantic is included. Use it.
-
 # AGENT CALLS
 harness run claude 10 20
-
 harness run codex 2 20
-
 harness run agy 3 10
-
 harness run copilot 2 20
 ```
 
-## Expanding your harness
+<details>
+  <summary>
+
+## Expanding your harness </summary>
 
 - Edit rules at [pyproject.toml](pyproject.toml) for [ruff](https://docs.astral.sh/ruff/), [pylint](https://pypi.org/project/pylint/), [pydoclint](https://pypi.org/project/pydoclint/0.9.1/), [pyright](https://github.com/microsoft/pyright), [pytest](https://docs.pytest.org/en/stable/), [hypothesis](https://hypothesis.readthedocs.io/), [complexipy](https://github.com/rohaquinlop/complexipy)
 - Add forbidden files, directories, or patterns in `[tool.harness.gate]` at [pyproject.toml](pyproject.toml)
@@ -207,7 +206,23 @@ chaotic_continue_statements  # abolish unecessary nested continue statements, cl
 complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefer linear code
 ```
 
-## Coordination
+</details>
+
+<details>
+  <summary>
+
+### FAQ </summary>
+
+**What is the difference between a gate and a sandbox?**
+
+A **gate** is a workflow checkpoint that evaluates code and decides whether it is allowed to land in your commits. A **sandbox** is an isolated OS-level environment designed to prevent code from modifying your underlying machine. LoopGate uses gates to control your git history, but it does _not_ provide a secure OS sandbox.
+
+</details>
+
+<details>
+  <summary>
+
+## Coordination </summary>
 
 - Use `git log --oneline <branch>..HEAD` to show what's unpushed.
 - There is NO worktree/branch creation by design. You can create branches/trees and run a loop in each, then merge _(if you really feel like managing that)_
@@ -249,5 +264,7 @@ complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefe
   1. For simplicity and maintainability of the framework.
   2. Because a fresh iteration can't see the unmerged work in another worktree, so agents miss context and scramble to merge while conflicts pile up.
   3. Change this behavior if you're comfortable with granting agents machine access, feeding context to agents, and managing rapidly moving git history.
+
+</details>
 
 ![diagram](.diagram.png)

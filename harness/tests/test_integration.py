@@ -123,30 +123,27 @@ def test_no_verify_bypasses_the_hook(fake_hook_repo: Path) -> None:
 # --------------------------------------------------------------------------- full gate dispatch
 
 
-def test_full_gate_end_to_end_and_pre_push_hook_blocks(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_full_gate_end_to_end_and_pre_push_hook_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     """Full gate dispatch runs the real header/bucket path and faults only the tool seam."""
     monkeypatch.delenv("RALPH_LOOP", raising=False)
     calls = fake_popen(monkeypatch)
-    result = gate.run_checks(tmp_path, gate.FULL_CHECKS)
+    result = gate.run_checks(gate.FULL_CHECKS)
 
     assert [command for command, cwd, env in calls] == list(gate.FULL_CHECKS.values())
-    assert all(cwd == tmp_path for command, cwd, env in calls)
+    assert all(cwd == gate.REPO_ROOT for command, cwd, env in calls)
     assert all(env["FORCE_COLOR"] == "1" for command, cwd, env in calls)
-    assert set(result["pass"]) | set(result["fail"]) == set(gate.FULL_CHECKS)
+    assert set(result["pass"]) | set(result["fail"]) | set(result["warn"]) == set(gate.FULL_CHECKS)
     assert result["fail"] == []
-    assert "ruff format (no fail)" in result["pass"]
+    assert len(result["pass"]) == 6
+    assert "format" in result["warn"]
 
 
-def test_format_report_stays_pass_when_runner_exits_nonzero(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_format_report_stays_pass_when_runner_exits_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
     """Format reports are informational, so a nonzero format check is still bucketed as pass."""
     monkeypatch.delenv("RALPH_LOOP", raising=False)  # dispatch-only test: skip the containment git branch
     fake_popen(monkeypatch, fails=[["fmt"]])
-    result = gate.run_checks(tmp_path, {"ruff lint": ["lint"], "ruff format (no fail)": ["fmt"]})
-    assert result == {"pass": ["ruff lint", "ruff format (no fail)"], "fail": []}
+    result = gate.run_checks({"ruff lint": ["lint"], "ruff format (no fail)": ["fmt"]})
+    assert result == {"pass": ["ruff lint"], "fail": [], "warn": ["ruff format (no fail)"]}
 
 
 # --------------------------------------------------------------------------- pre-push hook wiring

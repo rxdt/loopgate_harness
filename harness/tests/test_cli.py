@@ -9,7 +9,9 @@ import json
 import os
 import subprocess
 import tomllib
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -28,7 +30,7 @@ runner = CliRunner()
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def returns(fail: list[str], passed: list[str] | None = None) -> Callable[[Path], dict[str, list[str]]]:
+def returns(fail: list[str], passed: list[str] | None = None) -> Callable[[], dict[str, list[str]]]:
     """Build a typed stand-in for gate.run_preflight / gate.run_gate that returns fixed results.
 
     `fail` is the list of check names that fail; passing an empty list means a clean gate.
@@ -36,9 +38,8 @@ def returns(fail: list[str], passed: list[str] | None = None) -> Callable[[Path]
     renders at least one PASSED row).
     """
 
-    def check(repo: Path) -> dict[str, list[str]]:
-        del repo
-        return {"pass": passed if passed is not None else ["lint"], "fail": fail}
+    def check() -> dict[str, list[str]]:
+        return {"pass": passed if passed is not None else ["lint"], "fail": fail, "warn": []}
 
     return check
 
@@ -87,6 +88,17 @@ def seed_prompt(cwd: Path) -> None:
     """Create docs/PROMPT.md so `run` (which reads it into RALPH_PROMPT) has a prompt to pass."""
     (cwd / "docs").mkdir(parents=True, exist_ok=True)
     (cwd / "docs" / "PROMPT.md").write_text("do the most important thing\n", encoding="utf-8")
+
+
+def frozen_now(tz: object | None = None) -> datetime:
+    """Fixed clock for cli.run's dated log dir: 2099-01-02 UTC -> "20990102"."""
+    del tz
+    return datetime(2099, 1, 2, tzinfo=UTC)
+
+
+def freeze_run_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin cli.run's dated log dir so path assertions cannot race midnight. The dated dir is 20990102."""
+    monkeypatch.setattr(cli, "datetime", SimpleNamespace(now=frozen_now))
 
 
 # --------------------------------------------------------------------------- entry point
@@ -317,6 +329,38 @@ def test_install_rejects_invalid_name(monkeypatch: pytest.MonkeyPatch, git_repo:
     assert ("uv", "sync") not in calls
 
 
+def test_install_without_name_keeps_existing_name(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """The name argument is optional: bare `install` preserves the existing project name and the rest of
+    install (defaults version, syncs, sets hooks) still runs.
+    """
+    monkeypatch.chdir(git_repo)
+    (git_repo / "pyproject.toml").write_text('[project]\nname = "keep-me"\n', encoding="utf-8")
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(subprocess, "run", stub_toolchain(subprocess.run, calls))
+    result = runner.invoke(cli.app, ["install"])
+    assert result.exit_code == 0
+    assert ("uv", "sync") in calls  # install still runs its steps without a name
+    with (git_repo / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+    assert project["name"] == "keep-me"  # existing name untouched
+    assert project["version"] == "0.0.0"  # version still defaulted
+
+
+def test_install_without_name_on_nameless_pyproject(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Bare `install` on a pyproject that has no `name` key must still complete: the confirmation line
+    only echoes the name, so a missing name must not abort install (uv sync / hooks must still run).
+    """
+    monkeypatch.chdir(git_repo)
+    (git_repo / "pyproject.toml").write_text('[project]\nversion = "1.0"\n', encoding="utf-8")  # no name key
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(subprocess, "run", stub_toolchain(subprocess.run, calls))
+    result = runner.invoke(cli.app, ["install"])
+    assert result.exit_code == 0  # does not crash on the missing name
+    assert ("uv", "sync") in calls  # install proceeds past the (name-less) confirmation line
+    with (git_repo / "pyproject.toml").open("rb") as handle:
+        assert "name" not in tomllib.load(handle)["project"]  # bare install never invents a name
+
+
 # --------------------------------------------------------------------------- run
 
 
@@ -327,16 +371,17 @@ def test_run_rejects_unknown_agent(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     monkeypatch.setattr(subprocess, "run", pytest.fail)
     result = runner.invoke(cli.app, ["run", "bogus"])
     assert result.exit_code == 2
-    assert result.stderr.strip() == "unknown agent 'bogus'; choose from claude, codex, agy, copilot"
+    assert result.stderr.strip() == "Unknown agent name 'bogus'"
     assert not (tmp_path / "scratchpad").exists()
 
 
 def test_run_builds_ralph_command_and_writes_sequential_log(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Run fires ralph.sh with the preset and the worker writes the NNNN-agent.jsonl receipt."""
+    """Run fires ralph.sh with the preset and the worker writes the dated NNNN.jsonl receipt."""
     monkeypatch.chdir(tmp_path)
     seed_prompt(tmp_path)
+    freeze_run_day(monkeypatch)  # pin the dated log dir to 20990102 so the path assertion can't race midnight
     captured: dict[str, list[list[str]]] = {}
     monkeypatch.setattr(subprocess, "run", fake_agent(captured))
     result = runner.invoke(cli.app, ["run", "claude", "1", "2", "False"])
@@ -344,19 +389,36 @@ def test_run_builds_ralph_command_and_writes_sequential_log(
     command = captured["commands"][0]
     assert command[0].endswith("ralph.sh")
     assert command[1:3] == ["1", "2"]
-    assert command[3:] == list(cli.AGENTS["claude"])  # preset expanded verbatim
+    assert command[3:] == list(gate.AGENTS["claude"])  # preset expanded
     assert (tmp_path / "scratchpad" / "runs").is_dir()  # run creates the log dir
-    log = tmp_path / "scratchpad" / "runs" / "0001-claude.jsonl"
+    log = tmp_path / "scratchpad" / "runs" / "20990102" / "claude" / "0001.jsonl"
     assert log.read_text(encoding="utf-8") == '{"type":"result","result":"ok"}\n'
 
 
+def test_run_model_option_replaces_preset_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`--model X` swaps the value after the preset's `--model` in place, so exactly one --model X is sent
+    (no duplicate flag) and no other preset arg changes.
+    """
+    monkeypatch.chdir(tmp_path)
+    seed_prompt(tmp_path)
+    captured: dict[str, list[list[str]]] = {}
+    monkeypatch.setattr(subprocess, "run", fake_agent(captured))
+    result = runner.invoke(cli.app, ["run", "claude", "1", "2", "False", "--model", "haiku"])
+    assert result.exit_code == 0
+    agent_argv = captured["commands"][0][3:]  # drop launcher + iterations + minutes
+    expected = list(gate.AGENTS["claude"])
+    expected[expected.index("--model") + 1] = "haiku"  # in-place swap, not an appended second flag
+    assert agent_argv == expected
+    assert agent_argv.count("--model") == 1  # replaced, never duplicated
+
+
 def test_agent_presets_are_registered() -> None:
-    """Every supported agent has one nonempty tuple command registered in the CLI."""
-    assert set(cli.AGENTS) == {"claude", "codex", "agy", "copilot"}
-    for command in cli.AGENTS.values():
-        assert isinstance(command, tuple)
-        assert command
-        assert all(command)
+    """Every supported agent has one nonempty command list registered in the CLI."""
+    agents: dict[str, list[str]] = gate.AGENTS  # TOML: each preset is a name -> argv-string list
+    assert set(agents) == {"claude", "codex", "agy", "copilot"}
+    for command in agents.values():
+        assert command  # nonempty command
+        assert all(part for part in command)  # no empty argv entries
 
 
 def test_run_claude_executes_real_loop_twice_with_prompt(
@@ -380,6 +442,7 @@ def test_run_claude_executes_real_loop_twice_with_prompt(
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    freeze_run_day(monkeypatch)  # pin the dated log dir to 20990102
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "PROMPT.md").write_text("build from specs\n", encoding="utf-8")
 
@@ -387,18 +450,18 @@ def test_run_claude_executes_real_loop_twice_with_prompt(
 
     assert result.exit_code == 0
     assert (tmp_path / "claude-count").read_text(encoding="utf-8") == "2"
-    identity = "Your agent id is `0001-claude`. Use it verbatim.\n\n"  # harness-injected worker id
+    identity = "Your agent id is `0001`\n\n"  # worker_id is NNNN, no agent suffix
     assert (tmp_path / "prompt-1.txt").read_text(encoding="utf-8") == (
         f"{identity}build from specs\n\nRALPH_ITERATION=1/2\n"
     )
     assert (tmp_path / "prompt-2.txt").read_text(encoding="utf-8") == (
         f"{identity}build from specs\n\nRALPH_ITERATION=2/2\n"
     )
-    claude_args = list(cli.AGENTS["claude"][1:])
+    claude_args = list(gate.AGENTS["claude"][1:])
     expected_args = claude_args.copy()
     expected_args.extend(claude_args)
     assert (tmp_path / "claude-args.txt").read_text(encoding="utf-8").splitlines() == expected_args
-    assert (tmp_path / "scratchpad" / "runs" / "0001-claude.jsonl").read_text(
+    assert (tmp_path / "scratchpad" / "runs" / "20990102" / "claude" / "0001.jsonl").read_text(
         encoding="utf-8"
     ) == '{ "type" : "result", "result" : "ok" }\n{ "type" : "result", "result" : "ok" }\n'
 
@@ -515,13 +578,17 @@ def test_ensure_timeout_tool_skips_install_when_declined(monkeypatch: pytest.Mon
 
 
 def test_run_log_sequence_increments_past_existing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The receipt number is max(existing leading int) + 1, so a prior run is never overwritten."""
-    write_log(tmp_path, "0007-codex.jsonl")
+    """The receipt number is max(existing NNNN in that dated/agent dir) + 1, so a prior run is never lost."""
     monkeypatch.chdir(tmp_path)
     seed_prompt(tmp_path)
+    freeze_run_day(monkeypatch)  # dated dir is 20990102
+    claude_dir = tmp_path / "scratchpad" / "runs" / "20990102" / "claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "0007.jsonl").write_text("{}\n", encoding="utf-8")  # prior run in this dated/agent dir
     monkeypatch.setattr(subprocess, "run", fake_agent({}))
     assert runner.invoke(cli.app, ["run", "claude", "2", "20", "False"]).exit_code == 0
-    assert (tmp_path / "scratchpad" / "runs" / "0008-claude.jsonl").exists()
+    assert (claude_dir / "0008.jsonl").exists()  # max(0007)+1
+    assert (claude_dir / "0007.jsonl").read_text(encoding="utf-8") == "{}\n"  # prior run untouched
 
 
 @pytest.mark.parametrize("args", [["claude", "0", "1"], ["claude", "1", "0"]])
@@ -578,7 +645,7 @@ def fake_popen(lines: list[str], code: int = 0) -> Callable[..., FakeProcess]:
 def test_run_worker_streams_and_logs_json_and_invalid_lines(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Verbose streaming writes the raw stdout to the log verbatim, JSON and non-JSON alike, and does
+    """Verbose streaming writes the raw stdout to the log, JSON and non-JSON alike, and does
     not crash on a non-JSON line. Terminal coloring is a human cosmetic, so it is not asserted here.
     """
     monkeypatch.setattr(cli.subprocess, "Popen", fake_popen(['{ "type" : "result" }\n', "not json\n"]))
@@ -588,21 +655,32 @@ def test_run_worker_streams_and_logs_json_and_invalid_lines(
     assert log.read_text(encoding="utf-8") == '{ "type" : "result" }\nnot json\n'
 
 
-def test_format_live_line_colorizes_in_process_without_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A styled console colorizes valid JSON in-process (ANSI present), spawning no subprocess per line."""
+def test_run_worker_compacts_valid_json_in_process_without_subprocess(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verbose streaming renders valid JSON in-process (no per-line subprocess) and logs the raw line
+    verbatim. Rich's coloring/spacing of the streamed copy is TTY-dependent, so it is not asserted;
+    only the tokens' presence (which survive any coloring) and the untouched log are checked.
+    """
     monkeypatch.setattr(cli.subprocess, "run", pytest.fail)  # any per-line subprocess fails the test
-    console = cli.Console(force_terminal=True, width=10**9)  # styled: emit ANSI
-    out = cli.format_live_line('{ "type" : "result" }\n', console)
-    assert "\x1b[" in out  # colored in-process
-    assert '"type"' in out  # still the compacted JSON content
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen(['{ "type" : "result" }\n']))
+    log = tmp_path / "out.jsonl"
+    assert cli.run_worker(["worker"], tmp_path, log, verbose=True) == 0
+    out = capsys.readouterr().out
+    assert '"type"' in out  # the JSON tokens reach the terminal (coloring, if any, wraps each one)
     assert '"result"' in out
+    assert log.read_text(encoding="utf-8") == '{ "type" : "result" }\n'  # raw stdout logged verbatim
 
 
-def test_format_live_line_passes_non_json_through_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A non-JSON line returns unchanged and never reaches the renderer or any subprocess."""
+def test_run_worker_passes_non_json_through_verbatim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-JSON streamed line is passed through unchanged and never crashes the renderer."""
     monkeypatch.setattr(cli.subprocess, "run", pytest.fail)
-    console = cli.Console(force_terminal=True)
-    assert cli.format_live_line("not json\n", console) == "not json\n"
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen(["not json\n"]))
+    log = tmp_path / "out.jsonl"
+    assert cli.run_worker(["worker"], tmp_path, log, verbose=True) == 0
+    assert "not json" in capsys.readouterr().out
 
 
 def test_run_accepts_positional_verbose_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -620,11 +698,12 @@ def test_run_accepts_python_verbose_false(monkeypatch: pytest.MonkeyPatch, tmp_p
     """Calling run(..., verbose=False) keeps output in the receipt only."""
     monkeypatch.chdir(tmp_path)
     seed_prompt(tmp_path)
+    freeze_run_day(monkeypatch)  # dated dir is 20990102
     captured: dict[str, list[list[str]]] = {}
     monkeypatch.setattr(subprocess, "run", fake_agent(captured))
     with pytest.raises(typer.Exit) as exit_info:
         cli.run("claude", 2, 20, verbose=False)
     assert exit_info.value.exit_code == 0
-    assert (tmp_path / "scratchpad" / "runs" / "0001-claude.jsonl").read_text(
+    assert (tmp_path / "scratchpad" / "runs" / "20990102" / "claude" / "0001.jsonl").read_text(
         encoding="utf-8"
     ) == '{"type":"result","result":"ok"}\n'

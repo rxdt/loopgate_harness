@@ -29,7 +29,6 @@ import keyword
 import string
 import sys
 from collections.abc import Callable
-from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -46,7 +45,6 @@ except ImportError:
     preferences_violations = None
 
 # Patterns in a deterministic order so hypothesis shrinks toward the first entry predictably.
-BANNED_PATTERNS = sorted(gate.FORBIDDEN_PATTERNS)
 IDENTIFIER_START = string.ascii_letters + "_"
 IDENTIFIER_REST = IDENTIFIER_START + string.digits
 
@@ -77,13 +75,13 @@ def scan_banned(diff: str, patterns: set[str] | None = None) -> list[str]:
 
     Args:
         diff: The `git diff --cached --unified=0` output the scan should read.
-        patterns: Optional override for gate.FORBIDDEN_PATTERNS (to inject a mixed-case entry).
+        patterns: Optional override for FORBIDDEN_PATTERNS (to inject a mixed-case entry).
 
     Returns:
         The problems list run_non_human_checks produced for that diff.
     """
 
-    def fake_git(_repo: Path, args: list[str]) -> str:
+    def fake_git(args: list[str]) -> str:
         if "--unified=0" in args:
             return diff
         if "--name-only" in args and "--diff-filter=ACMRD" in args:
@@ -97,7 +95,7 @@ def scan_banned(diff: str, patterns: set[str] | None = None) -> list[str]:
             gate, "FORBIDDEN_PATTERNS", gate.FORBIDDEN_PATTERNS if patterns is None else patterns
         ),
     ):
-        return gate.run_non_human_checks(Path("/unused"))
+        return gate.run_non_human_checks()
 
 
 @st.composite
@@ -110,7 +108,7 @@ def added_line_with_pattern(draw: st.DrawFn) -> tuple[str, str]:
     Returns:
         (pattern, diff_line) where diff_line is a '+' added line whose casefold contains the pattern.
     """
-    pattern = draw(st.sampled_from(BANNED_PATTERNS))
+    pattern = draw(st.sampled_from(gate.FORBIDDEN_PATTERNS))
     # Recase each alphabetic character independently; symbols (e.g. in '--no-verify') pass through.
     recased = "".join(
         draw(st.sampled_from([char.lower(), char.upper()])) if char.isalpha() else char for char in pattern
@@ -366,7 +364,7 @@ def reset_paths_for(staged: list[str]) -> list[str] | None:
     """
     reset_args: list[str] | None = None
 
-    def fake_git(_repo: Path, args: list[str]) -> str:
+    def fake_git(args: list[str]) -> str:
         nonlocal reset_args
         if args[:1] == ["reset"]:
             reset_args = args[args.index("--") + 1 :]
@@ -376,7 +374,7 @@ def reset_paths_for(staged: list[str]) -> list[str] | None:
         return ""
 
     with mock.patch.object(gate, "run_git", fake_git), mock.patch.object(gate, "prefs", None):
-        gate.run_non_human_checks(Path("/unused"))
+        gate.run_non_human_checks()
     return reset_args
 
 

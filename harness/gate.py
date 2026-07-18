@@ -1,7 +1,11 @@
 """1) Preflight pre-commit checks basic quality plus agent containment. `def run_preflight`
 
 2) Full gate on staged files.
-`def run_gate` mirrors what will run on Github.
+`def run_gate` mirrors what will run on Github (CI runs this same `harness gate`).
+
+All containment lists and check commands come from [tool.harness] in pyproject.toml, read once at
+import into the constants below. A check is a (name, argv) pair; its `preflight`/`blocking` flags sort
+it into the maps and sets this module runs on. Nothing is hardcoded here.
 """
 
 from __future__ import annotations
@@ -9,6 +13,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import typer
@@ -20,115 +25,35 @@ try:
 except ImportError:  # humans do what they want with preferences.py
     prefs = None
 
-# A staged file is forbidden if this is one of its parent dirs
-FORBIDDEN_DIRS = ("harness/", "tests/harness/", ".githooks/", ".github/")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
-FORBIDDEN_FILES = {
-    "agents.md",  # .casefold() for comparison to staged files
-    "pyproject.toml",
-    "docs/prompt.md",  # .casefold() for comparison to staged files
-    "docs/plan.md",  # delete or comment out if you want agents to manage the vision
-    "uv.lock",
-    # tooling/config files that would weaken checks in pyproject.toml
-    "pytest.ini",
-    "tox.ini",
-    "setup.cfg",
-    ".coveragerc",
-    "ruff.toml",
-    ".ruff.toml",
-    ".semgrepignore",
-    "pyrightconfig.json",
-    ".pylintrc",
-    ".gitmodules",
-}
-
-FORBIDDEN_PATTERNS = {
-    "# noqa",
-    "# flake8",
-    "type: ignore",
-    "type:ignore",
-    "no_type_check",
-    "pyright: ignore",
-    "from typing import any",
-    "from typing import cast",
-    "from typing import no_type_check",
-    "mypy: ignore",
-    "pragma: no cover",
-    "// eslint-disable",
-    "ts-ignore",
-    "ts-nocheck",
-    "ts-expect-error",
-    "--no-verify",
-    "hookspath",
-    "pytest.mark.skip",
-    "fail_under",
-    "cov-fail-under",
-    "# pylint:",
-    "pytest.mark.xfail",
-}  # already .casefold() for easier comparison
-
-# Tools run the way CI runs them.
-COMMIT_CHECKS = {
-    "ruff lint": ["uv", "run", "--no-cache", "--no-sync", "ruff", "check", "--show-fixes", "."],
-    "ruff format (no fail)": ["uv", "run", "--no-sync", "ruff", "format", "--check"],
-    "complexipy": [
-        "uv",
-        "run",
-        "--no-sync",
-        "complexipy",
-        ".",
-        "--no-ignore",
-        "--report-ignored",
-        "--suggest-refactors",
-        "--sort",
-        "file_name",
-    ],
-}
-FULL_CHECKS = COMMIT_CHECKS | {
-    "types": ["uv", "run", "--no-sync", "pyright", "--outputjson"],
-    "pylint": ["uv", "run", "--no-sync", "pylint", "src", "harness"],
-    "security": [
-        "uv",
-        "run",
-        "--no-sync",
-        "semgrep",
-        "scan",
-        "--error",  # exit nonzero on findings so run_checks blocks the commit, not just reports
-        "--config",
-        "auto",
-        "--config",
-        "p/secrets",
-        "--exclude-rule",
-        "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag",
-        ".",
-    ],
-    "pytest": [
-        "uv",
-        "run",
-        "--no-cache",
-        "--no-sync",
-        "pytest",
-        "--cov",
-        "--cov-report=term-missing",
-        "--cov-fail-under=100",
-    ],
-}
+raw_toml = tomllib.loads((REPO_ROOT / "pyproject.toml").read_bytes().decode())
+harness = raw_toml.get("tool", {}).get("harness", {})
+gate = harness.get("gate", {})
+AGENTS = harness.get("agents", {})
+COMMIT_CHECKS = harness.get("preflight", {})
+FULL_CHECKS = COMMIT_CHECKS | gate
+FORBIDDEN = harness.get("FORBIDDEN", {})
+FORBIDDEN_FILES = FORBIDDEN.get("FILES", [])
+FORBIDDEN_DIRS = tuple(FORBIDDEN.get("DIRS", []))
+FORBIDDEN_PATTERNS = FORBIDDEN.get("PATTERNS", [])
 
 
-def run_git(repo: Path, args: list[str]) -> str:
+def run_git(args: list[str], check: bool = True) -> str:
     """Run a git command in the repo and return its stdout.
 
-    Args:
-        repo: Repository root passed to git via -C.
-        args: Git subcommand and its arguments.
+        Args:
+            args: Git subcommand and its arguments.
+            check: If check is True and the exit code was non-zero, it raises a
+    CalledProcessError which has returncode attribute, and output attribute
 
-    Returns:
-        The command's raw stdout string (callers .splitlines() as needed).
+        Returns:
+            The command's raw stdout string (callers .splitlines() as needed).
     """
-    command = ["git", "-C", str(repo)]
+    command = ["git", "-C", str(REPO_ROOT)]
     command.extend(args)
     git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    result = subprocess.run(command, capture_output=True, text=True, check=True, env=git_env)
+    result = subprocess.run(command, capture_output=True, text=True, check=check, env=git_env)
     return result.stdout
 
 
@@ -147,49 +72,43 @@ def colorize(name: str, command: str) -> None:
         console.print(f"[dim italic]{command}[/dim italic]\n", justify="center")
 
 
-def run_checks(repo: Path, checks: dict[str, list[str]]) -> dict[str, list[str]]:
+def run_checks(checks: dict[str, list[str]]) -> dict[str, list[str]]:
     """Run each named command, streaming its output live under a phase header.
     Reports what each command did and leaves the verdict to the caller.
 
     Args:
-        repo: Working directory the checks run in.
         checks: Mapping of check name to the argv that runs it.
 
     Returns:
-        { "pass": [...], "fail": [ problems ] } bucketing each check name by exit code.
+        { "pass": [...], "warn": [...], "fail": [ problems ] } bucketing each check name by exit code.
         if anything is in "fail", a commit is not allowed
     """
     clean_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     if not os.environ.get("RALPH_LOOP"):
         clean_env.update({"FORCE_COLOR": "1", "CLICOLOR_FORCE": "1", "SEMGREP_FORCE_COLOR": "1"})
-    results: dict[str, list[str]] = {"pass": [], "fail": []}
+    results: dict[str, list[str]] = {"pass": [], "fail": [], "warn": []}
     for name, command in checks.items():
         colorize(name, " ".join(command))
         sys.stdout.flush()
-        with subprocess.Popen(command, cwd=repo, env=clean_env) as process:
+        with subprocess.Popen(command, cwd=REPO_ROOT, env=clean_env) as process:
             exit_code = process.wait()
-        key = "pass" if exit_code == 0 or "format" in name else "fail"
+        key = "warn" if "format" in name else ("pass" if exit_code == 0 else "fail")
         results[key].append(name)
     if os.environ.get("RALPH_LOOP"):
-        results["fail"].extend(run_non_human_checks(repo))
+        results["fail"].extend(run_non_human_checks())
 
     return results
 
 
-def run_non_human_checks(repo: Path) -> list[str]:
+def run_non_human_checks() -> list[str]:
     """Runs checks on non-humans only. Checks things that linters or other chekcs to do not check.
     Unstages files that should never be touched.
-
-    Args:
-        repo: Working directory the non-human is working in.
 
     Returns:
         list of problems not caught by lint, type-checking, testing
     """
     problems: list[str] = []
-    staged = run_git(
-        repo, ["diff", "--cached", "--name-only", "--no-renames", "--diff-filter=ACMRD"]
-    ).splitlines()
+    staged = run_git(["diff", "--cached", "--name-only", "--no-renames", "--diff-filter=ACMRD"]).splitlines()
     if not staged:
         colorize("EMPTY COMMIT", "nothing staged: do real work, do not commit empty")
         return problems  # yell, but don't block
@@ -199,20 +118,17 @@ def run_non_human_checks(repo: Path) -> list[str]:
         if path.casefold() in FORBIDDEN_FILES or path.casefold().startswith(FORBIDDEN_DIRS)
     ]
     if forbidden:
-        run_git(repo, ["reset", "-q", "HEAD", "--", *forbidden])
+        run_git(["reset", "-q", "HEAD", "--", *forbidden])
         colorize("EJECTED", f"kept forbidden paths out of the commit: {', '.join(forbidden)}")
-    problems.extend(check_for_bad_patterns(repo))
+    problems.extend(check_for_bad_patterns())
     return problems
 
 
-def check_for_bad_patterns(repo: Path) -> list[str]:
+def check_for_bad_patterns() -> list[str]:
     """Check staged files for banned patterns and user-preference breaks (agent-in-loop containment).
     Does not unstage anything. Later, if any problem lands in { "fail": ... } the commit is blocked.
 
     Banned patterns are flagged only on ADDED diff lines (a '+' line, never a '+++' header).
-
-    Args:
-        repo: Working directory the non-human is working in.
 
     Returns:
         The banned-pattern hits plus any preference violations found in the staged files.
@@ -220,7 +136,7 @@ def check_for_bad_patterns(repo: Path) -> list[str]:
     # Scan every staged file type (code, config, shell — the real bypass surface) except .md prose,
     # where a legitimate 'noqa' / 'type: ignore' quoted in docs is a false positive, not a bypass.
     diff_args = ["diff", "--cached", "--unified=0", "--", ".", ":(exclude)*.md"]
-    staged_lines = run_git(repo, diff_args).splitlines()
+    staged_lines = run_git(diff_args).splitlines()
     colorize("BANNED PATTERNS CHECK", "checking for banned patterns in staged files")
     problems = [
         f"'{pattern}' line: {line[1:].strip()}"
@@ -228,38 +144,62 @@ def check_for_bad_patterns(repo: Path) -> list[str]:
         for pattern in FORBIDDEN_PATTERNS
         if line.startswith("+") and not line.startswith("+++") and pattern.casefold() in line.casefold()
     ]
-    staged_python = run_git(
-        repo, ["diff", "--cached", "--name-only", "--diff-filter=d", "--", "*.py"]
-    ).splitlines()
+    staged_python = run_git(["diff", "--cached", "--name-only", "--diff-filter=d", "--", "*.py"]).splitlines()
     if not (staged_python and prefs):
         return problems
     colorize("USER PREFERENCES", "checking that user's preferences.py are respected")
-    violations = (prefs(path, run_git(repo, ["show", f":{path}"])) for path in staged_python)
+    violations = (prefs(path, run_git(["show", f":{path}"])) for path in staged_python)
     problems.extend(filter(None, violations))
     return problems
 
 
-def run_preflight(repo: Path) -> dict[str, list[str]]:
+def run_preflight() -> dict[str, list[str]]:
     """Pre-commit: lint (blocking) plus an informational format report. For agents in the loop also unstages
     forbidden filepaths and flags banned patterns + human-preferences not honored.
 
-    Args:
-        repo: Repository root to inspect and run checks against.
-
     Returns:
-        The COMMIT_CHECKS result with any containment problems appended to "fail" list.
+        The commit-checks result with any containment problems appended to "fail" list.
     """
-    return run_checks(repo, COMMIT_CHECKS)
+    return run_checks(COMMIT_CHECKS)
 
 
-def run_gate(repo: Path) -> dict[str, list[str]]:
+def run_gate() -> dict[str, list[str]]:
     """Pre-push / CI: lint, types, pylint, security, pytest/hypothesis (blocking), complexipy, plus an
     informational format report.
 
+    Returns:
+        The full-checks result bucketing each check name into "pass"/"fail" lists.
+    """
+    return run_checks(FULL_CHECKS)
+
+
+def prepare_commit_msg(argv: list[str]) -> int:
+    """Logic for the git prepare-commit-msg hook applicable to agents in the loop.
+
     Args:
-        repo: Repository root to run the full check suite against.
+        argv: arguments used to invoke `git commit`
 
     Returns:
-        The FULL_CHECKS result bucketing each check name into "pass"/"fail" lists.
+        Status code integer 0 or 1 (git blocks commit on code 1)
     """
-    return run_checks(repo, FULL_CHECKS)
+    if os.environ.get("RALPH_LOOP") != "1":
+        return 0
+    commit_msg_file: str = argv[1] if len(argv) > 1 else ""
+    command = argv[2] if len(argv) > 2 else ""
+    msg = ""
+    # Determine if HEAD points to valid commit, check=False to prevent fatal Python runtime crash
+    empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # universal empty tree hash
+    ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else empty_tree
+    if command in {"merge", "squash", "rebase", "reset", "clean", "filter-branch"}:
+        msg = f"You cannot use that git command `{command}`.\n"
+    if not run_git(["diff-index", "--cached", "--name-only", f"{ref}"]):
+        msg += "Empty-tree commit detected. Stage real work and don't use --allow-empty. Lazy.\n"
+    if Path(commit_msg_file).exists():
+        content = Path(commit_msg_file).read_text(encoding="utf-8")
+        actual_text = "\n".join([line for line in content.splitlines() if not line.startswith("#")]).strip()
+        if not actual_text:
+            msg += "Commit message is blank. Provide an informative message with your agent ID.\n"
+    if msg:
+        sys.stdout.write(f"\n[COMMIT BLOCKED]:\n{msg}\n")
+        return 1  # Intercepts git
+    return 0

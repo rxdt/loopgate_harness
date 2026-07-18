@@ -158,7 +158,7 @@ def test_gtimeout_is_preferred(tmp_path: Path) -> None:
     assert (tmp_path / "used-timeout").read_text(encoding="utf-8") == "gtimeout\n"
 
 
-def test_worker_args_pass_through_verbatim_without_substitution(tmp_path: Path) -> None:
+def test_worker_args_pass_through_without_substitution(tmp_path: Path) -> None:
     """Ralph does no token substitution: worker args (e.g. a literal {{PROMPT}}) reach the worker
     byte-for-byte. The prompt is delivered only on stdin, never injected into argv.
     """

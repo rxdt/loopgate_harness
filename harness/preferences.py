@@ -141,7 +141,7 @@ def hidden_signature_star_args(node: ast.AST) -> str | None:
         A short message if the function uses *args or **kwargs, otherwise None.
     """
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and (node.args.vararg or node.args.kwarg):
-        return "'*args'/'**kwargs' hide the function signature; use explicit parameters"
+        return "'*args'/'**kwargs' hide the function signature, use explicit parameters"
     return None
 
 

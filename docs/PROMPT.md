@@ -33,5 +33,5 @@ One sentence summary
 <your-agent-id>-<spec-you-worked>-<RALPH_ITERATION>
 ```
 
-Use the agent id the harness gave you verbatim (e.g. `0002-codex`); append the spec you worked and the
+Use the agent id the harness gave you (e.g. `0002-codex`); append the spec you worked and the
 `RALPH_ITERATION` value. This makes commits traceable to their run log (`scratchpad/runs/<id>.jsonl`).

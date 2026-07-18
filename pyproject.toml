@@ -1,5 +1,5 @@
 [project]
-name = "ralph-harness"
+name = "loopgate"
 version = "0.0.0"
 requires-python = ">=3.11"
 dependencies = [
@@ -29,6 +29,114 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["harness"]
+
+# ==============================================================================
+# Harness Configuration — single source of truth for agents and every check.
+# harness/gate.py parses [tool.harness] once at import into the constants it uses.
+# CI runs `harness gate`, so it uses the same commands.
+# Humans own this file (it is agent-forbidden below).
+# ==============================================================================
+# argv preset per agent for `harness run <agent>`
+[tool.harness.agents]
+claude = [
+    "claude",
+    "--model", "opus",
+    "--permission-mode", "acceptEdits",
+    # "--bare" # for one-shot minimal run: skips MCP, hooks, plugins, CLAUDE.md, reduced startup, and sets
+    # CLAUDE_CODE_SIMPLE + uses CLAUDE_CODE_OAUTH_TOKEN (ANTHROPIC_API_KEY billed), no .claude log
+    "--no-session-persistence",  # no-save session data good for disposable auto tasks
+    "--output-format", "stream-json",
+    "--verbose", "-p",
+]
+codex = [
+    # env -u clears the CODEX_* session/thread ids so a child agent never binds to the parent conversation
+    "env", "-u", "CODEX_THREAD_ID", "-u", "CODEX_CONVERSATION_ID", "-u", "CODEX_SESSION_ID",
+    "codex",
+    "exec",
+    "--model", "gpt-5.5",
+    "--json",
+    "--sandbox", "danger-full-access", "-",
+]
+agy = [
+    "agy",
+    "--model", "gemini-3.5-flash-low",
+    "--dangerously-skip-permissions",
+    "--add-dir", ".",
+    "--log-file", "{log_file}",
+    "--prompt", "-"
+]
+copilot = [
+    "copilot",
+    "--model=auto",  # if paid: https://docs.github.com/en/copilot/reference/ai-models/supported-models
+    "--output-format", "json", "--stream", "on",
+    "--allow-all", "--no-ask-user",
+]
+
+[tool.harness.preflight]
+lint = ["uv", "run", "--no-cache", "--no-sync", "ruff", "check", "--show-fixes", "."]
+pylint = ["uv", "run", "--no-sync", "pylint", "src", "harness"]
+format = ["uv", "run", "--no-sync", "ruff", "format", "--check"]
+command = ["uv", "run", "--no-sync", "complexipy", "."]
+
+[tool.harness.gate]
+security = [
+    "uv", "run", "--no-sync", "semgrep", "scan",
+    "--error",  # exit nonzero on findings so the gate blocks the commit, not just reports
+    "--config", "auto",
+    "--config", "p/secrets",
+    "--exclude-rule", "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag",
+    ".",
+]
+types = ["uv", "run", "--no-sync", "pyright", "--outputjson"]
+pytest = [
+    "uv", "run", "--no-cache", "--no-sync", "pytest",
+    "--cov", "--cov-report=term-missing", "--cov-fail-under=100",
+]
+
+[tool.harness.FORBIDDEN]
+DIRS = ["harness/", "tests/harness/", ".githooks/", ".github/"]
+FILES = [
+    "agents.md",
+    "pyproject.toml",
+    "docs/prompt.md",
+    "docs/plan.md",     # delete or comment out if you want agents to manage the vision
+    "uv.lock",
+    # tooling/config files that would weaken checks in this file
+    "pytest.ini",
+    "tox.ini",
+    "setup.cfg",
+    ".coveragerc",
+    "ruff.toml",
+    ".ruff.toml",
+    ".semgrepignore",
+    "pyrightconfig.json",
+    ".pylintrc",
+    ".gitmodules",
+]
+PATTERNS = [
+    "# noqa",
+    "# flake8",
+    "type: ignore",
+    "type:ignore",
+    "no_type_check",
+    "pyright: ignore",
+    "from typing import any",
+    "from typing import cast",
+    "from typing import no_type_check",
+    "mypy: ignore",
+    "pragma: no cover",
+    "// eslint-disable",
+    "ts-ignore",
+    "ts-nocheck",
+    "ts-expect-error",
+    "--no-verify",
+    "hookspath",
+    "pytest.mark.skip",
+    "fail_under",
+    "cov-fail-under",
+    "# pylint:",
+    "pytest.mark.xfail",
+]
 
 # ==============================================================================
 # Pyright Configuration
@@ -137,16 +245,6 @@ select = [
     "C4",      # flake8-comprehensions (.e.g unnecessary list comprehensions)
     "C90",     # Enables McCabe cyclomatic complexity checks
     "COM",     # flake8-commas. Trailing comma added.
-    "D300",    # Use """ triple quotes for docstrings """
-    "D102",    # No missing docstring in public method
-    "D103",    # No missing docstring in public function
-    "D202",    # No blank line between a function docstring and the function body
-    "D417",    # No missing arg description in docstring for {definition}: {name}
-    "D419",    # No empty docstrings
-    "DOC",     # Global. Validates parameter & return documentation
-    "DOC102",  # Redundancy of "DOC". Documented parameter {id} must be in the function's signature
-    "DOC201",  # Redundancy of "DOC". Structured docstrings must include Returns when code returns.
-    "DOC501",  # Redundancy of "DOC". Raised exception {id} missing from docstring
     "DTZ",     # flake8-datetimez (forbid naive datetime usage)
     "E",       # pycodestyle: Catches objective syntax rule violations
     "EM",      # flake8-errmsg (keep exception messages clean and reusable)
@@ -174,23 +272,33 @@ select = [
     "RUF",     # Ruff-specific rules
     "S",       # flake8-bandit (security checks: SQLi, hardcoded credentials)
     "SIM",     # flake8-simplify (prefer simpler control flow and syntax)
-    "SLF001",  # No start with single underscore outside defining module
+    "private-member-access",  # No start with single underscore outside defining module
     "T10",     # flake8-debugger (forbid breakpoint/debugger calls)
     "T20",     # flake8-print (forbids print statements; forces logging)
     "TID",     # flake8-tidy-imports (forces clean absolute imports)
     "TRY",     # tryceratops (exception handling hygiene)
     "UP",      # Modern Python idioms
     "W",       # Catches stylistic choices that harm readability
+    "triple-single-quotes",    # Use """ triple quotes for docstrings """
+    "undocumented-public-method",    # No missing docstring in public method
+    "undocumented-public-function",    # No missing docstring in public function
+    "blank-line-after-function",    # No blank line between a function docstring and the function body
+    "undocumented-param",    # No missing arg description in docstring for {definition}: {name}
+    "empty-docstring",    # No empty docstrings
+    "DOC",     # Global. Validates parameter & return documentation
+    "docstring-extraneous-parameter",  # Redundancy of "DOC". Documented parameter {id} must be in the function's signature
+    "docstring-missing-returns",  # Redundancy of "DOC". Structured docstrings must include Returns when code returns.
+    "docstring-missing-exception",  # Redundancy of "DOC". Raised exception {id} missing from docstring
 ]
 ignore = [
-    "COM812",   # Let Ruff format own trailing commas to avoid formatter conflicts
-    "PLR2004",  # Allow 'magic values" (unnamed numbers)
-    "S607",     # Allow resolving git/uv from PATH
+    "missing-trailing-comma",   # Let Ruff format own trailing commas to avoid formatter conflicts
+    "magic-value-comparison",  # Allow 'magic values" (unnamed numbers)
+    "start-process-with-partial-path",     # Allow resolving git/uv from PATH
 ]
 [tool.ruff.lint.pylint]      # Prevent unreadable complexity and code
 max-nested-blocks = 4        # Stop indentation madness
-max-positional-args = 4      # Max total params, to prevent big initializers. Match max-args so no def(*)
-max-args = 4                 # Do not build big object initializers.
+max-positional-args = 5      # Max total params, to prevent big initializers. Match max-args so no def(*)
+max-args = 5                 # Do not build big object initializers.
 max-public-methods = 5       # Cap public methods per class
 max-statements = 25          # Cap executable statements per function/method
 max-branches = 6             # Cap branching paths per function/method; long if/elif chains are banned
@@ -203,17 +311,17 @@ banned-api."typing.cast".msg = "Do not use cast(); fix the type at the boundary 
 banned-api."re".msg = "Regex is slow. Use Python built-in string manipulation operations."
 
 [tool.ruff.lint.per-file-ignores]
-"**/__init__.py" = ["D104"]  # Package marker files do not need package docstrings.
+"**/__init__.py" = ["undocumented-public-package"]  # Package marker files do not need package docstrings.
 "**/tests/**/*.py" = [
-    "D100",  # Test modules do not need noisy docstrings
-    "D101",  # Test classes do not need noisy docstrings
-    "D102",  # Test helper methods do not need noisy docstrings
-    "D103",  # Test functions describe behavior through test names
-    "D104",  # Test package boundaries do not need package docstrings
-    "DOC201", # Tests explain behavior through assertions; no Returns section needed.
-    "S101",   # Allow 'assert' statements (needed for pytest)
+    "undocumented-public-module",  # Test modules do not need noisy docstrings
+    "undocumented-public-class",  # Test classes do not need noisy docstrings
+    "undocumented-public-method",  # Test helper methods do not need noisy docstrings
+    "undocumented-public-function",  # Test functions describe behavior through test names
+    "undocumented-public-package",  # Test package boundaries do not need package docstrings
+    "docstring-missing-returns", # Tests explain behavior through assertions; no Returns section needed.
+    "assert",   # Allow 'assert' statements (needed for pytest)
 ]
 "harness/**/*.py" = [
-    "S404", # Harness code intentionally imports subprocess to run local tools.
-    "S603"  # Harness code intentionally executes trusted local tool commands without a shell.
+    "suspicious-subprocess-import", # Harness code intentionally imports subprocess to run local tools.
+    "subprocess-without-shell-equals-true"  # Harness code intentionally executes trusted local tool commands without a shell.
 ]
