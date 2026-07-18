@@ -58,6 +58,16 @@ Changes to the [`harness/`](harness) itself should preserve the core contract: *
 
 ## Checks
 
+### Where tests live
+
+The harness's own tests live in [`harness/tests/`](harness/tests), including the Hypothesis property tests in [`test_properties.py`](harness/tests/test_properties.py).
+
+The full suite runs as part of `harness gate` (at 100% coverage). To run only the harness tests while iterating:
+
+```sh
+uv run pytest harness/tests
+```
+
 Fast check while working [`harness/gate.py line 164`](harness/gate.py#L164)
 
 ```sh
