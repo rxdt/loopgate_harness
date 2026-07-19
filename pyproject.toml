@@ -28,7 +28,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["harness"]
+packages = ["harness", "src/preferences"]  # src/ prefix stripped, so it imports as `preferences`
+exclude = ["harness/tests"]                # machinery tests don't ship; preferences/tests do
 
 # ==============================================================================
 # Harness Configuration — single source of truth for agents and every check.
@@ -72,6 +73,23 @@ copilot = [
     "--allow-all", "--no-ask-user",
 ]
 
+[tool.harness]
+languages = ["py"]
+
+# EXAMPLE OF WHAT Javascript checks might be
+#
+# [tool.harness.preflight]
+# checks = ["npm", "--prefix", "harness/js-scaffold", "run", "preflight"]
+# [tool.harness.gate]
+# checks = ["npm", "--prefix", "harness/js-scaffold", "run", "gate"]
+#
+# EXAMPLE OF WHAT Ruby checks might be
+#
+# [tool.harness.rb.preflight]
+# checks = ["bundle", "exec", "rubocop"]
+# [tool.harness.rb.gate]
+# checks = ["bundle", "exec", "rspec"]
+
 [tool.harness.preflight]
 lint = ["uv", "run", "--no-cache", "--no-sync", "ruff", "check", "--show-fixes", "."]
 pylint = ["uv", "run", "--no-sync", "pylint", "src", "harness"]
@@ -94,7 +112,7 @@ pytest = [
 ]
 
 [tool.harness.FORBIDDEN]
-DIRS = ["harness/", "tests/harness/", ".githooks/", ".github/"]
+DIRS = ["harness/", "tests/harness/", ".githooks/", ".github/", "src/preferences/"]
 FILES = [
     "agents.md",
     "pyproject.toml",
@@ -155,7 +173,7 @@ include = ["src", "harness"]            # Type-check only code shipped by this t
 [tool.pytest.ini_options]
 minversion = "9.0"
 addopts = ["-ra"]                       # print useful short reasons for outcomes
-testpaths = ["tests", "harness/tests"]
+testpaths = ["tests", "harness/tests", "src/preferences/tests"]
 pythonpath = ["src", "harness"]
 
 # ==============================================================================
@@ -196,6 +214,7 @@ main.ignore = [
     "dist",
     "scratchpad",
     "tests",
+    "**/tests/**",
     "harness/tests"
 ]
 format.max-line-length = 110         # Keep Pylint line accounting aligned with Ruff E501
@@ -272,13 +291,13 @@ select = [
     "RUF",     # Ruff-specific rules
     "S",       # flake8-bandit (security checks: SQLi, hardcoded credentials)
     "SIM",     # flake8-simplify (prefer simpler control flow and syntax)
-    "private-member-access",  # No start with single underscore outside defining module
     "T10",     # flake8-debugger (forbid breakpoint/debugger calls)
     "T20",     # flake8-print (forbids print statements; forces logging)
     "TID",     # flake8-tidy-imports (forces clean absolute imports)
     "TRY",     # tryceratops (exception handling hygiene)
     "UP",      # Modern Python idioms
     "W",       # Catches stylistic choices that harm readability
+    "private-member-access",  # No start with single underscore outside defining module
     "triple-single-quotes",    # Use """ triple quotes for docstrings """
     "undocumented-public-method",    # No missing docstring in public method
     "undocumented-public-function",    # No missing docstring in public function

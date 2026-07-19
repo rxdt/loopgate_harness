@@ -21,7 +21,7 @@ from rich.console import Console
 
 console = Console(force_terminal=True)
 try:
-    from harness.preferences import preferences_violations as prefs
+    from preferences.preferences import preferences_violations as prefs
 except ImportError:  # humans do what they want with preferences.py
     prefs = None
 
@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 raw_toml = tomllib.loads((REPO_ROOT / "pyproject.toml").read_bytes().decode())
 harness = raw_toml.get("tool", {}).get("harness", {})
+languages = harness.get("languages", {})
 gate = harness.get("gate", {})
 AGENTS = harness.get("agents", {})
 COMMIT_CHECKS = harness.get("preflight", {})
@@ -133,8 +134,6 @@ def check_for_bad_patterns() -> list[str]:
     Returns:
         The banned-pattern hits plus any preference violations found in the staged files.
     """
-    # Scan every staged file type (code, config, shell — the real bypass surface) except .md prose,
-    # where a legitimate 'noqa' / 'type: ignore' quoted in docs is a false positive, not a bypass.
     diff_args = ["diff", "--cached", "--unified=0", "--", ".", ":(exclude)*.md"]
     staged_lines = run_git(diff_args).splitlines()
     colorize("BANNED PATTERNS CHECK", "checking for banned patterns in staged files")
@@ -144,13 +143,23 @@ def check_for_bad_patterns() -> list[str]:
         for pattern in FORBIDDEN_PATTERNS
         if line.startswith("+") and not line.startswith("+++") and pattern.casefold() in line.casefold()
     ]
-    staged_python = run_git(["diff", "--cached", "--name-only", "--diff-filter=d", "--", "*.py"]).splitlines()
-    if not (staged_python and prefs):
-        return problems
-    colorize("USER PREFERENCES", "checking that user's preferences.py are respected")
-    violations = (prefs(path, run_git(["show", f":{path}"])) for path in staged_python)
-    problems.extend(filter(None, violations))
+    problems.extend(filter(None, check_for_preferences()))
     return problems
+
+
+def check_for_preferences() -> list[str]:
+    """Checks user preferences honored. Currently only a preferences.py file exists. New languages should add
+    their own.
+
+    Returns:
+        The banned-pattern hits plus any preference violations found in the staged files.
+    """
+    if "py" in languages:
+        staged = run_git(["diff", "--cached", "--name-only", "--diff-filter=d", "--", "*.py"]).splitlines()
+        if staged and prefs:
+            colorize("USER PREFERENCES", "checking that user's preferences are respected")
+            return [prefs(path, run_git(["show", f":{path}"])) for path in staged]
+    return []
 
 
 def run_preflight() -> dict[str, list[str]]:
@@ -187,7 +196,6 @@ def prepare_commit_msg(argv: list[str]) -> int:
     commit_msg_file: str = argv[1] if len(argv) > 1 else ""
     command = argv[2] if len(argv) > 2 else ""
     msg = ""
-    # Determine if HEAD points to valid commit, check=False to prevent fatal Python runtime crash
     empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # universal empty tree hash
     ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else empty_tree
     if command in {"merge", "squash", "rebase", "reset", "clean", "filter-branch"}:

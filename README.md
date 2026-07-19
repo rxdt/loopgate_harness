@@ -65,7 +65,7 @@
 3. Optionally add the first spec in `docs/specs/`, or have an agent draft the first specs.
 4. Put product code under `src/` and list new source directories in `pyproject.toml [tool.coverage.run]`.
 5. Strict Ruff rules, type checking, pyright, complexipy, and pytest coverage are set in `pyproject.toml`.
-6. Your coding quirks go in `harness/preferences.py`.
+6. Your coding quirks go in [`src/preferences/preferences.py`](src/preferences/preferences.py).
 7. Run a loop:
 
 ```sh
@@ -115,7 +115,6 @@ Only humans can bypass triggered gates and commit by adding flag `--no-verify`.
 
 ```
 harness/        the gate, loop runner, CLI, custom user checks       (🤖 forbidden)
-  preferences.py  user-defined preferences not covered by tools      (🤖 forbidden)
   gate.py         mirror the CI locally + preferences.py honored     (🤖 forbidden)
   tests/          the harness's own tests                            (🤖 forbidden)
     test_properties.py  hypothesis tests                             (🤖 forbidden)
@@ -128,6 +127,8 @@ docs/           PLAN, PROJECT_STATUS, PROMPT                          (human mai
 scratchpad/     scratch dir agents can use for temp files            (For the 🤖 to play)
 docs/specs/     WHAT to build, one PRIORITY-bannered file per track
 src/            your product/source code (add to coverage source)
+  preferences/
+    preferences.py  user-defined preferences not covered by tools    (🤖 forbidden)
 ```
 
 If an agent edits a forbidden file, the file will be unstaged (not allowed to commit). A forbidden pattern by an agent (e.g. `# noqa` will also prevent their commit and force them to fix it.)
@@ -189,8 +190,8 @@ harness run copilot 2 20
 - Add forbidden files, directories, or patterns in `[tool.harness.gate]` at [pyproject.toml](pyproject.toml)
 - Add Hypothesis tests in any test directory, examples at [test_properties.py](harness/tests/test_properties.py)
 - [semgrep](https://docs.semgrep.dev/semgrep-ci/sample-ci-configs) has no repo config here. It uses registry configs plus Semgrep's built-in defaults which ignore tests.
-- Edit checks in `[tool.harness.gate.checks]` at [pyproject.toml](pyproject.toml) — [ci.yml](.github/workflows/ci.yml) runs the same `harness gate`, so there is nothing to keep in sync
-- Removing existing preferences or add your own preferences at [preferences.py](harness/preferences.py). Current preferences:
+- Edit `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). [ci.yml](.github/workflows/ci.yml) runs the same `harness gate`.
+- Removing existing preferences or add your own preferences at [preferences.py](src/preferences/preferences.py). Current preferences:
 
 ```py
 function_argument_assignment_has_star  # agents use non-specific `def fun(*)`
@@ -213,9 +214,22 @@ complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefe
 
 ### FAQ </summary>
 
-**What is the difference between a gate and a sandbox?**
+- **What is the difference between a gate and a sandbox?**
 
 A **gate** is a workflow checkpoint that evaluates code and decides whether it is allowed to land in your commits. A **sandbox** is an isolated OS-level environment designed to prevent code from modifying your underlying machine. LoopGate uses gates to control your git history, but it does _not_ provide a secure OS sandbox.
+
+- **What if I don't want to build an app in Python?**
+
+You don’t have to. The loop runner, Ralph, and the CLI take a prompt, launch agents pointed at markdown files. LoopGate is language-agnostic at the agent-loop level, but the template is configured to be Python-specific at [pyproject.toml](pyproject.toml). Add your language and commands for your checks to run there.
+
+- **Javascript?**
+
+The included [`harness/js-scaffold`](harness/js-scaffold/package.json) is a simple JavaScript **example** to expand on. Go to [pyproject.toml line 75](pyproject.toml#L75). Update checks. Put `js` into list `[tool.harness].languages`. Remove `py` if unused.
+
+```
+npm run --prefix harness/js-scaffold gate
+npm run --prefix harness/js-scaffold preflight
+```
 
 </details>
 

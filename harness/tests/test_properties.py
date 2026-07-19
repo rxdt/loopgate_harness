@@ -40,7 +40,7 @@ from harness import gate
 # preferences.py is optional. Gate tests in this file should still run when it is absent.
 preferences_violations: Callable[[str, str], str] | None
 try:
-    from harness.preferences import preferences_violations
+    from preferences.preferences import preferences_violations
 except ImportError:
     preferences_violations = None
 
@@ -171,7 +171,7 @@ def test_module_tolerates_absent_preferences_on_import() -> None:
     """
     module = sys.modules[__name__]
     try:
-        with mock.patch.dict(sys.modules, {"harness.preferences": None}):
+        with mock.patch.dict(sys.modules, {"preferences.preferences": None}):
             reloaded = importlib.reload(module)
             assert reloaded.preferences_violations is None
     finally:

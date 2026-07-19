@@ -31,9 +31,10 @@ uv run harness install loopgate  # for first time use. After: `harness install l
 Humans edit
 
 - `pyproject.toml`: Python and tool configuration.
-- `harness/`: CLI, gate, loop runner, preferences, and harness tests. Wraps the loop that starts agents.
+- `harness/`: CLI, gate, loop runner, and harness tests. Wraps the loop that starts agents.
+- `src/preferences` can contain user-specific preferences. A live Python example is already there.
 - `docs/PROMPT.md`: tells agents how to operate headless in the repo (mechanics)
-- [A javascript example](harness/js-scaffold) lives in its own directory within [harness](harness) and can be expanded upon.
+- [A javascript example](harness/js-scaffold) lives in its own directory within [`harness/`](harness) and can be expanded on.
 
 Humans set, agents update
 

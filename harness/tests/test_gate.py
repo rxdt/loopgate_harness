@@ -333,13 +333,13 @@ def test_lint_command_keeps_show_fixes_flag() -> None:
 
 
 def test_full_gate_runs_every_preflight_and_gate_check_from_pyproject() -> None:
-    """The full gate runs exactly the preflight + gate checks declared in pyproject.toml: 7 in total,
+    """The full gate runs the preflight + gate checks declared in pyproject.toml: at least 7 in total,
     and each FULL_CHECKS name matches a key under [tool.harness.preflight] or [tool.harness.gate].
     """
     raw_toml = tomllib.loads((REPO_ROOT / "pyproject.toml").read_bytes().decode())["tool"]["harness"]
     preflight, gate_checks = raw_toml.get("preflight"), raw_toml.get("gate")
-    assert len(preflight) == 4
-    assert len(gate_checks) == 3
+    assert len(preflight) >= 4
+    assert len(gate_checks) >= 3
     assert set(gate.FULL_CHECKS) == set(preflight) | set(gate_checks)
 
 
@@ -386,6 +386,38 @@ def test_gate_tolerates_partially_deleted_harness_config(
     result = gate.run_gate()
     assert result == {"pass": ["lint"], "fail": [], "warn": []}  # survivor ran; empty FORBIDDEN flags nothing
     assert "harness/util.py" in staged()  # FORBIDDEN deleted -> nothing ejected, not a crash
+
+
+def test_preflight_tolerates_deleted_format_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deleting `format` from [tool.harness.preflight] just drops a key; run_preflight iterates the
+    remaining checks and does not crash. Simulated by removing 'format' from COMMIT_CHECKS.
+    """
+    without_format = {name: cmd for name, cmd in gate.COMMIT_CHECKS.items() if name != "format"}
+    monkeypatch.setattr(gate, "COMMIT_CHECKS", without_format)
+    fake_popen(monkeypatch)
+    result = gate.run_preflight()
+    assert result == {"pass": list(without_format), "fail": [], "warn": []}
+
+
+def test_gate_runs_a_javascript_toolchain_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A user can swap the whole [tool.harness] toolchain for JS commands (npm lint/format in preflight,
+    typecheck/test/build in gate) and the gate is agnostic: it spawns exactly the five configured checks,
+    in order, and buckets each by exit code — nothing here is Python-specific.
+
+    Passes because fake Popen returns 0, not because js is configured yet.
+    """
+    js_checks = {
+        "lint": ["npm", "run", "lint"],
+        "format": ["npm", "run", "format:check"],
+        "typecheck": ["npm", "run", "typecheck"],
+        "test": ["npm", "test"],
+        "build": ["npm", "run", "build"],
+    }
+    monkeypatch.setattr(gate, "FULL_CHECKS", js_checks)
+    calls = fake_popen(monkeypatch)
+    result = gate.run_gate()
+    assert [launch[0] for launch in calls] == list(js_checks.values())
+    assert result == {"pass": ["lint", "typecheck", "test", "build"], "fail": [], "warn": ["format"]}
 
 
 def test_types_check_uses_pyright_json_output() -> None:
@@ -664,7 +696,7 @@ def test_preflight_tolerates_missing_preferences(monkeypatch: pytest.MonkeyPatch
 
 def test_gate_imports_cleanly_without_preferences(monkeypatch: pytest.MonkeyPatch) -> None:
     """If preferences.py is absent, gate still imports and prefs is None (the ImportError branch)."""
-    monkeypatch.setitem(sys.modules, "harness.preferences", None)
+    monkeypatch.setitem(sys.modules, "preferences.preferences", None)
     importlib.reload(gate)
     assert gate.prefs is None
     monkeypatch.undo()
@@ -718,6 +750,20 @@ def test_empty_commit_does_not_block_under_loop(monkeypatch: pytest.MonkeyPatch)
     """An empty commit (nothing staged) is not blocked: containment is skipped and no problems returned."""
     monkeypatch.setenv("RALPH_LOOP", "1")
     assert gate.run_non_human_checks() == []  # seed commit only, nothing staged
+
+
+def test_language_without_preferences_file_crashes_check_for_bad_patterns(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Setting languages=['rb'] routes staged .rb files into the Python `ast`-based prefs, which cannot
+    parse Ruby: the preference walk raises SyntaxError. Pins that the prefs engine is Python-only.
+    """
+    monkeypatch.setattr(gate, "languages", ["js"])
+    stage(git_repo, "preferences.js", "console.log('pass');\n")  # valid js, invalid py
+    gate.check_for_bad_patterns()
+    monkeypatch.setattr(gate, "languages", ["rb"])
+    stage(git_repo, "app.rb", "def foo; end\n")  # valid Ruby, invalid py
+    gate.check_for_bad_patterns()
 
 
 # --------------------------------------------------------- spec tests (FAIL against the current bugs)

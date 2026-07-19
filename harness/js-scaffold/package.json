@@ -1,8 +1,16 @@
 {
-    "name": "js-scaffold" ,
-    "type": "module" ,
-    "scripts": {
-        "test": "node --test test.js"
-    }
-
+	"name": "js-scaffold",
+	"type": "module",
+	"scripts": {
+		"test": "node --test",
+		"lint": "npx @biomejs/biome check .",
+		"format": "npx @biomejs/biome check --write .",
+		"security": "semgrep scan --error --config auto --config p/secrets --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag ../..",
+		"coverage": "node --test --experimental-test-coverage",
+		"preflight": "npm run lint && npm run format",
+		"gate": "npm run coverage && npm run security"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "latest"
+	}
 }

@@ -14,7 +14,7 @@ import inspect
 import pytest
 
 # preferences.py is optional — humans may delete it; skip its tests when it is gone.
-preferences = pytest.importorskip("harness.preferences")
+preferences = pytest.importorskip("preferences.preferences")
 preferences_violations = preferences.preferences_violations
 CHECKS = preferences.CHECKS
 
