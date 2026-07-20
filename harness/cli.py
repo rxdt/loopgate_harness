@@ -29,6 +29,7 @@ app = typer.Typer(
     add_completion=False,
     rich_markup_mode="rich",
 )
+console = Console(force_terminal=True, stderr=True)
 
 
 def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
@@ -38,7 +39,7 @@ def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
 
     Args:
         command: The worker argv to execute.
-        cwd: Working directory for the subprocess.
+        cwd: Working directory for the worker subprocess.
         log: File path that always receives the raw stdout.
         verbose: When True, also stream compacted output live to the terminal.
 
@@ -48,7 +49,6 @@ def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
     with log.open("w", encoding="utf-8") as handle:
         if not verbose:
             return subprocess.run(command, cwd=str(cwd), stdout=handle, check=False).returncode
-        console = Console()
         with subprocess.Popen(command, cwd=str(cwd), stdout=subprocess.PIPE, text=True) as process:
             for line in process.stdout or ():
                 handle.write(line)
@@ -90,7 +90,6 @@ def check(name: str, command: Callable[[], dict[str, list[str]]]) -> dict[str, l
         )
     else:
         table = Table(title="\nHarness Summary\n", title_style="bold grey74", box=None, padding=(0, 5))
-        console = Console(force_terminal=True, stderr=True)
         table.add_column("PASSED", style="bold dim white")
         table.add_column("FAILED")
         for passed in results["pass"]:
@@ -116,6 +115,23 @@ def gate() -> None:
     check("gate", gate_module.run_gate)
 
 
+@app.command(help="Show harness configuration and capabilitie in pyproject.toml")
+def info() -> None:
+    """Print everything the harness reads from [tool.harness] so nobody has to open pyproject.toml."""
+    table = Table(title="\n[cyan2]Harness Configuration Settings[/]", box=None, padding=(0, 2))
+    phases = (
+        ("agents", gate_module.AGENTS),
+        ("preflight", gate_module.COMMIT_CHECKS),
+        ("gate", gate_module.gate),
+        ("forbidden", gate_module.FORBIDDEN),
+    )
+    for title, checks in phases:
+        table.add_row(f"[bold cyan]{title}[/]", "")
+        for name, command in checks.items():
+            table.add_row(f"  {name}", f"[dim]{' '.join(command)}[/]")
+    console.print(table)
+
+
 @app.command(help="Count agent run logs under scratchpad/runs")
 def status() -> None:
     """Count run logs and point at the newest one."""
@@ -124,27 +140,6 @@ def status() -> None:
     typer.secho(f"{len(logs)} run log(s) in {runs}", fg=typer.colors.CYAN, bold=True)
     if logs:
         typer.secho(f"newest: {logs[-1]}", fg=typer.colors.GREEN, bold=True)
-
-
-@app.command()
-def ensure_timeout_tool() -> None:
-    """Warn (and offer to install) when `harness run` lacks a timeout tool, macOS case.
-    Windows uses ralph.ps1 and has no timeout tool so no-op here.
-
-    Linux ships `timeout`; macOS needs `brew install coreutils` (for `gtimeout`). If neither is on PATH
-    on a non-Windows host, prompt to install via Homebrew.
-    """
-    if sys.platform == "win32" or shutil.which("timeout") or shutil.which("gtimeout"):
-        return
-    rprint("\n[yellow]macOS harness needs timeout/gtimeout from coreutils[/yellow]")
-    if not shutil.which("brew"):
-        rprint(
-            "no Homebrew https://brew.sh then run `brew install coreutils`, or `sudo port install coreutils`"
-        )
-    elif typer.confirm("Allow install now with `brew install coreutils`?"):
-        subprocess.run(("brew", "install", "coreutils"), check=False)
-    else:
-        rprint("[yellow]skipped[/yellow] — run `brew install coreutils` before `harness run`.")
 
 
 @app.command(help="Setup project: inject project name in pyproject, sync dependencies, set up githooks")
@@ -156,9 +151,7 @@ def install(name: Annotated[str | None, typer.Argument(help="Set up project for 
         will overwrite existing name in pyproject.toml. When ommitted, project name is left untouched.
     """
     cwd = Path.cwd()
-
-    pyproject = cwd / "pyproject.toml"
-    document = tomlkit.parse(pyproject.read_text(encoding="utf-8"))
+    document = tomlkit.parse((cwd / "pyproject.toml").read_text(encoding="utf-8"))
     # Set the requested name (if any); default a missing version to 0.0.0 but never clobber an existing one.
     project = document.setdefault("project", tomlkit.table())
     if name:
@@ -166,10 +159,9 @@ def install(name: Annotated[str | None, typer.Argument(help="Set up project for 
         rprint(f"\n[cyan2]project name[/cyan2] '{project['name']}' set in `pyproject.toml`")
     if not project.get("version"):
         project["version"] = "0.0.0"
-    pyproject.write_text(tomlkit.dumps(document), encoding="utf-8")
-    rprint("\n[cyan2]installing dependencies[/cyan2] with `uv sync`")
+    (cwd / "pyproject.toml").write_text(tomlkit.dumps(document), encoding="utf-8")
+    rprint("\n[cyan2]installing dependencies[/cyan2] with `uv sync`, then setting git hooks:")
     subprocess.run(("uv", "sync"), cwd=str(cwd), check=True)
-
     rprint("\n[cyan2]setting git hooks[/cyan2] with `git config core.hooksPath .githooks`:")
     subprocess.run(("git", "config", "core.hooksPath", ".githooks"), cwd=str(cwd), check=True)
     typer.echo(
@@ -179,7 +171,16 @@ def install(name: Annotated[str | None, typer.Argument(help="Set up project for 
     )
     subprocess.run(("ls", "-l", ".githooks"), cwd=str(cwd), check=True)
 
-    ensure_timeout_tool()
+    # Warn (and offer to install) when `harness run` lacks a timeout tool. Linux ships `timeout`; macOS
+    # needs `gtimeout` from coreutils. Windows uses ralph.ps1 (no timeout tool), so this is a no-op there.
+    if not (sys.platform == "win32" or shutil.which("timeout") or shutil.which("gtimeout")):
+        rprint("\n[yellow]macOS harness needs timeout/gtimeout from coreutils[/yellow]")
+        if not shutil.which("brew"):
+            rprint("no Homebrew https://brew.sh then run `brew install coreutils`, or `sudo port install`")
+        elif typer.confirm("Allow install now with `brew install coreutils`?"):
+            subprocess.run(("brew", "install", "coreutils"), check=False)
+        else:
+            rprint("[yellow]skipped[/yellow] — run `brew install coreutils` before `harness run`.")
 
     rprint(
         "\nActivate env by running command [turquoise2]`source .venv/bin/activate`[/turquoise2] "
@@ -189,7 +190,10 @@ def install(name: Annotated[str | None, typer.Argument(help="Set up project for 
     )
 
 
-@app.command(help="Run one harnessed ralph loop with <agent>, e.g. harness run claude 3 20")
+@app.command(
+    help="Run one harnessed ralph loop with <agent>, e.g. harness run claude 3 20.\n\n"
+    f"Integrated agents (from tool.harness.agents): {', '.join(gate_module.AGENTS)}"
+)
 def run(
     agent: str,
     num_iterations: Annotated[int, typer.Argument()] = 2,

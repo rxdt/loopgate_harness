@@ -28,13 +28,13 @@ except ImportError:  # humans do what they want with preferences.py
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 raw_toml = tomllib.loads((REPO_ROOT / "pyproject.toml").read_bytes().decode())
-harness = raw_toml.get("tool", {}).get("harness", {})
-languages = harness.get("languages", {})
-gate = harness.get("gate", {})
-AGENTS = harness.get("agents", {})
-COMMIT_CHECKS = harness.get("preflight", {})
+HARNESS = raw_toml.get("tool", {}).get("harness", {})
+languages = HARNESS.get("languages", {})
+gate = HARNESS.get("gate", {})
+AGENTS = HARNESS.get("agents", {})
+COMMIT_CHECKS = HARNESS.get("preflight", {})
 FULL_CHECKS = COMMIT_CHECKS | gate
-FORBIDDEN = harness.get("FORBIDDEN", {})
+FORBIDDEN = HARNESS.get("FORBIDDEN", {})
 FORBIDDEN_FILES = FORBIDDEN.get("FILES", [])
 FORBIDDEN_DIRS = tuple(FORBIDDEN.get("DIRS", []))
 FORBIDDEN_PATTERNS = FORBIDDEN.get("PATTERNS", [])

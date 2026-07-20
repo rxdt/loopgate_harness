@@ -236,6 +236,37 @@ def test_verify_rejects_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "gate: security fail" not in result.output
 
 
+# --------------------------------------------------------------------------- info
+
+
+def test_info_prints_all_harness_config() -> None:
+    """Info surfaces every [tool.harness] section so nobody has to open pyproject.toml: both check
+    phases with their argv, the containment lists, and the integrated agents.
+    """
+    result = runner.invoke(cli.app, ["info"])
+    assert result.exit_code == 0
+    flat = " ".join(result.output.split())  # collapse Rich's line-wrapping so long entries stay whole
+    for phase in ("preflight", "gate"):
+        assert phase in flat
+    for name, command in (gate.COMMIT_CHECKS | gate.gate).items():
+        assert name in flat
+        assert command[0] in flat  # the argv is rendered, not just the check name
+    for pattern in gate.FORBIDDEN_PATTERNS:
+        assert pattern in flat
+    for path in (*gate.FORBIDDEN_DIRS, *gate.FORBIDDEN_FILES):
+        assert path in flat
+    for agent in gate.AGENTS:
+        assert agent in flat
+
+
+def test_run_help_lists_integrated_agents() -> None:
+    """`run --help` names every integrated agent so callers see the choices without reading the toml."""
+    result = runner.invoke(cli.app, ["run", "--help"])
+    assert result.exit_code == 0
+    for agent in gate.AGENTS:
+        assert agent in result.output
+
+
 # --------------------------------------------------------------------------- status
 
 
@@ -528,53 +559,63 @@ def say_no(prompt: str) -> bool:
     return False
 
 
-def test_ensure_timeout_tool_skips_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With a timeout tool on PATH, install does not prompt or install anything."""
+def install_in(monkeypatch: pytest.MonkeyPatch, repo: Path, calls: list[tuple[str, ...]]) -> None:
+    """Run `install` in `repo` with a seeded pyproject, recording every subprocess call into `calls`.
+
+    The timeout-tool step is inlined at the tail of install, so these tests exercise it through install.
+    """
+    monkeypatch.chdir(repo)
+    (repo / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", stub_toolchain(subprocess.run, calls))
+    assert runner.invoke(cli.app, ["install"]).exit_code == 0
+
+
+def test_install_timeout_skips_when_present(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """With a timeout tool on PATH, install neither prompts nor installs coreutils."""
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli.shutil, "which", which_only("timeout"))
-    monkeypatch.setattr(cli.subprocess, "run", pytest.fail)  # must not install
-    cli.ensure_timeout_tool()  # returns without error
+    monkeypatch.setattr(cli.typer, "confirm", pytest.fail)  # must not prompt
+    calls: list[tuple[str, ...]] = []
+    install_in(monkeypatch, git_repo, calls)
+    assert ("brew", "install", "coreutils") not in calls
 
 
-def test_ensure_timeout_tool_skips_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """On Windows the ps1 path handles timing, so no coreutils check runs."""
+def test_install_timeout_skips_on_windows(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """On Windows the ps1 path handles timing, so no coreutils probe or prompt runs."""
     monkeypatch.setattr(cli.sys, "platform", "win32")
-    monkeypatch.setattr(cli.shutil, "which", pytest.fail)  # must not even probe PATH
-    cli.ensure_timeout_tool()
+    monkeypatch.setattr(cli.shutil, "which", pytest.fail)  # must not even probe PATH for timeout tools
+    monkeypatch.setattr(cli.typer, "confirm", pytest.fail)
+    install_in(monkeypatch, git_repo, [])
 
 
-def test_ensure_timeout_tool_installs_when_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Missing tool + brew present + user confirms -> it installs coreutils via brew."""
-    installed: list[tuple[str, ...]] = []
-
-    def record_run(cmd: tuple[str, ...], **kwargs: object) -> None:
-        del kwargs
-        installed.append(tuple(cmd))
-
+def test_install_timeout_installs_when_confirmed(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Missing tool + brew present + user confirms -> install shells out to `brew install coreutils`."""
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli.shutil, "which", which_only("brew"))
     monkeypatch.setattr(cli.typer, "confirm", say_yes)
-    monkeypatch.setattr(cli.subprocess, "run", record_run)
-    cli.ensure_timeout_tool()
-    assert ("brew", "install", "coreutils") in installed
+    calls: list[tuple[str, ...]] = []
+    install_in(monkeypatch, git_repo, calls)
+    assert ("brew", "install", "coreutils") in calls
 
 
-def test_ensure_timeout_tool_points_to_homebrew_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No timeout tool and no Homebrew -> it never prompts or installs, just points at brew.sh."""
+def test_install_timeout_points_to_homebrew(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """No timeout tool and no Homebrew -> install never prompts or installs, just points at brew.sh."""
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli.shutil, "which", which_none)  # no timeout, no brew
     monkeypatch.setattr(cli.typer, "confirm", pytest.fail)  # cannot confirm without brew
-    monkeypatch.setattr(cli.subprocess, "run", pytest.fail)  # must not install
-    cli.ensure_timeout_tool()
+    calls: list[tuple[str, ...]] = []
+    install_in(monkeypatch, git_repo, calls)
+    assert ("brew", "install", "coreutils") not in calls
 
 
-def test_ensure_timeout_tool_skips_install_when_declined(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_install_timeout_skips_install_when_declined(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Missing tool, brew present, user declines -> nothing is installed, just a hint."""
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli.shutil, "which", which_only("brew"))
     monkeypatch.setattr(cli.typer, "confirm", say_no)
-    monkeypatch.setattr(cli.subprocess, "run", pytest.fail)  # must not install
-    cli.ensure_timeout_tool()
+    calls: list[tuple[str, ...]] = []
+    install_in(monkeypatch, git_repo, calls)
+    assert ("brew", "install", "coreutils") not in calls
 
 
 def test_run_log_sequence_increments_past_existing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
