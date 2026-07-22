@@ -180,6 +180,14 @@ harness run codex 2 20
 harness run agy 3 10
 harness run copilot 2 20
 ```
+### Running with claude 
+
+To run LoopGate with Claude :
+
+```sh
+harness run claude 2 20
+```
+Note: The worker must be installed and authenticated separately.
 
 <details>
   <summary>
