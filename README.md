@@ -222,6 +222,10 @@ complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefe
 
 ### FAQ </summary>
 
+- **`harness run <agent>` exits immediately / can't find the worker?**
+
+LoopGate does not install or log in agent CLIs. Install and authenticate the worker you selected (`claude`, `codex`, `copilot`, or `agy`), confirm it is on your `PATH` (e.g. `which codex`), then retry. If `which` finds the binary but the run still fails, finish that tool's login/auth flow and retry `harness run`.
+
 - **What is the difference between a gate and a sandbox?**
 
 A **gate** is a workflow checkpoint that evaluates code and decides whether it is allowed to land in your commits. A **sandbox** is an isolated OS-level environment designed to prevent code from modifying your underlying machine. LoopGate uses gates to control your git history, but it does _not_ provide a secure OS sandbox.
