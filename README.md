@@ -2,7 +2,8 @@
 <img src=".banner.svg" alt="Blue infinity loop" width="360">
 
 <h1>L∞pGate</h1>
-<p>A coding-agent loop harness for Claude, Codex, Copilot, or any CLI agent.  A dumb Ralph loop runner tells an agent to "Go!" and hands it a PROMPT. Agents can edit. Gates decide what lands. You set the plan in motion. The loops eat the prompt, and each agent iteration must update specs and commit through guardrails.</p>
+<h4>Run coding agents strictly andonly accept changes that pass your quality gates.</h4>
+<p>A coding-agent loop harness for Claude, Codex, Copilot, or any CLI agent. A dumb Ralph loop runner tells an agent to "Go!" and hands it a PROMPT. Agents can edit. Gates decide what lands. You set the plan in motion. The loops eat the prompt, and each agent iteration must update specs and commit through guardrails.</p>
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Status](https://img.shields.io/badge/github-repo-blue?logo=github)
@@ -21,13 +22,12 @@
 
 ---
 
-## TL;DR: Getting Started.
+## TL;DR
 
-1. `gh repo create my-app --template <your-gh-username>/loopgate_harness --private --clone` **or** ['Use This Template'](https://github.com/new?template_name=loopgate_harness&template_owner=rxdt)
-2. `uv run harness install <your-project-name>`
-3. Write your project goal in [docs/plan.md](docs/plan.md)
-4. `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
-5. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
+1. `gh repo create <your-app-name>/<your-app-name> --template rxdt/loopgate_harness --private --clone && cd <your-app-name> && uv run harness install <your-app-name> && source .venv/bin/activate`
+2. `harness run codex`
+
+**Requirements**: `pip`, `uv`, or `poetry`. Python 3.11.
 
 ---
 
@@ -40,7 +40,7 @@
 - **Built-in stack**: Ruff, Pyright, Pylint, Semgrep, Complexipy, Hypothesis, 100% coverage ☑☑☑
 - **Progressive**: Preflight vs full gate split 🆗
 - **Forbidden-path containment**: Don't touch that!-configurable 🛑
-- **Installable project template**: `harness install loopgate` gets the repo ready ▶️
+- **Installable project template**: `harness install <your-app-name>` gets the repo ready ▶️
 - **No-rot**: Fresh-context agent iterations to reduce context rot 🔄
 - **Simple**: One command setup gets you git hooks and everything else
 - **No-waste**: Timeouts and time-limits for all loops ⏸
@@ -51,30 +51,59 @@
 ## Details
 
 > [!IMPORTANT]
-> Default configurations In [`pyproject.toml`](pyproject.toml) Update tool settings, add agent calls, remove or include checks... or leave as it.
+> Default configurations In [`pyproject.toml`](pyproject.toml) Update tool settings, add agent calls, remove or include checks... or leave as is.
 
 `docs/PROMPT.md` tells each agent to pick a `spec` and build. `docs/specs/` say _what_ to build. The agent decides _what next_. You keep `docs/plan.md` current, and specs get rewritten from it (agent is told in `docs/PROMPT.md` to update the specs). Each iteration the agent updates its spec and `PROJECT_STATUS`. Ideas from [ghuntley](https://github.com/ghuntley), How to Ralph Wiggum.
 
 > [!TIP]
-> If you don't like _ANYTHING_ in this framework, remove it.
+> If you don't like _ANYTHING_ in this framework, update it.
 
-## Start a project
+### Start a project
 
-1. From inside the checkout, run `harness install <your-project-name>` to name the project, installs dependencies, and set up the 3 git hook.
-2. Write your grand vision into `docs/plan.md`.
-3. Optionally add the first spec in `docs/specs/`, or have an agent draft the first specs.
-4. Put product code under `src/` and list new source directories in `pyproject.toml [tool.coverage.run]`.
-5. Strict Ruff rules, type checking, pyright, complexipy, and pytest coverage are set in `pyproject.toml`.
-6. Your coding quirks go in [`src/preferences/preferences.py`](src/preferences/preferences.py).
-7. Run a loop:
+1. `gh repo create my-app-name --template <your-gh-username>/loopgate_harness --private --clone` **or**
+   ['Use This Template'](https://github.com/new?template_name=loopgate_harness&template_owner=rxdt)
+2. Source your environment (if applicable)
+3. From the root, run `harness install <your-project-name>` to name the project, install dependencies, set up the git hooks, and delete excess files. Install dependencies e.g. `uv sync && source .venv/bin/activate && harness install <your-project-name`.
+4. `git commit` (the `install` command updates the repo)
+5. Write your grand vision in [docs/plan.md](docs/plan.md)
+6. Optionally add the first spec in `docs/specs/` (or leave it to the agents to draft the first specs based on your `plan.md`)
+7. Product code goes in [`src/`](src/). _(List new source directories in [`pyproject.toml [tool.coverage.run]`](pyproject.toml#toolcoveragerun).)_
+8. Run some loops!
+   `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
+9. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
+10. Strict Ruff rules, type-checking Pyright, Complexipy, and Pytest coverage are set in [`pyproject.toml`](pyproject.toml).
+11. Your coding quirks go in [`preferences/preferences.py`](preferences/preferences.py).
+12. Loop!:
 
 ```sh
-harness run <agent> [max_iterations] [max_minutes]  # agent: claude/codex/agy/copilot. ralph loop runner adds prompt
+harness run <agent> [max_iterations] [max_minutes]  # agent: claude/codex/agy/copilot. ralph loop runner injects prompt
+```
+
+### Works with `uv`, `poetry`, or `pip`
+
+```sh
+uv sync
+source .venv/bin/activate
+harness install <your-project-name>
+harness gate
+harness run <agent>
+
+poetry install
+poetry run harness install <your-project-name>
+poetry run harness gate
+poetry run harness run <agent>
+
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt -e .
+harness install <your-project-name>
+harness gate
+harness run <agent>
 ```
 
 ![L∞P architecture engine flow](.loops.svg)
 
-## A L∞PS Loop
+## A L∞Pgate Loop
 
 The repo is the only memory. Each iteration is a fresh-context agent.
 
@@ -90,52 +119,35 @@ The repo is the only memory. Each iteration is a fresh-context agent.
 
 ![L∞PS Agents](.loops_agents.svg)
 
-## Safety
-
-`harness run` launches an autonomous LLM worker with the configured permissions, e.g.
-`--permission-mode acceptEdits` or `--sandbox danger-full-access`.
-
-The gate bounds what any **commit** may touch, but the worker itself is **not** sandboxed to this repo unless you set that config. Consider the balance: without access it cannot do much. With machine access it can wreak havoc. Under a permissive mode it can run arbitrary shell. You are authorizing real changes. Choose the worker and permission mode deliberately.
-
-#### The Gate: Tiered Checks
-
-⚡ `harness preflight` (pre-commit) → fast checks.
-Ruff lint + check format for everyone, _plus_ **containment** for the agents. Self-heals by un-staging forbidden files.
-
-✅ `harness gate` (CI/PR pre-push). Local checks mirror CI → ruff lint + format report-only, pyright, pylint, semgrep, complexipy, hypothesis, pytest @ 100% cov.
-
-Only humans can bypass triggered gates and commit by adding flag `--no-verify`.
-
-<details>
-  <summary>
-
 ## Directory Layout
 
 </summary>
 
 ```
-harness/        the gate, loop runner, CLI, custom user checks       (🤖 forbidden)
-  gate.py         mirror the CI locally + preferences.py honored     (🤖 forbidden)
-  tests/          the harness's own tests                            (🤖 forbidden)
-    test_properties.py  hypothesis tests                             (🤖 forbidden)
-.githooks/      pre-commit / pre-push gate hooks                     (🤖 forbidden)
-.github/        CI that re-runs the gate                             (🤖 forbidden)
+harness/        the gate, loop runner, CLI                           (🤖 forbidden directory)
+  gate.py         mirror the CI locally + preferences.py honored
+  cli.py          command-line entry point
+  tests/          the harness's own tests
+  js-scaffold   javascript example to build upon
+preferences/    user-defined preferences not covered by tools        (🤖 forbidden directory)
+tests/
+  preferences/  (🤖 tests/preferences is forbidden directory)
+.githooks/      pre-commit / pre-push gate hooks                     (🤖 forbidden directory)
+.github/        CI that re-runs the gate                             (🤖 forbidden directory)
 pyproject.toml  project + tooling config                             (🤖 forbidden)
 AGENTS.md       rules for agents working in the repo                 (🤖 forbidden)
 docs/PROMPT.md  the standing per-iteration instruction               (human maintained)
-docs/           PLAN, PROJECT_STATUS, PROMPT                          (human maintained plan.md)
+docs/           PLAN, PROJECT_STATUS, PROMPT                         (human or agent maintained plan.md)
 scratchpad/     scratch dir agents can use for temp files            (For the 🤖 to play)
-docs/specs/     WHAT to build, one PRIORITY-bannered file per track
+docs/specs/     WHAT to build, one PRIORITY-bannered file per track  (agent maintained)
 src/            your product/source code (add to coverage source)
-  preferences/
-    preferences.py  user-defined preferences not covered by tools    (🤖 forbidden)
 ```
+
+[`pyproject.toml`](pyproject.toml) is the single source of harness configuration. Humans own it and [`preferences/`](preferences/); both are agent-protected.
 
 If an agent edits a forbidden file, the file will be unstaged (not allowed to commit). A forbidden pattern by an agent (e.g. `# noqa` will also prevent their commit and force them to fix it.)
 
 </details>
-
-[`pyproject.toml`](pyproject.toml) is the single source of harness configuration. Humans own all of it (`pyproject.toml` is agent-forbidden; `harness/preferences.py` is part of `harness/`).
 
 A minimal `[tool.harness.gate]` snippet could look like:
 
@@ -148,20 +160,6 @@ patterns = ["# noqa"]     # banned in agent-authored diffs
 [tool.harness.gate]
 pytest = "uv sync pytest"  # one check command, run by the local gate AND CI
 ```
-
-## ⚠️ Warnings. Read this before a first run.
-
-1. **This harness does not sandbox agents.** It _tries_ to harness bad code in loops via gates. Sandboxing agents will, e.g. prevent them from maintaining git, running Playwright, being seen as trustworthy by semgrep leading to cyclical failures, etc.
-
-2. **The gate is a guardrail, not a jail.** Agents are crafty, like people. They will find a way to complete a task at all costs. **Trust nothing and no one.**
-
-3. **Mind your usage limits.** `harness run` works agents to the cap set. You can easily burn through your tokens, context windows, and provider usage limits. **Workers continue running as long as there is work to do.**
-
-4. **`docs/PROMPT.md` tells the worker to push every iteration**. Protect `main` and run the loop on its own branch.
-
-5. **100% coverage does not mean good tests.** That is quantity, not quality. (Upcoming feature: mutation testing)
-
-6. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
 
 ## Commands
 
@@ -180,13 +178,15 @@ harness run codex 2 20
 harness run agy 3 10
 harness run copilot 2 20
 ```
-### Running with claude 
+
+### Running with claude
 
 To run LoopGate with Claude :
 
 ```sh
 harness run claude 2 20
 ```
+
 Note: The worker must be installed and authenticated separately.
 
 <details>
@@ -196,10 +196,10 @@ Note: The worker must be installed and authenticated separately.
 
 - Edit rules at [pyproject.toml](pyproject.toml) for [ruff](https://docs.astral.sh/ruff/), [pylint](https://pypi.org/project/pylint/), [pydoclint](https://pypi.org/project/pydoclint/0.9.1/), [pyright](https://github.com/microsoft/pyright), [pytest](https://docs.pytest.org/en/stable/), [hypothesis](https://hypothesis.readthedocs.io/), [complexipy](https://github.com/rohaquinlop/complexipy)
 - Add forbidden files, directories, or patterns in `[tool.harness.gate]` at [pyproject.toml](pyproject.toml)
-- Add Hypothesis tests in any test directory, examples at [test_properties.py](harness/tests/test_properties.py)
-- [semgrep](https://docs.semgrep.dev/semgrep-ci/sample-ci-configs) has no repo config here. It uses registry configs plus Semgrep's built-in defaults which ignore tests.
-- Edit `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). [ci.yml](.github/workflows/ci.yml) runs the same `harness gate`.
-- Removing existing preferences or add your own preferences at [preferences.py](src/preferences/preferences.py). Current preferences:
+- Add [Hypothesis](https://hypothesis.readthedocs.io/) tests in any test directory, examples at [test_properties.py](tests/preferences/test_properties.py).
+- [semgrep](https://docs.semgrep.dev/semgrep-ci/sample-ci-configs) has no repo config here. It uses registry configs / Semgrep's built-in defaults which ignore tests.
+- Update `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). [ci.yml](.github/workflows/ci.yml) runs those **same exact** `harness gate` checks.
+- Add or remove coding preferences [preferences.py](preferences/preferences.py) that only agents in loops **must** respect. Current preferences:
 
 ```py
 function_argument_assignment_has_star  # agents use non-specific `def fun(*)`
@@ -209,7 +209,7 @@ dynamic_star_call  # Calls to def fun(*items) breaks when you can't tell how man
 pointless_class  # ensure classes are added for good reasons (carry state, values, methods)
 lazy_assert  # enforce real assertions, stronger tests
 objects_injected_into_runtime_memory  # finds calls that manipulate global state (dangerous, tricky)
-lambda_found  # abolish lambdas for agents to keep their code simpler
+lambda_found  # abolish lambdas, make agents keep their code simple
 lazy_any_type_hints  # abolish type `Any` used to bypass strict type-checking
 chaotic_continue_statements  # abolish unecessary nested continue statements, clean code
 complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefer linear code
@@ -238,6 +238,10 @@ You don’t have to. The loop runner, Ralph, and the CLI take a prompt, launch a
 
 The included [`harness/js-scaffold`](harness/js-scaffold/package.json) is a simple JavaScript **example** to expand on. Go to [pyproject.toml line 75](pyproject.toml#L75). Update checks. Put `js` into list `[tool.harness].languages`. Remove `py` if unused.
 
+- **Why not just a shell loop?**
+
+A shell loop only reruns an agent. LoopGate ensures fresh context, durable repo state, time and iteration limits, protected paths, and quality gates that stop bad changes _before_ they land.
+
 ```
 npm run --prefix harness/js-scaffold gate
 npm run --prefix harness/js-scaffold preflight
@@ -254,7 +258,7 @@ npm run --prefix harness/js-scaffold preflight
 - There is NO worktree/branch creation by design. You can create branches/trees and run a loop in each, then merge _(if you really feel like managing that)_
 - Agent duties can be contained to a part of the repo. e.g. Codex-1-frontend uses `docs/specs/frontend.md`, Claude-2-researcher `docs/specs/backend`...
 
-### If you must be a ringleader
+### If you want to run a graph
 
 **Recommendations for running several agents at once on one branch (no worktrees):**
 
@@ -294,3 +298,38 @@ npm run --prefix harness/js-scaffold preflight
 </details>
 
 ![diagram](.diagram.png)
+
+## Read this before a first run.
+
+1. **This harness does not sandbox agents.** It _tries_ to harness bad code in loops via gates. Sandboxing agents will, e.g. prevent them from maintaining git, running Playwright, being seen as trustworthy by semgrep leading to cyclical failures, etc.
+
+2. **The gate is a guardrail, not a jail.** Agents are crafty, like people. They will find a way to complete a task at all costs. **Trust nothing and no one.**
+
+3. **Mind your usage limits.** `harness run` works agents to the cap set. You can easily burn through your tokens, context windows, and provider usage limits. **Workers continue running as long as there is work to do.**
+
+4. **`docs/PROMPT.md` tells the worker to push or not**.
+
+5. Protect `main` and run the loop on its own branch.
+
+6. **100% coverage does not mean good tests.** That is quantity, not quality. (Upcoming feature: mutation testing)
+
+7. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
+
+## Safety
+
+`harness run` launches an autonomous LLM worker with the configured permissions, e.g.
+`--permission-mode acceptEdits` or `--sandbox danger-full-access`.
+
+The gate bounds what any **commit** may touch, but the worker itself is **not** sandboxed to this repo unless you set that config. Consider the balance: without access it cannot do much. With machine access it can wreak havoc. Under a permissive mode it can run arbitrary shell. You are authorizing real changes. Choose the worker and permission mode deliberately.
+
+#### The Gate: Tiered Checks
+
+⚡ `harness preflight` (pre-commit) → fast checks.
+Ruff lint + check format for everyone, _plus_ **containment** for the agents. Self-heals by un-staging forbidden files.
+
+✅ `harness gate` (CI/PR pre-push). Local checks mirror CI → ruff lint + format report-only, pyright, pylint, semgrep, complexipy, hypothesis, pytest @ 100% cov.
+
+Only humans can bypass triggered gates and commit by adding flag `--no-verify`.
+
+<details>
+  <summary>

@@ -2,7 +2,7 @@
 
 OPTIONAL for humans to use or edit! The functions below are examples to use. Or delete.
 
-Agents in the loop cannot edit this file. It's in `FORBIDDEN_FILES` at `harness/gate.py`.
+Agents in the loop cannot edit this file. It's in `FORBIDDEN_DIRS` at `harness/gate.py`.
 
 This module should reflect the repo owner's personal coding style hates. It's personal.
 e.g. indiscriminate __underscore_names, **star-unpacking, pointless classes, loops instead of Set math.

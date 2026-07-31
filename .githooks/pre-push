@@ -6,4 +6,5 @@
 # Bypassing this hook is forbidden by AGENTS.md.
 set -eu
 
-.venv/bin/harness gate
+. "$(dirname "$0")/_resolve"
+exec "$HARNESS" gate

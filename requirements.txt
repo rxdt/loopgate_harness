@@ -1,0 +1,11 @@
+complexipy
+hypothesis
+packaging
+pylint
+pyright
+pytest
+pytest-cov
+ruff
+semgrep
+tomlkit
+typer

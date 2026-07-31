@@ -32,7 +32,7 @@ Humans edit
 
 - `pyproject.toml`: Python and tool configuration.
 - `harness/`: CLI, gate, loop runner, and harness tests. Wraps the loop that starts agents.
-- `src/preferences` can contain user-specific preferences. A live Python example is already there.
+- `preferences/` contains user-specific preferences. A live Python example is already there.
 - `docs/PROMPT.md`: tells agents how to operate headless in the repo (mechanics)
 - [A javascript example](harness/js-scaffold) lives in its own directory within [`harness/`](harness) and can be expanded on.
 
@@ -62,7 +62,7 @@ Changes to the [`harness/`](harness) itself should preserve the core contract: *
 
 ### Where tests live
 
-The harness's own tests live in [`harness/tests/`](harness/tests), including the Hypothesis property tests in [`test_properties.py`](harness/tests/test_properties.py).
+The harness's own tests live in [`harness/tests/`](harness/tests). Hypothesis coverage for the gate and preferences lives in [`test_properties.py`](tests/preferences/test_properties.py).
 
 The full suite runs as part of `harness gate` (at 100% coverage). To run only the harness tests while iterating:
 
@@ -80,7 +80,7 @@ The full gate before a pull request [`harness/gate.py line 177`](harness/gate.py
 
 ```sh
 harness gate
-# or, to mimic what an agent will see:
+# To mimic what an agent will see add the env var:
 RALPH_LOOP=1 harness gate
 ```
 

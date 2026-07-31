@@ -5,7 +5,6 @@ __pycache__/
 .ruff_cache/
 .hypothesis/
 .coverage
-dist/
 .DS_Store
 .claude
 .codex
@@ -13,8 +12,7 @@ dist/
 docs/launch.md
 test-results/
 **/node_modules/
-.python-version
-uv.lock
+harness-path
 
 .env
 .env.*
@@ -28,3 +26,6 @@ scratchpad/*
 !scratchpad/runs/
 scratchpad/runs/*
 !scratchpad/runs/.gitkeep
+
+# kept at the last line for easy deletion (real projects need lockfile)
+uv.lock
