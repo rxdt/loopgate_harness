@@ -3,4 +3,5 @@
 # Bypassing this hook is forbidden by AGENTS.md.
 set -eu
 
-.venv/bin/harness preflight
+. "$(dirname "$0")/_resolve"
+exec "$HARNESS" preflight

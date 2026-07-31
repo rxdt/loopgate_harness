@@ -25,37 +25,41 @@ try:
 except ImportError:  # humans do what they want with preferences.py
     prefs = None
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+
+def run_git(args: list[str], repo: Path | None = None, check: bool = True) -> str:
+    """Run a git command in the repo and return its stdout.
+
+    Arguments:
+        args: Git subcommand and its arguments
+        repo: the repository directory to run the git command from; defaults to REPO_ROOT
+        check: If check is True and the exit code was non-zero, it raises a CalledProcessError which has
+          returncode attribute, and output attribute
+
+    Returns:
+        The command's raw stdout string (callers will .splitlines() as needed)
+    """
+    target = REPO_ROOT if repo is None else repo
+    command = ["git", "-C", str(target), *args]
+    git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    result = subprocess.run(command, capture_output=True, text=True, check=check, env=git_env)
+    return result.stdout
+
+
+# GATE AND PREFLIGHT RUN FROM PROJECT LEVEL DIRECTORY
+REPO_ROOT = Path(run_git(["rev-parse", "--show-toplevel"], repo=Path.cwd()).strip()).resolve()
+
 
 raw_toml = tomllib.loads((REPO_ROOT / "pyproject.toml").read_bytes().decode())
 HARNESS = raw_toml.get("tool", {}).get("harness", {})
 languages = HARNESS.get("languages", {})
-gate = HARNESS.get("gate", {})
+gate_checks = HARNESS.get("gate", {})
 AGENTS = HARNESS.get("agents", {})
 COMMIT_CHECKS = HARNESS.get("preflight", {})
-FULL_CHECKS = COMMIT_CHECKS | gate
+FULL_CHECKS = COMMIT_CHECKS | gate_checks
 FORBIDDEN = HARNESS.get("FORBIDDEN", {})
 FORBIDDEN_FILES = FORBIDDEN.get("FILES", [])
 FORBIDDEN_DIRS = tuple(FORBIDDEN.get("DIRS", []))
 FORBIDDEN_PATTERNS = FORBIDDEN.get("PATTERNS", [])
-
-
-def run_git(args: list[str], check: bool = True) -> str:
-    """Run a git command in the repo and return its stdout.
-
-        Args:
-            args: Git subcommand and its arguments.
-            check: If check is True and the exit code was non-zero, it raises a
-    CalledProcessError which has returncode attribute, and output attribute
-
-        Returns:
-            The command's raw stdout string (callers .splitlines() as needed).
-    """
-    command = ["git", "-C", str(REPO_ROOT)]
-    command.extend(args)
-    git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    result = subprocess.run(command, capture_output=True, text=True, check=check, env=git_env)
-    return result.stdout
 
 
 def colorize(name: str, command: str) -> None:
@@ -66,8 +70,7 @@ def colorize(name: str, command: str) -> None:
         command: The command string printed beneath the header.
     """
     if os.environ.get("RALPH_LOOP"):  # loop agents get plain text (no ANSI)
-        typer.echo(f"PHASE: {name.upper()}")
-        typer.echo(command)
+        typer.echo(f"PHASE: {name.upper()}\n{command}")
     else:
         console.rule(f"[bold cyan] PHASE: {name.upper()}[/]", style="blink cyan on grey15")
         console.print(f"[dim italic]{command}[/dim italic]\n", justify="center")
@@ -82,7 +85,7 @@ def run_checks(checks: dict[str, list[str]]) -> dict[str, list[str]]:
 
     Returns:
         { "pass": [...], "warn": [...], "fail": [ problems ] } bucketing each check name by exit code.
-        if anything is in "fail", a commit is not allowed
+        If anything is in "fail", a commit is not allowed.
     """
     clean_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     if not os.environ.get("RALPH_LOOP"):
@@ -93,8 +96,12 @@ def run_checks(checks: dict[str, list[str]]) -> dict[str, list[str]]:
         sys.stdout.flush()
         with subprocess.Popen(command, cwd=REPO_ROOT, env=clean_env) as process:
             exit_code = process.wait()
-        key = "warn" if "format" in name else ("pass" if exit_code == 0 else "fail")
-        results[key].append(name)
+        if exit_code == 0:
+            results["pass"].append(name)
+        elif "format" in name:
+            results["warn"].append(name)
+        else:
+            results["fail"].append(name)
     if os.environ.get("RALPH_LOOP"):
         results["fail"].extend(run_non_human_checks())
 
@@ -113,7 +120,8 @@ def run_non_human_checks() -> list[str]:
     if not staged:
         colorize("EMPTY COMMIT", "nothing staged: do real work, do not commit empty")
         return problems  # yell, but don't block
-    forbidden = [
+    problems.extend(check_for_bad_patterns())
+    forbidden: list[str] = [
         path
         for path in staged
         if path.casefold() in FORBIDDEN_FILES or path.casefold().startswith(FORBIDDEN_DIRS)
@@ -121,8 +129,7 @@ def run_non_human_checks() -> list[str]:
     if forbidden:
         run_git(["reset", "-q", "HEAD", "--", *forbidden])
         colorize("EJECTED", f"kept forbidden paths out of the commit: {', '.join(forbidden)}")
-    problems.extend(check_for_bad_patterns())
-    return problems
+    return ["problems:\n" + "\n".join(problems)] if problems else []
 
 
 def check_for_bad_patterns() -> list[str]:
@@ -134,15 +141,16 @@ def check_for_bad_patterns() -> list[str]:
     Returns:
         The banned-pattern hits plus any preference violations found in the staged files.
     """
-    diff_args = ["diff", "--cached", "--unified=0", "--", ".", ":(exclude)*.md"]
-    staged_lines = run_git(diff_args).splitlines()
     colorize("BANNED PATTERNS CHECK", "checking for banned patterns in staged files")
-    problems = [
-        f"'{pattern}' line: {line[1:].strip()}"
-        for line in staged_lines
-        for pattern in FORBIDDEN_PATTERNS
-        if line.startswith("+") and not line.startswith("+++") and pattern.casefold() in line.casefold()
-    ]
+    diff_args = ["diff", "--cached", "--unified=0", "--output-indicator-new=a", "--", ".", ":(exclude)*.md"]
+    staged_lines = run_git(diff_args).splitlines()
+    problems: list[str] = []
+    for line in staged_lines:
+        if line.startswith("a"):
+            for pattern in FORBIDDEN_PATTERNS:
+                pattern_and_bare_line = f"'{pattern}' line: {line[1:].strip()}"
+                if pattern.casefold() in line.casefold():
+                    problems.append(pattern_and_bare_line)
     problems.extend(filter(None, check_for_preferences()))
     return problems
 
@@ -154,10 +162,10 @@ def check_for_preferences() -> list[str]:
     Returns:
         The banned-pattern hits plus any preference violations found in the staged files.
     """
+    colorize("USER PREFERENCES", "checking that user's preferences are respected")
     if "py" in languages:
         staged = run_git(["diff", "--cached", "--name-only", "--diff-filter=d", "--", "*.py"]).splitlines()
         if staged and prefs:
-            colorize("USER PREFERENCES", "checking that user's preferences are respected")
             return [prefs(path, run_git(["show", f":{path}"])) for path in staged]
     return []
 

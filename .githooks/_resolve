@@ -1,0 +1,23 @@
+# Used by the git hooks so they can run checks.
+# e.g.
+# . "$(dirname "$0")/_resolve"
+# exec "$HARNESS" preflight
+#
+# Loads the harness executable.
+# The harness executable was created in cli.py at `def record_harness`` called with `harness install`.
+#
+# $HARNESS is the path recorded by `record_harness`.
+#
+# Then, git hook does not require `uv` or `pip` or any specific environment layout.
+
+recorded="${GIT_DIR:-$(git rev-parse --absolute-git-dir)}/harness-path"
+if [ ! -r "$recorded" ]; then
+    echo "loopgate: hooks are not installed. Run 'harness install' in this repo." >&2
+    exit 1
+fi
+
+HARNESS="$(cat "$recorded")"
+if [ ! -x "$HARNESS" ]; then
+    echo "loopgate: recorded harness '$HARNESS' is gone. Re-run 'harness install'." >&2
+    exit 1
+fi

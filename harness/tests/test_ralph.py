@@ -11,15 +11,10 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
-import pytest
+from harness.tests.conftest import REPO_ROOT
 
-# ralph.sh is the POSIX loop runner; Windows uses ralph.ps1 (see test_ralph_ps1.py).
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX ralph.sh; Windows uses ralph.ps1")
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 RALPH = REPO_ROOT / "harness" / "ralph.sh"
 
 
