@@ -134,6 +134,7 @@ FILES = [
     "pyrightconfig.json",
     ".pylintrc",
     ".gitmodules",
+    ".gitattributes"
 ]
 PATTERNS = [
     "# noqa",
