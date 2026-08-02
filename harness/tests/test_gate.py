@@ -164,9 +164,7 @@ def test_pre_push_hook_dispatches_gate_and_blocks_push(real_hook_repo: Path) -> 
 
 
 @pytest.mark.parametrize("real_hook_repo", [("prepare-commit-msg",)], indirect=True)
-def test_prepare_commit_msg_hook_rejects_empty_agent_then_accepts_staged_work(
-    real_hook_repo: Path,
-) -> None:
+def test_prepare_commit_msg_hook_rejects_empty_agent_then_accepts_staged_work(real_hook_repo: Path) -> None:
     """The hook rejects an empty agent commit, then accepts the agent's staged work."""
     before = gate.run_git(["rev-parse", "HEAD"], real_hook_repo).strip()
     agent_empty = git_process(
@@ -194,14 +192,7 @@ def test_prepare_commit_msg_hook_rejects_empty_agent_then_accepts_staged_work(
 def test_prepare_commit_msg_hook_allows_human_empty_commit(real_hook_repo: Path) -> None:
     """The hook does not apply agent containment to a human's empty commit."""
     human_empty = git_process(
-        real_hook_repo,
-        "commit",
-        "--allow-empty",
-        "--no-verify",
-        "-q",
-        "-m",
-        "human empty",
-        loop=False,
+        real_hook_repo, "commit", "--allow-empty", "--no-verify", "-q", "-m", "human empty", loop=False
     )
 
     assert human_empty.returncode == 0
@@ -377,20 +368,24 @@ def test_human_running_the_same_commands_is_not_policed(
         *(
             pytest.param(f"{directory}blocked.txt", id=f"dir-{directory}")
             for directory in gate.FORBIDDEN_DIRS
+            if directory != ".git/"
         ),
         *(pytest.param(path, id=f"file-{path}") for path in gate.FORBIDDEN_FILES),
     ],
 )
-def test_every_configured_forbidden_path_is_ejected(
+def test_every_configured_forbidden_path_is_ejected_except_dot_git(
     forbidden_path: str, monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
-    """Every forbidden directory and exact file configured in pyproject is removed from the index."""
+    """Every forbidden directory and exact file configured in pyproject is removed from the index, except for
+    `.git` which never stages files (but is forbidden to be explicit to agents.)"""
     monkeypatch.setenv("RALPH_LOOP", "1")
     stage(git_repo, forbidden_path, "blocked\n")
 
     assert gate.run_git(["diff", "--cached", "--name-only"]).splitlines() == [forbidden_path]
     assert gate.run_non_human_checks() == []
     assert gate.run_git(["diff", "--cached", "--name-only"]).splitlines() == []
+
+    assert ".git/" in gate.FORBIDDEN_DIRS
 
 
 def test_every_configured_check_can_block_the_gate(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:

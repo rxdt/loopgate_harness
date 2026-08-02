@@ -320,7 +320,7 @@ def test_installing_the_template_cleans_the_repo_sets_hooks_and_reruns_cleanly(
     assert document["tool"]["pytest"]["ini_options"] == {
         "addopts": ["-ra"],
         "testpaths": ["tests"],
-        "pythonpath": ["src"],
+        "pythonpath": [".", "src"],
     }
     assert document["tool"]["coverage"] == {
         "run": {"source": ["src", "preferences"]},

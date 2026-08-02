@@ -116,7 +116,7 @@ pytest = [
 ]
 
 [tool.harness.FORBIDDEN]
-DIRS = ["harness/", ".githooks/", ".github/", "preferences/", "tests/preferences/"]
+DIRS = ["harness/", ".githooks/", ".github/", "preferences/", "tests/preferences/", ".git/"]
 FILES = [
     "agents.md",
     "pyproject.toml",
@@ -168,7 +168,8 @@ PATTERNS = [
     "fmt: off",
     "fmt: skip",
     "yapf: disable",
-    "complexipy: ignore"
+    "complexipy: ignore",
+    "pragma: no mutate"
 ]
 
 # ==============================================================================
@@ -180,7 +181,7 @@ reportAssertAlwaysTrue = "error"        # Catch asserts that are always true.
 reportUnusedImport = "none"             # Handled by Ruff F401
 reportUnusedVariable = "none"           # Handled by Ruff F841
 verboseOutput = true                    # JSON report output when Pyright is run
-include = ["src", "preferences", "harness"] # Type-check shipped code plus repository preferences.
+include = ["src", "preferences", "mutation", "harness"] # Type-check shipped code plus repository preferences.
 
 # ==============================================================================
 # Pytest Configuration
@@ -189,23 +190,35 @@ include = ["src", "preferences", "harness"] # Type-check shipped code plus repos
 minversion = "9.0"
 addopts = ["-ra"]                   # Print useful short reasons for outcomes
 testpaths = ["tests", "harness"]
-pythonpath = ["src", "harness"]     # Lets tests import Python code located in the named folders
+pythonpath = ["."]                  # Repo root: tests import root packages by full dotted path
 
 # ==============================================================================
 # Test Coverage Configuration
 # ==============================================================================
 [tool.coverage]
-run.source = ["src", "preferences", "harness"] # ADD EVERY DIRECTORY THAT SHIPS CODE TO ENSURE 100% COVERAGE
+run.source = ["src", "preferences", "mutation", "harness"] # ADD EVERY DIRECTORY THAT SHIPS CODE TO ENSURE 100% COVERAGE
 report.show_missing = true         # Show exact missed lines when coverage fails
 report.skip_covered = false        # Keep fully covered files visible in reports
 report.fail_under = 100            # Block merges unless all shipped code is covered
 skip_covered = false               # Same behavior for older coverage config readers
 
 # ==============================================================================
+# Mutmut (Mutation Testing) Configuration
+# ==============================================================================
+[tool.mutmut]
+max-children = 2
+source_paths = ["preferences/preferences.py", "harness/gate.py"]        # what to mutate
+also_copy = ["harness", ".githooks"]  # not mutated paths, copied for imports
+do_not_mutate = ["harness/tests/*"]   # mutmut can't tell what's a test file
+pytest_add_cli_args_test_selection = [
+    "harness/tests/test_properties.py",  "harness/tests/test_gate.py",
+]
+
+# ==============================================================================
 # Complexipy Configuration
 # ==============================================================================
 [tool.complexipy]
-paths = ["src", "preferences", "harness"]
+paths = ["src", "preferences", "mutation", "harness"]
 exclude = ["**/tests/**"]    # Test code can be more branching and example-heavy than production code
 max-complexity-allowed = 10  # Cognitive complexity cap catches deeply nested, hard-to-read flow
 no-ignore = true             # Disallow `# complexipy: ignore`, fix complexity instead of suppressing it
@@ -230,7 +243,9 @@ main.ignore = [
     "tests",
     "**/tests/**",
     "harness/tests",
-    "worktrees"
+    ".worktrees",
+    "worktrees",
+    "mutants"
 ]
 format.max-line-length = 110         # Keep Pylint line accounting aligned with Ruff E501
 format.max-module-lines = 500        # Enable Pylint C0302 because Ruff has no equivalent
