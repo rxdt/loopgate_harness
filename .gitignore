@@ -27,5 +27,8 @@ scratchpad/*
 scratchpad/runs/*
 !scratchpad/runs/.gitkeep
 
+# mutmut's mutated copies of the source. Ignoring them is also what keeps ruff and semgrep out.
+mutants/
+
 # kept at the last line for easy deletion (real projects need lockfile)
 uv.lock

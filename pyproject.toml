@@ -168,7 +168,8 @@ PATTERNS = [
     "fmt: off",
     "fmt: skip",
     "yapf: disable",
-    "complexipy: ignore"
+    "complexipy: ignore",
+    "pragma: no mutate"
 ]
 
 # ==============================================================================
@@ -202,6 +203,18 @@ report.fail_under = 100            # Block merges unless all shipped code is cov
 skip_covered = false               # Same behavior for older coverage config readers
 
 # ==============================================================================
+# Mutmut (Mutation Testing) Configuration
+# ==============================================================================
+[tool.mutmut]
+source_paths = ["preferences"]  # what to mutate
+also_copy = ["harness", ".githooks"]  # copied for imports, not mutated
+do_not_mutate = ["harness/tests/*"]  # mutmut can't tell what is a test
+pytest_add_cli_args_test_selection = [
+    "--deselect",
+    "tests/preferences/test_preferences.py::test_every_check_shaped_function_is_registered",
+] # switch to use pytest command line 113
+
+# ==============================================================================
 # Complexipy Configuration
 # ==============================================================================
 [tool.complexipy]
@@ -230,7 +243,8 @@ main.ignore = [
     "tests",
     "**/tests/**",
     "harness/tests",
-    "worktrees"
+    "worktrees",
+    "mutants"
 ]
 format.max-line-length = 110         # Keep Pylint line accounting aligned with Ruff E501
 format.max-module-lines = 500        # Enable Pylint C0302 because Ruff has no equivalent

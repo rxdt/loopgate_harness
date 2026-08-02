@@ -37,7 +37,7 @@
 - **Worker-agnostic**: Claude, Codex, Copilot, Agy, or any prompt-reading CLI
 - **No lazy**: Agents work, _only if they pass the quality gates you set_ ✅
 - **Repo-as-memory workflow**: specs/status/prompt are durable but code is king, leaving you free 😎
-- **Built-in stack**: Ruff, Pyright, Pylint, Semgrep, Complexipy, Hypothesis, 100% coverage ☑☑☑
+- **Built-in stack**: Ruff, Pyright, Pylint, Semgrep, Complexipy, Hypothesis, Mutmut, 100% coverage ☑☑☑
 - **Progressive**: Preflight vs full gate split 🆗
 - **Forbidden-path containment**: Don't touch that!-configurable 🛑
 - **Installable project template**: `harness install <your-app-name>` gets the repo ready ▶️
@@ -194,9 +194,10 @@ Note: The worker must be installed and authenticated separately.
 
 ## Expanding your harness </summary>
 
-- Edit rules at [pyproject.toml](pyproject.toml) for [ruff](https://docs.astral.sh/ruff/), [pylint](https://pypi.org/project/pylint/), [pydoclint](https://pypi.org/project/pydoclint/0.9.1/), [pyright](https://github.com/microsoft/pyright), [pytest](https://docs.pytest.org/en/stable/), [hypothesis](https://hypothesis.readthedocs.io/), [complexipy](https://github.com/rohaquinlop/complexipy)
+- Edit rules at [pyproject.toml](pyproject.toml) for [ruff](https://docs.astral.sh/ruff/), [pylint](https://pypi.org/project/pylint/), [pydoclint](https://pypi.org/project/pydoclint/0.9.1/), [pyright](https://github.com/microsoft/pyright), [pytest](https://docs.pytest.org/en/stable/), [hypothesis](https://hypothesis.readthedocs.io/), [complexipy](https://github.com/rohaquinlop/complexipy), [mutmut](https://mutmut.readthedocs.io/)
 - Add forbidden files, directories, or patterns in `[tool.harness.gate]` at [pyproject.toml](pyproject.toml)
 - Add [Hypothesis](https://hypothesis.readthedocs.io/) tests in any test directory, examples at [test_properties.py](tests/preferences/test_properties.py).
+- Run [mutmut](https://mutmut.readthedocs.io/) by hand with `uv run mutmut run`, then `uv run mutmut browse`. A surviving mutant is a covered line no assertion checks. It is not a gate check: `mutmut run` exits 0 even with survivors. Its verdicts are cached against source hashes and ignore test edits, so re-run a single mutant by name once you have written a test for it. Examples at [test_with_mutations.py](tests/preferences/test_with_mutations.py).
 - [semgrep](https://docs.semgrep.dev/semgrep-ci/sample-ci-configs) has no repo config here. It uses registry configs / Semgrep's built-in defaults which ignore tests.
 - Update `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). [ci.yml](.github/workflows/ci.yml) runs those **same exact** `harness gate` checks.
 - Add or remove coding preferences [preferences.py](preferences/preferences.py) that only agents in loops **must** respect. Current preferences:
@@ -311,7 +312,7 @@ npm run --prefix harness/js-scaffold preflight
 
 5. Protect `main` and run the loop on its own branch.
 
-6. **100% coverage does not mean good tests.** That is quantity, not quality. (Upcoming feature: mutation testing)
+6. **100% coverage does not mean good tests.** That is quantity, not quality. Run `uv run mutmut run` to find covered lines that no assertion actually checks.
 
 7. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
 
