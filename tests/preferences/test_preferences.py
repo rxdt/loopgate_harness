@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+from unittest.mock import Mock
 
 import pytest
 
@@ -273,6 +274,22 @@ def test_preferences_violations_returns_grouped_str() -> None:
     violations = preferences_violations("m.py", "VALUE = 1\n")
     assert isinstance(violations, str)
     assert not violations
+
+
+def test_locationless_node_violation_reports_unknown_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `preferences` check reports '?' for missing lineno when its AST node has no parser-provided line.
+
+    Args:
+        monkeypatch: Sets/restores the AST parser for the test.
+    """
+    source = "value = lambda: None\n"
+    tree = ast.parse(source)
+    lambda_node = next(node for node in ast.walk(tree) if isinstance(node, ast.Lambda))
+    del lambda_node.lineno
+    monkeypatch.setattr(ast, "parse", Mock(return_value=tree))
+
+    expected = "m.py:?: Lambda found hurting readability and adding complexity."
+    assert preferences_violations("m.py", source) == expected
 
 
 def test_clean_file_has_no_complaints() -> None:

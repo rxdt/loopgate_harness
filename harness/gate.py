@@ -5,7 +5,7 @@
 
 All containment lists and check commands come from [tool.harness] in pyproject.toml, read once at
 import into the constants below. A check is a (name, argv) pair; its `preflight`/`blocking` flags sort
-it into the maps and sets this module runs on. Nothing is hardcoded here.
+it into the maps and sets this module runs on.
 """
 
 from __future__ import annotations
