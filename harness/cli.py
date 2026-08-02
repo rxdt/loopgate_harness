@@ -178,8 +178,11 @@ def info() -> None:
     )
     for title, checks in phases:
         table.add_row(f"[bold cyan]{title}[/]", "")
+        # Forbidden lists are atomic tokens (some carry spaces, e.g. "fmt: skip"); one per line keeps
+        # each one whole and readable. Argv checks stay space-joined so a command reads as one line.
+        separator = "\n" if title == "forbidden" else " "
         for name, command in checks.items():
-            table.add_row(f"  {name}", f"[dim]{' '.join(command)}[/]")
+            table.add_row(f"  {name}", f"[dim]{separator.join(command)}[/]")
     console.print(table)
 
 

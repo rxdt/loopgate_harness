@@ -169,7 +169,22 @@ PATTERNS = [
     "fmt: skip",
     "yapf: disable",
     "complexipy: ignore",
-    "pragma: no mutate"
+    "pragma: no mutate",
+    # Literal-string offenders. These need no AST check: a pattern is zero code and zero tests, and
+    # it also catches the occurrences inside strings and comments that an AST walk never sees.
+    "time.sleep(",        # blocking wait papering over a race or a flaky test
+    "__import__",         # hides a dependency from the reader and the import graph
+    "assert_called",      # mock interaction asserts: pin HOW code was called, not what it returned
+    "assert_any_call",
+    "assert_has_calls",
+    "assert_not_called",
+    ".call_count",
+    ".mock_calls",
+    # Unresolved merge-conflict markers. Ruff catches these in .py only, as a syntax error, so a
+    # conflicted .json/.yml/.toml would otherwise sail through. '=======' is omitted on purpose: it
+    # collides with ASCII banners in code. A real conflict always carries these two.
+    "<<<<<<<",
+    ">>>>>>>",
 ]
 
 # ==============================================================================

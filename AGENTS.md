@@ -12,6 +12,7 @@
 - The quality minimum is code in `harness/gate.py` (forbidden to agents). Leave it unchallenged.
 - Strengthen tests and coverage. Pass lint, type, and gate checks.
 - Avoid lint suppressions, type-ignores, skipped/xfail tests, or broad exception swallowing.
+- Do not write code that only looks finished: no `...` / `raise NotImplementedError` stubs, no `time.sleep()` to paper over a race.
 - Never run destructive git commands (`rm -rf`, `git reset --hard`, `git branch -D`) unless the user explicitly asks; verify each risky step.
 - Never bypass or reconfigure git hooks.
 
