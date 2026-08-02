@@ -11,13 +11,15 @@ dependencies = [
 dev = [
     "complexipy",
     "hypothesis",
+    "mutmut",
+    "pip-audit",
     "pylint",
     "pyright",
     "pytest",
     "pytest-cov",
     "pytest-xdist",
     "ruff",
-    "semgrep",
+    "semgrep"
 ]
 [project.scripts]
 harness = "harness.cli:main" # creates the executable
