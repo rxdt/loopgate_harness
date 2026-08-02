@@ -1,4 +1,4 @@
-"""Tests for AST-based structural style checks (harness.preferences).
+"""Tests for AST-based structural style checks (preferences.preferences).
 
 The preferences API is a registry of single-node `Check` functions (each takes one `ast.AST`
 node and returns a complaint string or None), plus `preferences_violations`, which walks a file
@@ -13,7 +13,6 @@ import inspect
 
 import pytest
 
-# preferences.py is optional — humans may delete it; skip its tests when it is gone.
 preferences = pytest.importorskip("preferences.preferences")
 preferences_violations = preferences.preferences_violations
 CHECKS = preferences.CHECKS

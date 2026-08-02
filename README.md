@@ -23,8 +23,8 @@
 
 ## TL;DR: Getting Started.
 
-1. `gh repo create my-app --template <your-gh-username>/loopgate_harness --private --clone` **or** ['Use This Template'](https://github.com/new?template_name=loopgate_harness&template_owner=rxdt)
-2. `uv run harness install <your-project-name>`
+1. `gh repo create my-app-name --template <your-gh-username>/loopgate_harness --private --clone` **or** ['Use This Template'](https://github.com/new?template_name=loopgate_harness&template_owner=rxdt)
+2. Install dependancies e.g. `uv sync && source .venv/bin/activate && harness install <your-project-name`.
 3. Write your project goal in [docs/plan.md](docs/plan.md)
 4. `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
 5. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
@@ -51,7 +51,7 @@
 ## Details
 
 > [!IMPORTANT]
-> Default configurations In [`pyproject.toml`](pyproject.toml) Update tool settings, add agent calls, remove or include checks... or leave as it.
+> Default configurations In [`pyproject.toml`](pyproject.toml) Update tool settings, add agent calls, remove or include checks... or leave as is.
 
 `docs/PROMPT.md` tells each agent to pick a `spec` and build. `docs/specs/` say _what_ to build. The agent decides _what next_. You keep `docs/plan.md` current, and specs get rewritten from it (agent is told in `docs/PROMPT.md` to update the specs). Each iteration the agent updates its spec and `PROJECT_STATUS`. Ideas from [ghuntley](https://github.com/ghuntley), How to Ralph Wiggum.
 
@@ -60,16 +60,38 @@
 
 ## Start a project
 
-1. From inside the checkout, run `harness install <your-project-name>` to name the project, installs dependencies, and set up the 3 git hook.
+1. From the root, run `harness install <your-project-name>` to name the project, install dependencies, set up the three git hooks, and delete excess files.
 2. Write your grand vision into `docs/plan.md`.
 3. Optionally add the first spec in `docs/specs/`, or have an agent draft the first specs.
 4. Put product code under `src/` and list new source directories in `pyproject.toml [tool.coverage.run]`.
 5. Strict Ruff rules, type checking, pyright, complexipy, and pytest coverage are set in `pyproject.toml`.
-6. Your coding quirks go in [`src/preferences/preferences.py`](src/preferences/preferences.py).
+6. Your coding quirks go in [`preferences/preferences.py`](preferences/preferences.py).
 7. Run a loop:
 
 ```sh
 harness run <agent> [max_iterations] [max_minutes]  # agent: claude/codex/agy/copilot. ralph loop runner adds prompt
+```
+
+### Works with `uv`, `poetry`, or `pip`
+
+```sh
+uv sync
+source .venv/bin/activate
+harness install <your-project-name>
+harness gate
+harness run <agent>>
+
+poetry install
+poetry run harness install <your-project-name>
+poetry run harness gate
+poetry run harness <agent>
+
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt -e .
+harness install <your-project-name>
+harness gate
+harness run <agent>
 ```
 
 ![L∞P architecture engine flow](.loops.svg)
@@ -114,28 +136,30 @@ Only humans can bypass triggered gates and commit by adding flag `--no-verify`.
 </summary>
 
 ```
-harness/        the gate, loop runner, CLI, custom user checks       (🤖 forbidden)
-  gate.py         mirror the CI locally + preferences.py honored     (🤖 forbidden)
-  tests/          the harness's own tests                            (🤖 forbidden)
-    test_properties.py  hypothesis tests                             (🤖 forbidden)
-.githooks/      pre-commit / pre-push gate hooks                     (🤖 forbidden)
-.github/        CI that re-runs the gate                             (🤖 forbidden)
+harness/        the gate, loop runner, CLI                           (🤖 forbidden directory)
+  gate.py         mirror the CI locally + preferences.py honored
+  cli.py          command-line entry point
+  tests/          the harness's own tests
+  js-scaffold   javascript example to build upon
+preferences/    user-defined preferences not covered by tools        (🤖 forbidden directory)
+tests/
+  preferences/  (🤖 tests/preferences is forbidden directory)
+.githooks/      pre-commit / pre-push gate hooks                     (🤖 forbidden directory)
+.github/        CI that re-runs the gate                             (🤖 forbidden directory)
 pyproject.toml  project + tooling config                             (🤖 forbidden)
 AGENTS.md       rules for agents working in the repo                 (🤖 forbidden)
 docs/PROMPT.md  the standing per-iteration instruction               (human maintained)
-docs/           PLAN, PROJECT_STATUS, PROMPT                          (human maintained plan.md)
+docs/           PLAN, PROJECT_STATUS, PROMPT                         (human or agent maintained plan.md)
 scratchpad/     scratch dir agents can use for temp files            (For the 🤖 to play)
-docs/specs/     WHAT to build, one PRIORITY-bannered file per track
+docs/specs/     WHAT to build, one PRIORITY-bannered file per track  (agent maintained)
 src/            your product/source code (add to coverage source)
-  preferences/
-    preferences.py  user-defined preferences not covered by tools    (🤖 forbidden)
 ```
+
+[`pyproject.toml`](pyproject.toml) is the single source of harness configuration. Humans own it and [`preferences/`](preferences/); both are agent-protected.
 
 If an agent edits a forbidden file, the file will be unstaged (not allowed to commit). A forbidden pattern by an agent (e.g. `# noqa` will also prevent their commit and force them to fix it.)
 
 </details>
-
-[`pyproject.toml`](pyproject.toml) is the single source of harness configuration. Humans own all of it (`pyproject.toml` is agent-forbidden; `harness/preferences.py` is part of `harness/`).
 
 A minimal `[tool.harness.gate]` snippet could look like:
 
@@ -149,7 +173,7 @@ patterns = ["# noqa"]     # banned in agent-authored diffs
 pytest = "uv sync pytest"  # one check command, run by the local gate AND CI
 ```
 
-## ⚠️ Warnings. Read this before a first run.
+## Read this before a first run.
 
 1. **This harness does not sandbox agents.** It _tries_ to harness bad code in loops via gates. Sandboxing agents will, e.g. prevent them from maintaining git, running Playwright, being seen as trustworthy by semgrep leading to cyclical failures, etc.
 
@@ -157,11 +181,13 @@ pytest = "uv sync pytest"  # one check command, run by the local gate AND CI
 
 3. **Mind your usage limits.** `harness run` works agents to the cap set. You can easily burn through your tokens, context windows, and provider usage limits. **Workers continue running as long as there is work to do.**
 
-4. **`docs/PROMPT.md` tells the worker to push every iteration**. Protect `main` and run the loop on its own branch.
+4. **`docs/PROMPT.md` tells the worker to push or not**.
 
-5. **100% coverage does not mean good tests.** That is quantity, not quality. (Upcoming feature: mutation testing)
+5. Protect `main` and run the loop on its own branch.
 
-6. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
+6. **100% coverage does not mean good tests.** That is quantity, not quality. (Upcoming feature: mutation testing)
+
+7. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
 
 ## Commands
 
@@ -180,13 +206,15 @@ harness run codex 2 20
 harness run agy 3 10
 harness run copilot 2 20
 ```
-### Running with claude 
+
+### Running with claude
 
 To run LoopGate with Claude :
 
 ```sh
 harness run claude 2 20
 ```
+
 Note: The worker must be installed and authenticated separately.
 
 <details>
@@ -196,10 +224,10 @@ Note: The worker must be installed and authenticated separately.
 
 - Edit rules at [pyproject.toml](pyproject.toml) for [ruff](https://docs.astral.sh/ruff/), [pylint](https://pypi.org/project/pylint/), [pydoclint](https://pypi.org/project/pydoclint/0.9.1/), [pyright](https://github.com/microsoft/pyright), [pytest](https://docs.pytest.org/en/stable/), [hypothesis](https://hypothesis.readthedocs.io/), [complexipy](https://github.com/rohaquinlop/complexipy)
 - Add forbidden files, directories, or patterns in `[tool.harness.gate]` at [pyproject.toml](pyproject.toml)
-- Add Hypothesis tests in any test directory, examples at [test_properties.py](harness/tests/test_properties.py)
+- Add [Hypothesis](https://hypothesis.readthedocs.io/) tests in any test directory, examples at [test_properties.py](tests/preferences/test_properties.py).
 - [semgrep](https://docs.semgrep.dev/semgrep-ci/sample-ci-configs) has no repo config here. It uses registry configs plus Semgrep's built-in defaults which ignore tests.
 - Edit `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). [ci.yml](.github/workflows/ci.yml) runs the same `harness gate`.
-- Removing existing preferences or add your own preferences at [preferences.py](src/preferences/preferences.py). Current preferences:
+- Remove existing preferences or add your own at [preferences.py](preferences/preferences.py). Current preferences:
 
 ```py
 function_argument_assignment_has_star  # agents use non-specific `def fun(*)`
@@ -254,7 +282,7 @@ npm run --prefix harness/js-scaffold preflight
 - There is NO worktree/branch creation by design. You can create branches/trees and run a loop in each, then merge _(if you really feel like managing that)_
 - Agent duties can be contained to a part of the repo. e.g. Codex-1-frontend uses `docs/specs/frontend.md`, Claude-2-researcher `docs/specs/backend`...
 
-### If you must be a ringleader
+### If you want to run a graph
 
 **Recommendations for running several agents at once on one branch (no worktrees):**
 
