@@ -243,6 +243,7 @@ main.ignore = [
     "tests",
     "**/tests/**",
     "harness/tests",
+    ".worktrees",
     "worktrees",
     "mutants"
 ]
