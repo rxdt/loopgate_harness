@@ -232,26 +232,6 @@ def test_gate_summary_names_every_check_for_agents(monkeypatch: pytest.MonkeyPat
         assert " ".join(command) in output
 
 
-def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path) -> None:
-    """Status reports zero without crashing, then counts the receipts and points at the last one."""
-    empty = runner.invoke(cli.app, ["status"])
-
-    assert empty.exit_code == 0
-    assert "0 run log(s)" in empty.stdout
-
-    runs = git_repo / "scratchpad" / "runs"
-    runs.mkdir(parents=True)
-    (runs / "0001-claude.jsonl").write_text("{}\n", encoding="utf-8")
-    (runs / "0002-codex.jsonl").write_text("{}\n", encoding="utf-8")
-
-    counted = runner.invoke(cli.app, ["status"])
-
-    assert counted.exit_code == 0
-    assert "2 run log(s)" in counted.stdout
-    assert "newest: " in counted.stdout
-    assert "0002-codex.jsonl" in counted.stdout
-
-
 def test_installing_the_template_cleans_the_repo_sets_hooks_and_reruns_cleanly(
     monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -15,7 +14,7 @@ from unittest.mock import Mock, call
 import pytest
 
 from harness import gate
-from harness.tests.conftest import REPO_ROOT, fake_popen
+from harness.tests.conftest import REPO_ROOT, fake_popen, real_hook_repo
 
 
 def stage(repo: Path, name: str, content: str) -> None:
@@ -65,52 +64,6 @@ def get_logged_calls_and_clear(repo: Path) -> list[object]:
     calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
     log.write_text("", encoding="utf-8")
     return calls
-
-
-@pytest.fixture
-def real_hook_repo(request: pytest.FixtureRequest, git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Wire selected tracked hooks to a recorded executable in the disposable repository."""
-    hooks = git_repo / ".active-hooks"
-    hooks.mkdir()
-    for name in (*request.param, "_resolve"):
-        shutil.copy2(REPO_ROOT / ".githooks" / name, hooks / name)
-    gate.run_git(["config", "core.hooksPath", ".active-hooks"], git_repo)
-
-    executable = git_repo / "recorded-harness"
-    executable.write_text(
-        f"""#!{Path(sys.executable).as_posix()}
-import json
-import os
-import sys
-from pathlib import Path
-
-repo = Path.cwd()
-arguments = sys.argv[1:]
-command = arguments[0] if arguments else ""
-recorded = arguments.copy()
-if command == "prepare-commit-msg" and len(recorded) > 1:
-    recorded[1] = Path(recorded[1]).name
-with (repo / "harness.calls").open("a", encoding="utf-8") as handle:
-    handle.write(json.dumps({{"arguments": recorded, "RALPH_LOOP": os.environ.get("RALPH_LOOP")}}) + "\\n")
-real_file = repo / "harness.real"
-real_commands = real_file.read_text(encoding="utf-8").splitlines() if real_file.exists() else []
-if command == "prepare-commit-msg" or command in real_commands:
-    os.chdir({str(REPO_ROOT)!r})
-    from harness import cli, gate
-    os.chdir(repo)
-    gate.REPO_ROOT = repo
-    if command == "preflight":
-        gate.COMMIT_CHECKS = {{}}
-    cli.main(arguments)
-status_file = repo / "harness.exit"
-raise SystemExit(int(status_file.read_text(encoding="utf-8")) if status_file.exists() else 0)
-""",
-        encoding="utf-8",
-    )
-    executable.chmod(0o755)
-    (git_repo / ".git" / "harness-path").write_text(f"{executable}\n", encoding="utf-8")
-    monkeypatch.setenv("RALPH_LOOP", "1")
-    return git_repo
 
 
 @pytest.mark.parametrize("real_hook_repo", [("pre-commit",)], indirect=True)
