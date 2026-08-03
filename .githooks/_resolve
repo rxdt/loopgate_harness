@@ -10,7 +10,7 @@
 #
 # Then, git hook does not require `uv` or `pip` or any specific environment layout.
 
-recorded="${GIT_DIR:-$(git rev-parse --absolute-git-dir)}/harness-path"
+recorded="$(git rev-parse --path-format=absolute --git-common-dir)/harness-path"
 if [ ! -r "$recorded" ]; then
     echo "loopgate: hooks are not installed. Run 'harness install' in this repo." >&2
     exit 1
@@ -21,3 +21,5 @@ if [ ! -x "$HARNESS" ]; then
     echo "loopgate: recorded harness '$HARNESS' is gone. Re-run 'harness install'." >&2
     exit 1
 fi
+
+export PATH="$(dirname "$HARNESS")${PATH:+:$PATH}"

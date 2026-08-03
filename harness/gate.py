@@ -5,7 +5,7 @@
 
 All containment lists and check commands come from [tool.harness] in pyproject.toml, read once at
 import into the constants below. A check is a (name, argv) pair; its `preflight`/`blocking` flags sort
-it into the maps and sets this module runs on. Nothing is hardcoded here.
+it into the maps and sets this module runs on.
 """
 
 from __future__ import annotations
@@ -24,6 +24,8 @@ try:
     from preferences.preferences import preferences_violations as prefs
 except ImportError:  # humans do what they want with preferences.py
     prefs = None
+
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # universal empty tree hash
 
 
 def run_git(args: list[str], repo: Path | None = None, check: bool = True) -> str:
@@ -199,13 +201,12 @@ def prepare_commit_msg(argv: list[str]) -> int:
     Returns:
         Status code integer 0 or 1 (git blocks commit on code 1)
     """
-    if os.environ.get("RALPH_LOOP") != "1":
+    if not os.environ.get("RALPH_LOOP"):
         return 0
     commit_msg_file: str = argv[1] if len(argv) > 1 else ""
     command = argv[2] if len(argv) > 2 else ""
     msg = ""
-    empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # universal empty tree hash
-    ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else empty_tree
+    ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else EMPTY_TREE
     if command in {"merge", "squash", "rebase", "reset", "clean", "filter-branch"}:
         msg = f"You cannot use that git command `{command}`.\n"
     if not run_git(["diff-index", "--cached", "--name-only", f"{ref}"]):

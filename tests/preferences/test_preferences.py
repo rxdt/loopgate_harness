@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import ast
 import inspect
+import keyword
+import string
+from unittest.mock import Mock
 
 import pytest
+from hypothesis import assume, given, strategies
 
 preferences = pytest.importorskip("preferences.preferences")
 preferences_violations = preferences.preferences_violations
@@ -275,6 +279,22 @@ def test_preferences_violations_returns_grouped_str() -> None:
     assert not violations
 
 
+def test_locationless_node_violation_reports_unknown_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `preferences` check reports '?' for missing lineno when its AST node has no parser-provided line.
+
+    Args:
+        monkeypatch: Sets/restores the AST parser for the test.
+    """
+    source = "value = lambda: None\n"
+    tree = ast.parse(source)
+    lambda_node = next(node for node in ast.walk(tree) if isinstance(node, ast.Lambda))
+    del lambda_node.lineno
+    monkeypatch.setattr(ast, "parse", Mock(return_value=tree))
+
+    expected = "m.py:?: Lambda found hurting readability and adding complexity."
+    assert preferences_violations("m.py", source) == expected
+
+
 def test_clean_file_has_no_complaints() -> None:
     """A compliant module produces no complaints (the empty string)."""
     source = (
@@ -338,3 +358,127 @@ def test_syntax_error_raises() -> None:
     """Unparseable source raises SyntaxError; preferences does not swallow it."""
     with pytest.raises(SyntaxError):
         preferences_violations("m.py", "def broken(:\n")
+
+
+# --------------------------------------------------------------------- generated behavior
+
+
+IDENTIFIER_START = string.ascii_letters + "_"
+IDENTIFIER_REST = IDENTIFIER_START + string.digits
+
+
+@strategies.composite
+def identifiers(draw: strategies.DrawFn) -> str:
+    """Draw a valid ASCII Python identifier that is not a keyword."""
+    first = draw(strategies.sampled_from(IDENTIFIER_START))
+    rest = draw(strategies.text(alphabet=IDENTIFIER_REST, max_size=24))
+    name = first + rest
+    assume(not keyword.iskeyword(name))
+    return name
+
+
+def flags(source: str, needle: str) -> bool:
+    """Return whether the preferences output contains the expected text."""
+    checker = preferences_violations
+    return needle in checker("m.py", source) if checker else False
+
+
+@given(name=identifiers())
+def test_underscore_lead_flagged_iff_leading_underscore_not_dunder(name: str) -> None:
+    """Assignment targets are flagged exactly when they use a non-dunder leading underscore."""
+    expected = name.startswith("_") and not name.endswith("__")
+    assert flags(f"{name} = 1\n", "starts with underscore") is expected
+
+
+@given(name=identifiers())
+def test_underscore_rule_holds_for_function_and_argument_names(name: str) -> None:
+    """The underscore rule applies equally to function and argument names."""
+    assume(not name.endswith("__"))
+    expected = name.startswith("_")
+    assert flags(f"def {name}():\n    return 1\n", "starts with underscore") is expected
+    assert flags(f"def f({name}):\n    return {name}\n", "starts with underscore") is expected
+
+
+@strategies.composite
+def class_source(draw: strategies.DrawFn) -> tuple[str, bool]:
+    """Draw a class and whether the pointless-class rule should flag it."""
+    has_base = draw(strategies.booleans())
+    has_decorator = draw(strategies.booleans())
+    has_keyword = draw(strategies.booleans())
+    method_count = draw(strategies.integers(min_value=0, max_value=3))
+
+    decorator = "@deco\n" if has_decorator else ""
+    header_bits = (["Base"] if has_base else []) + (["metaclass=type"] if has_keyword else [])
+    header = f"({', '.join(header_bits)})" if header_bits else ""
+    body = "".join(f"    def m{i}(self):\n        return {i}\n" for i in range(method_count)) or "    x = 1\n"
+    source = f"{decorator}class C{header}:\n{body}"
+    should_flag = not has_base and not has_decorator and not has_keyword and method_count <= 1
+    return source, should_flag
+
+
+@given(case=class_source())
+def test_pointless_class_flagged_iff_plain_and_at_most_one_method(case: tuple[str, bool]) -> None:
+    """Only plain classes with at most one method are pointless."""
+    source, should_flag = case
+    assert flags(source, "no base, decorator, or behavior") is should_flag
+
+
+@strategies.composite
+def comprehension_source(draw: strategies.DrawFn) -> tuple[str, bool]:
+    """Draw a comprehension and whether its generators make it too complex."""
+    generator_count = draw(strategies.integers(min_value=1, max_value=3))
+    if_on = draw(strategies.integers(min_value=-1, max_value=generator_count - 1))
+
+    clauses: list[str] = []
+    for index in range(generator_count):
+        clause = f"for v{index} in xs{index}"
+        if index == if_on:
+            clause += f" if v{index}"
+        clauses.append(clause)
+    source = f"[v0 {' '.join(clauses)}]\n"
+    return source, generator_count > 1 and if_on != -1
+
+
+@given(case=comprehension_source())
+def test_complex_comprehension_flagged_iff_multi_generator_with_filter(case: tuple[str, bool]) -> None:
+    """Comprehensions are complex only with multiple generators and a filter."""
+    source, should_flag = case
+    assert flags(source, "Overly complex comprehension") is should_flag
+
+
+@strategies.composite
+def nested_continue_source(draw: strategies.DrawFn) -> str:
+    """Draw a continue nested beneath an outer loop and two to four more blocks."""
+    depth = draw(strategies.integers(min_value=2, max_value=4))
+    blocks = draw(
+        strategies.lists(strategies.sampled_from(["if cond", "for i in xs"]), min_size=depth, max_size=depth)
+    )
+
+    lines = ["for outer in items:"]
+    indent = "    "
+    for block in blocks:
+        lines.append(f"{indent}{block}:")
+        indent += "    "
+    lines.append(f"{indent}continue")
+    return "\n".join(lines) + "\n"
+
+
+@given(source=nested_continue_source())
+def test_continue_nested_under_stacked_blocks_is_flagged(source: str) -> None:
+    """Mixed nested if/for blocks always trigger the continue nesting rule."""
+    assert flags(source, "Overly-nested 'continue'")
+
+
+def test_single_if_guard_in_a_loop_is_not_flagged() -> None:
+    """A single if guard directly inside a loop remains readable."""
+    assert not flags("for i in items:\n    if skip:\n        continue\n", "Overly-nested 'continue'")
+
+
+def test_shallow_continue_in_single_loop_is_not_flagged() -> None:
+    """A continue directly inside one for loop is allowed."""
+    assert not flags("for x in items:\n    continue\n", "Overly-nested 'continue'")
+
+
+def test_continue_in_while_loop_is_flagged() -> None:
+    """A continue inside a while loop is banned as a freeze risk."""
+    assert flags("while cond:\n    continue\n", "while loop banned")

@@ -1,0 +1,50 @@
+name: Mutation Testing
+
+on:
+  schedule:
+    - cron: "0 0 * * 0" # Weekly at midnight Sunday
+  workflow_dispatch: # adds "Run workflow" button
+
+env:
+  FORCE_COLOR: "1"
+  CLICOLOR_FORCE: "1"
+  TERM: "xterm-256color"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: uv Sync Dependencies
+        run: uv sync
+
+      - name: Harness Checks
+        run: uv run --no-sync harness gate # need tests for Mutmut to target
+
+      - name: Run Mutmut
+        run: mutmut run || true
+
+      - name: Export CI/CD Stats
+        run: mutmut export-cicd-stats
+
+      - name: Upload Mutmut JSON Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutmut-json-report
+          path: mutants/mutmut-cicd-stats.json

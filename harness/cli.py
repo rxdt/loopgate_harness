@@ -61,7 +61,9 @@ def setup_git_hooks(env_bin: Path, is_windows: bool) -> Path:
     rprint("\n[cyan2]Setting git hooks[/cyan2] with `git config core.hooksPath .githooks`:")
     subprocess.run(("git", "config", "core.hooksPath", ".githooks"), cwd=REPO_ROOT_STR, check=True)
     binary = env_bin / ("harness.exe" if is_windows else "harness")
-    recorded = Path(run_git(["rev-parse", "--absolute-git-dir"]).strip()).resolve() / "harness-path"
+    recorded = (
+        Path(run_git(["rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()) / "harness-path"
+    )
     recorded.write_text(f"{binary.as_posix()}\n", encoding="utf-8", newline="\n")
     typer.echo(
         subprocess.run(
@@ -228,7 +230,7 @@ def cleanup(cwd: Path, name: str | None) -> bool:
     tool.setdefault("pyright", tomlkit.table()).update({"include": ["src", "preferences"]})
     tool.setdefault("pytest", tomlkit.table()).setdefault("ini_options", tomlkit.table()).update({
         "testpaths": ["tests"],
-        "pythonpath": ["src"],
+        "pythonpath": [".", "src"],
     })
     coverage = tool.setdefault("coverage", tomlkit.table())
     coverage.setdefault("run", tomlkit.table()).update({"source": ["src", "preferences"]})
