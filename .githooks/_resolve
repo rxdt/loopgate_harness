@@ -21,3 +21,5 @@ if [ ! -x "$HARNESS" ]; then
     echo "loopgate: recorded harness '$HARNESS' is gone. Re-run 'harness install'." >&2
     exit 1
 fi
+
+export PATH="$(dirname "$HARNESS")${PATH:+:$PATH}"
