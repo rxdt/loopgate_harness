@@ -38,10 +38,10 @@ jobs:
         run: uv run --no-sync harness gate # need tests for Mutmut to target
 
       - name: Run Mutmut
-        run: mutmut run || true
+        run: uv run --no-sync mutmut run || true
 
       - name: Export CI/CD Stats
-        run: mutmut export-cicd-stats
+        run: uv run --no-sync mutmut export-cicd-stats
 
       - name: Upload Mutmut JSON Report
         uses: actions/upload-artifact@v4
