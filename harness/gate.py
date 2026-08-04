@@ -22,7 +22,7 @@ from rich.console import Console
 console = Console(force_terminal=True)
 try:
     from preferences.preferences import preferences_violations as prefs
-except ImportError:  # humans do what they want with preferences.py
+except ImportError:  # humans can delete preferences.py
     prefs = None
 
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # universal empty tree hash
@@ -62,6 +62,8 @@ FORBIDDEN = HARNESS.get("FORBIDDEN", {})
 FORBIDDEN_FILES = FORBIDDEN.get("FILES", [])
 FORBIDDEN_DIRS = tuple(FORBIDDEN.get("DIRS", []))
 FORBIDDEN_PATTERNS = FORBIDDEN.get("PATTERNS", [])
+WARN_DIFF_LINES = HARNESS.get("warn_diff_lines")
+ERROR_DIFF_LINES = HARNESS.get("error_diff_lines")  # ~90th percentile of pull requests
 
 
 def colorize(name: str, command: str) -> None:
@@ -117,25 +119,28 @@ def run_non_human_checks() -> list[str]:
     Returns:
         list of problems not caught by lint, type-checking, testing
     """
-    problems: list[str] = []
+    ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else EMPTY_TREE
+    stats = run_git(["diff", ref, "--numstat", "--find-renames"]).splitlines()
+    problems = check_diff_size(stats)
     staged = run_git(["diff", "--cached", "--name-only", "--no-renames", "--diff-filter=ACMRD"]).splitlines()
     if not staged:
-        colorize("EMPTY COMMIT", "nothing staged: do real work, do not commit empty")
-        return problems  # yell, but don't block
-    problems.extend(check_for_bad_patterns())
-    forbidden: list[str] = [
-        path
-        for path in staged
-        if path.casefold() in FORBIDDEN_FILES or path.casefold().startswith(FORBIDDEN_DIRS)
-    ]
-    if forbidden:
-        run_git(["reset", "-q", "HEAD", "--", *forbidden])
-        colorize("EJECTED", f"kept forbidden paths out of the commit: {', '.join(forbidden)}")
+        colorize("EMPTY COMMIT", "nothing staged: do real work, do not commit empty")  # yell, but don't block
+    else:
+        forbidden: list[str] = [
+            path
+            for path in staged
+            if path.casefold() in FORBIDDEN_FILES or path.casefold().startswith(FORBIDDEN_DIRS)
+        ]
+        if forbidden:
+            run_git(["reset", "-q", "HEAD", "--", *forbidden])
+            colorize("EJECTED", f"kept forbidden paths out of the commit: {', '.join(forbidden)}")
+        problems.extend(check_for_bad_patterns())
+        problems.extend(filter(None, check_for_preferences()))
     return ["problems:\n" + "\n".join(problems)] if problems else []
 
 
 def check_for_bad_patterns() -> list[str]:
-    """Check staged files for banned patterns and user-preference breaks (agent-in-loop containment).
+    """Check staged files for banned patterns (agent-in-loop containment).
     Does not unstage anything. Later, if any problem lands in { "fail": ... } the commit is blocked.
 
     Banned patterns are flagged only on ADDED diff lines (a '+' line, never a '+++' header).
@@ -144,7 +149,15 @@ def check_for_bad_patterns() -> list[str]:
         The banned-pattern hits plus any preference violations found in the staged files.
     """
     colorize("BANNED PATTERNS CHECK", "checking for banned patterns in staged files")
-    diff_args = ["diff", "--cached", "--unified=0", "--output-indicator-new=a", "--", ".", ":(exclude)*.md"]
+    diff_args = [
+        "diff",
+        "--cached",
+        "--unified=0",
+        "--output-indicator-new=a",
+        "--",
+        f"*.{languages[0]}",
+        "*.sh",
+    ]
     staged_lines = run_git(diff_args).splitlines()
     problems: list[str] = []
     for line in staged_lines:
@@ -153,8 +166,33 @@ def check_for_bad_patterns() -> list[str]:
                 pattern_and_bare_line = f"'{pattern}' line: {line[1:].strip()}"
                 if pattern.casefold() in line.casefold():
                     problems.append(pattern_and_bare_line)
-    problems.extend(filter(None, check_for_preferences()))
     return problems
+
+
+def check_diff_size(stats: list[str]) -> list[str]:
+    """Report size of pending diff and block a bloated commit if past Lines Of Code (LOC) review cap.
+
+    LOC = added + deleted. Count diff lines, staged and unstaged. An edit is
+    one deletion plus one addition. Docs, lockfiles and binaries are excluded.
+
+    Args:
+        stats: Git numstat rows to total.
+
+    Returns:
+        String in a list naming when line count > ERROR_DIFF_LINES, otherwise empty list
+    """
+    total = 0
+    for line in stats:
+        inserted, deleted, path = line.split("\t", 2)
+        if not (inserted == "-" or path.endswith(".lock")):  # binary or lockfile
+            total += int(inserted) + int(deleted)
+    msg = (
+        f"{total} lines modified\nwarn at {WARN_DIFF_LINES}\nblock at {ERROR_DIFF_LINES}"
+        "\nSuggestion: Refactor bloat, inline helpers, reduce mis-direction, "
+        "re-use fixtures, cut duplication."
+    )
+    colorize("DIFF SIZE", msg)
+    return [f"{total} line diff, max is {ERROR_DIFF_LINES}"] if total >= ERROR_DIFF_LINES else []
 
 
 def check_for_preferences() -> list[str]:
@@ -206,17 +244,17 @@ def prepare_commit_msg(argv: list[str]) -> int:
     commit_msg_file: str = argv[1] if len(argv) > 1 else ""
     command = argv[2] if len(argv) > 2 else ""
     msg = ""
-    ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else EMPTY_TREE
     if command in {"merge", "squash", "rebase", "reset", "clean", "filter-branch"}:
         msg = f"You cannot use that git command `{command}`.\n"
-    if not run_git(["diff-index", "--cached", "--name-only", f"{ref}"]):
-        msg += "Empty-tree commit detected. Stage real work and don't use --allow-empty. Lazy.\n"
+    ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else EMPTY_TREE
+    if not run_git(["diff-index", "--cached", "--name-only", ref]):
+        msg += "Empty commit detected. Stage real work, Don't use --allow-empty. Or say if you're blocked\n"
     if Path(commit_msg_file).exists():
         content = Path(commit_msg_file).read_text(encoding="utf-8")
         actual_text = "\n".join([line for line in content.splitlines() if not line.startswith("#")]).strip()
         if not actual_text:
             msg += "Commit message is blank. Provide an informative message with your agent ID.\n"
     if msg:
-        sys.stdout.write(f"\n[COMMIT BLOCKED]:\n{msg}\n")
+        colorize("PRE COMMIT MESSAGE", msg)
         return 1  # Intercepts git
     return 0

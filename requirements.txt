@@ -1,8 +1,11 @@
 complexipy
 hypothesis
+mutmut
 packaging
+pip-audit
 pylint
 pyright
+pytest-xdist
 pytest
 pytest-cov
 ruff

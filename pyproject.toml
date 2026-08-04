@@ -41,6 +41,11 @@ packages = [{ include = "harness" }]
 # CI runs `harness gate`, so it uses the same commands.
 # Humans own this file (it is agent-forbidden below).
 # ==============================================================================
+[tool.harness]
+languages = ["py"]
+warn_diff_lines = 300   # < 200 generally ok
+error_diff_lines = 400  # ~90th percentile of pull requests
+
 # argv preset per agent for `harness run <agent>`
 [tool.harness.agents]
 claude = [
@@ -67,7 +72,7 @@ agy = [
     "--model", "gemini-3.5-flash-low",
     "--dangerously-skip-permissions",
     "--add-dir", ".",
-    "--log-file", "{log_file}",
+    "--log-file", "{log_path}",
     "--prompt", "-"
 ]
 copilot = [
@@ -76,10 +81,6 @@ copilot = [
     "--output-format", "json", "--stream", "on",
     "--allow-all", "--no-ask-user",
 ]
-
-[tool.harness]
-languages = ["py"]
-
 # EXAMPLE OF WHAT Javascript checks might be
 #
 # [tool.harness.preflight]
@@ -101,6 +102,7 @@ format = ["ruff", "format", "--no-cache", "--check"]
 complexipy = ["complexipy", "."]
 
 [tool.harness.gate]
+audit = ["pip-audit", ".", "--strict", "--progress-spinner", "off"]
 security = [
     "semgrep", "scan",
     "--error",  # exit nonzero on findings so the gate blocks the commit, not just reports
@@ -134,6 +136,7 @@ FILES = [
     "pyrightconfig.json",
     ".pylintrc",
     ".gitmodules",
+    ".gitattributes"
 ]
 PATTERNS = [
     "# noqa",

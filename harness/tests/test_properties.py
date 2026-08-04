@@ -20,33 +20,12 @@ not use function-scoped fixtures with @given; patch per-example state inside hel
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from hypothesis import example, given, settings, strategies
 
 from harness import gate
-
-
-def seed_repo(directory: Path) -> Path:
-    """Create a temp git repository with one commit and point gate's git calls at it."""
-    gate.run_git(["init", "-q"], directory)
-    gate.run_git(["config", "user.email", "harness@test.local"], directory)
-    gate.run_git(["config", "user.name", "harness-test"], directory)
-    (directory / "README.md").write_text("seed\n", encoding="utf-8")
-    gate.run_git(["add", "README.md"], directory)
-    gate.run_git(["commit", "-q", "-m", "seed"], directory)
-    return directory
-
-
-@pytest.fixture(scope="module")
-def scan_repo(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
-    """A temp repo shared by the generated examples, since @given cannot take a per-test fixture."""
-    repo = seed_repo(tmp_path_factory.mktemp("banned-patterns"))
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(gate, "REPO_ROOT", repo)
-        yield repo
 
 
 def scan_staged(repo: Path, source: str) -> list[str]:
