@@ -2,8 +2,8 @@
 <img src=".banner.svg" alt="Blue infinity loop" width="360">
 
 <h1>L∞pGate</h1>
-<h4>Run coding agents strictly andonly accept changes that pass your quality gates.</h4>
-<p>A coding-agent loop harness for Claude, Codex, Copilot, or any CLI agent. A dumb Ralph loop runner tells an agent to "Go!" and hands it a PROMPT. Agents can edit. Gates decide what lands. You set the plan in motion. The loops eat the prompt, and each agent iteration must update specs and commit through guardrails.</p>
+<h4>Run coding agents strictly and only accept changes that pass your quality gates.</h4>
+<p>A loop harness for Claude, Codex, Copilot, or any CLI agent. A loop runner hands each agent a prompt. Agents can edit. Gates decide what lands. You set the plan. Each agent iteration must update specs and commit through quality guardrails.</p>
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Status](https://img.shields.io/badge/github-repo-blue?logo=github)
@@ -24,26 +24,31 @@
 
 ## TL;DR
 
-1. `gh repo create <your-app-name>/<your-app-name> --template rxdt/loopgate_harness --private --clone && cd <your-app-name> && uv run harness install <your-app-name> && source .venv/bin/activate`
+1. `gh repo create <your-github-username>/<your-new-app-name> --template rxdt/loopgate_harness --private --clone && cd <your-new-app-name> && uv run harness install <your-new-app-name> && source .venv/bin/activate`
 2. `harness run codex`
 
-**Requirements**: `pip`, `uv`, or `poetry`. Python 3.11.
+**Requirements**: `pip`, `uv`, or `poetry`. Python 3.11. Linux or MacOS (Windows is experimental.)
 
 ---
 
 ## Features
 
+Each run starts fresh, has clear limits, saves its logs, protects key files, and must pass checks you choose.
+
 - **Quality-first**: Fight the AI slop with standards and style 💯
 - **Worker-agnostic**: Claude, Codex, Copilot, Agy, or any prompt-reading CLI
 - **No lazy**: Agents work, _only if they pass the quality gates you set_ ✅
 - **Repo-as-memory workflow**: specs/status/prompt are durable but code is king, leaving you free 😎
-- **Built-in stack**: Ruff, Pyright, Pylint, Semgrep, Complexipy, Hypothesis, Mutmut, 100% coverage ☑☑☑
+- **Built-in stack**: Linting, Format Check, Type-Checks, Dependancy Audit, Property-testing, Mutation-testing, 100% test coverage, Semgrep Security ☑☑☑
 - **Progressive**: Preflight vs full gate split 🆗
-- **Forbidden-path containment**: Don't touch that!-configurable 🛑
+- **Forbidden-file containment**: Don't touch that!-configurable 🛑
 - **Installable project template**: `harness install <your-app-name>` gets the repo ready ▶️
 - **No-rot**: Fresh-context agent iterations to reduce context rot 🔄
-- **Simple**: One command setup gets you git hooks and everything else
-- **No-waste**: Timeouts and time-limits for all loops ⏸
+- **Simple**: One-command setup gets you going
+- **Hooks and CI ready-to-go:** Pre-commit, pre-push, and commit-message hooks + [`CI`](.github/workflows/ci.yml) are defined and already work with the checks
+- **No-waste**: Timeouts and time-limits for all loops ⏰
+- **Diff size guardrails**: Agent changes warn at 300 lines and block at 400 📖
+- **No empty work**: Agents blocked from empty commits
 - **Agent containment prioritized**: Stop the madness (and [Semgrep](https://semgrep.dev/) for safety) 🔓
 
 ---
@@ -60,10 +65,10 @@
 
 ### Start a project
 
-1. `gh repo create my-app-name --template <your-gh-username>/loopgate_harness --private --clone` **or**
+1. `gh repo create <your-github-username>/<your-new-app-name> --template rxdt/loopgate_harness --private --clone` **or**
    ['Use This Template'](https://github.com/new?template_name=loopgate_harness&template_owner=rxdt)
 2. Source your environment (if applicable)
-3. From the root, run `harness install <your-project-name>` to name the project, install dependencies, set up the git hooks, and delete excess files. Install dependencies e.g. `uv sync && source .venv/bin/activate && harness install <your-project-name`.
+3. From the root, run `harness install <your-project-name>` to name the project, install dependencies, set up the git hooks, and delete excess files. Install dependencies e.g. `uv sync && source .venv/bin/activate && harness install <your-project-name>`.
 4. `git commit` (the `install` command updates the repo)
 5. Write your grand vision in [docs/plan.md](docs/plan.md)
 6. Optionally add the first spec in `docs/specs/` (or leave it to the agents to draft the first specs based on your `plan.md`)
@@ -73,11 +78,6 @@
 9. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
 10. Strict Ruff rules, type-checking Pyright, Complexipy, and Pytest coverage are set in [`pyproject.toml`](pyproject.toml).
 11. Your coding quirks go in [`preferences/preferences.py`](preferences/preferences.py).
-12. Loop!:
-
-```sh
-harness run <agent> [max_iterations] [max_minutes]  # agent: claude/codex/agy/copilot. ralph loop runner injects prompt
-```
 
 ### Works with `uv`, `poetry`, or `pip`
 
@@ -115,9 +115,13 @@ The repo is the only memory. Each iteration is a fresh-context agent.
 - every git push runs the full gate: lint, types, semgrep, tests, 100% coverage
 - the loop stops at `max_iterations`, a nonzero worker exit, or a timeout
 - Unspecified iterations/minutes → default to 2 iterations × 20 minutes each
+- Each run streams agent 'thought' output live and is saved in a local scratchpad log
 - **The harness is worker-agnostic.** Any agent CLI that reads a prompt from stdin and can edit/commit works.
 
 ![L∞PS Agents](.loops_agents.svg)
+
+<details>
+  <summary>
 
 ## Directory Layout
 
@@ -149,26 +153,16 @@ If an agent edits a forbidden file, the file will be unstaged (not allowed to co
 
 </details>
 
-A minimal `[tool.harness.gate]` snippet could look like:
-
-```toml
-[tool.harness.forbidden]
-dirs = ["harness/"]       # agents may not commit changes here
-iles = ["pyproject.toml"]
-patterns = ["# noqa"]     # banned in agent-authored diffs
-
-[tool.harness.gate]
-pytest = "uv sync pytest"  # one check command, run by the local gate AND CI
-```
-
 ## Commands
 
-Tool commands are defined once, in `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). The local gate and CI both derive them from there.
+Tool commands are defined once, in `[tool.harness]` in [pyproject.toml](pyproject.toml). The local gate and CI both derive them from there.
 
 ```sh
 harness install <your-project-name>  # rewrite [project] name, uv sync, set core.hooksPath to .githooks
 harness preflight  # fast checks: preferences, ruff lint + format (plus loop containment)
-harness gate  # full pass: preferences, ruff, format, pyright, pylint, complexipy, semgrep, pytest @ 100% cov, hypothesis
+harness gate  # full pass: preferences, ruff, format, pyright, pylint, complexipy, semgrep, pip-audit, pytest @ 100% cov, hypothesis
+harness info  # show configured agents, checks, and protected paths
+harness status  # count run logs and show the newest log
 RALPH_LOOP=1 harness gate  # to run as if you are the agent in the loop
 harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/copilot, defaults: 2 20 True
 
@@ -178,16 +172,6 @@ harness run codex 2 20
 harness run agy 3 10
 harness run copilot 2 20
 ```
-
-### Running with claude
-
-To run LoopGate with Claude :
-
-```sh
-harness run claude 2 20
-```
-
-Note: The worker must be installed and authenticated separately.
 
 <details>
   <summary>
@@ -239,14 +223,14 @@ You don’t have to. The loop runner, Ralph, and the CLI take a prompt, launch a
 
 The included [`harness/js-scaffold`](harness/js-scaffold/package.json) is a simple JavaScript **example** to expand on. Go to [pyproject.toml line 75](pyproject.toml#L75). Update checks. Put `js` into list `[tool.harness].languages`. Remove `py` if unused.
 
-- **Why not just a shell loop?**
-
-A shell loop only reruns an agent. LoopGate ensures fresh context, durable repo state, time and iteration limits, protected paths, and quality gates that stop bad changes _before_ they land.
-
 ```
 npm run --prefix harness/js-scaffold gate
 npm run --prefix harness/js-scaffold preflight
 ```
+
+- **Why not just a shell loop?**
+
+A shell loop only reruns an agent. LoopGate ensures fresh context, durable repo state, time and iteration limits, protected paths, and quality gates that stop bad changes _before_ they land.
 
 </details>
 
@@ -256,7 +240,7 @@ npm run --prefix harness/js-scaffold preflight
 ## Coordination </summary>
 
 - Use `git log --oneline <branch>..HEAD` to show what's unpushed.
-- There is NO worktree/branch creation by design. You can create branches/trees and run a loop in each, then merge _(if you really feel like managing that)_
+- There is NO worktree/branch creation by design. You can create branches/trees and run a loop in each, then merge _(if you feel like managing that)_
 - Agent duties can be contained to a part of the repo. e.g. Codex-1-frontend uses `docs/specs/frontend.md`, Claude-2-researcher `docs/specs/backend`...
 
 ### If you want to run a graph
@@ -294,7 +278,7 @@ npm run --prefix harness/js-scaffold preflight
 - No branch/worktree creation in this harness was intentional:
   1. For simplicity and maintainability of the framework.
   2. Because a fresh iteration can't see the unmerged work in another worktree, so agents miss context and scramble to merge while conflicts pile up.
-  3. Change this behavior if you're comfortable with granting agents machine access, feeding context to agents, and managing rapidly moving git history.
+  3. Change this behavior as you like.
 
 </details>
 
@@ -316,12 +300,12 @@ npm run --prefix harness/js-scaffold preflight
 
 7. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
 
-## Safety
+### Safety
 
 `harness run` launches an autonomous LLM worker with the configured permissions, e.g.
 `--permission-mode acceptEdits` or `--sandbox danger-full-access`.
 
-The gate bounds what any **commit** may touch, but the worker itself is **not** sandboxed to this repo unless you set that config. Consider the balance: without access it cannot do much. With machine access it can wreak havoc. Under a permissive mode it can run arbitrary shell. You are authorizing real changes. Choose the worker and permission mode deliberately.
+The gate bounds **commits**, but the worker itself is **not** sandboxed to this repo unless you set that config. Consider the balance: without access it cannot do much. With machine access it can wreak havoc. Under a permissive mode it can run arbitrary shell. You are authorizing real changes. Choose the permission mode deliberately.
 
 #### The Gate: Tiered Checks
 
@@ -330,7 +314,4 @@ Ruff lint + check format for everyone, _plus_ **containment** for the agents. Se
 
 ✅ `harness gate` (CI/PR pre-push). Local checks mirror CI → ruff lint + format report-only, pyright, pylint, semgrep, complexipy, hypothesis, pytest @ 100% cov.
 
-Only humans can bypass triggered gates and commit by adding flag `--no-verify`.
-
-<details>
-  <summary>
+**Only humans may bypass triggered gates and commit by adding flag `--no-verify`.**

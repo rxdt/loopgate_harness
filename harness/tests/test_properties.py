@@ -26,7 +26,6 @@ import pytest
 from hypothesis import example, given, settings, strategies
 
 from harness import gate
-from harness.tests.conftest import scan_repo
 
 
 def scan_staged(repo: Path, source: str) -> list[str]:
