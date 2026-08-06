@@ -8,7 +8,9 @@ set -eu
 # Containment in gate.py only runs when RALPH_LOOP is set, and that variable is lost the moment
 # anything clears the environment. Ask the detector instead of trusting it: it is fail-closed, so
 # containment goes back on unless a human is at an interactive terminal. Humans keep --no-verify.
-if harness/agent_detect.sh >/dev/null; then
+detector="$(dirname "$0")/../harness/agent_detect.sh"
+# Fail closed both ways: if the detector is missing or not executable, assume an agent.
+if [ ! -x "$detector" ] || "$detector" >/dev/null; then
     RALPH_LOOP=1
     export RALPH_LOOP
 fi

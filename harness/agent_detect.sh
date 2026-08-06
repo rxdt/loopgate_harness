@@ -20,8 +20,10 @@
 #      run the agent inside the extension host, so the ancestor chain is `node`/`code`, never an
 #      agent binary.
 #   3. NO CONTROLLING TERMINAL. The one signal that generalises. A human running `git commit` types
-#      it at a terminal, which means a pty -- including the IDE's own integrated terminal. An agent
-#      spawning git through child_process/subprocess gets no pty, whatever IDE it lives in.
+#      it at a terminal -- including the IDE's own integrated terminal -- so the process has a
+#      controlling terminal. An agent spawning git through child_process/subprocess has none,
+#      whatever IDE it lives in. Note CONTROLLING: git redirects a hook's stdin, so `[ -t 0 ]` is
+#      false for humans too and cannot be used here. See the measurements at signal 3 below.
 #
 # KNOWN FALSE POSITIVE, and it is the safe direction: committing from a GUI button (VS Code's Source
 # Control panel, GitKraken) has no pty either, so a human doing that is treated as an agent and gets
@@ -103,23 +105,38 @@ for _ in $(seq 1 12); do
 done
 
 # ------------------------------------------------------------ signal 3: no controlling terminal
-# A human typed this at a terminal, so stdin is a pty. Anything that spawned git programmatically
-# has no terminal on stdin, whether it lives in a shell, an editor or CI.
+# A human typed this at a terminal, so the process has a CONTROLLING terminal. Anything that spawned
+# git programmatically has none, whether it lives in a shell, an editor or CI.
+#
+# It must be the controlling terminal and NOT `[ -t 0 ]`. Git runs hooks with stdin redirected, so
+# inside a hook -- the only place this script is used -- `[ -t 0 ]` is false for a human too, and
+# every commit would look like an agent. Measured in a real pre-commit hook:
+#   human at a terminal:  [ -t 0 ] no | controlling tty pts/0 | /dev/tty openable yes
+#   agent, no pty:        [ -t 0 ] no | controlling tty ?     | /dev/tty openable no
+#
+# Two ways of asking, because either can be unavailable: opening /dev/tty is the POSIX question, and
+# `ps -o tty=` is the readable one. Either answering "yes" is enough. An agent that allocates a pty
+# AND adopts it as its controlling terminal defeats this, which is what signals 1 and 2 are for.
+terminal_name=$(ps -o tty= -p $$ 2>/dev/null | tr -d ' ')
 interactive=""
-if [ -t 0 ]; then
+if (: < /dev/tty) 2>/dev/null; then
     interactive="yes"
 fi
+case "$terminal_name" in
+    '' | '?' | '??' | '-') ;;
+    *) interactive="yes" ;;
+esac
 
 if [ -n "$explain" ]; then
-    echo "environment marker : ${marker_found:-none of the known names are set}"
-    echo "agent in ancestry  : ${ancestor_found:-none}"
-    echo "ancestor chain     :${chain:- (empty)}"
-    echo "stdin is a terminal: ${interactive:-no}"
-    echo "controlling tty    : $(ps -o tty= -p $$ 2>/dev/null | tr -d ' ')"
+    echo "environment marker  : ${marker_found:-none of the known names are set}"
+    echo "agent in ancestry   : ${ancestor_found:-none}"
+    echo "ancestor chain      :${chain:- (empty)}"
+    echo "controlling terminal: ${terminal_name:-none}"
+    echo "human at a terminal : ${interactive:-no}"
     if [ -n "$marker_found" ] || [ -n "$ancestor_found" ] || [ -z "$interactive" ]; then
-        echo "verdict            : AGENT (containment on)"
+        echo "verdict             : AGENT (containment on)"
     else
-        echo "verdict            : human (containment off)"
+        echo "verdict             : human (containment off)"
     fi
 fi
 

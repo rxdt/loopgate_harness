@@ -226,9 +226,18 @@ complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefe
 |---|---|---|
 | 1. environment marker (`CLAUDECODE`, `CODEX_*`, …) | agents that advertise themselves | most IDE agents |
 | 2. agent binary in the process ancestry | a CLI agent that unset its own variables | IDE agents — the chain is `node`/`code`, never an agent binary |
-| 3. **no controlling terminal** | everything above, plus IDE agents, CI, scripts | an agent that allocates a pty (signals 1–2 cover it) |
+| 3. **no controlling terminal** | everything above, plus IDE agents, CI, scripts | an agent that allocates a pty and adopts it (signals 1–2 cover it) |
 
-Signal 3 is the one that generalises. A human types `git commit` at a terminal, so stdin is a pty — including the IDE's own integrated terminal. An agent spawning git through `child_process`/`subprocess` gets no pty, whatever editor it lives in.
+Signal 3 is the one that generalises. A human types `git commit` at a terminal — including the IDE's own integrated terminal — so the process has a *controlling* terminal. An agent spawning git through `child_process`/`subprocess` has none, whatever editor it lives in.
+
+It has to be the **controlling** terminal, not `[ -t 0 ]`. Git redirects a hook's stdin, so inside a hook — the only place this runs — `[ -t 0 ]` is false for humans too. Measured in a real `pre-commit`:
+
+| | `[ -t 0 ]` | controlling tty | `/dev/tty` openable |
+|---|---|---|---|
+| human at a terminal | no | `pts/0` | yes |
+| agent, no pty | no | `?` | no |
+
+Verified end to end by committing a forbidden-path edit through the real hook: as a human it lands, as an agent it is ejected, and with the detector removed it is ejected too (the hooks fail closed if it is missing).
 
 **Known false positive, in the safe direction:** committing from a GUI button (VS Code's Source Control panel, GitKraken) has no pty either, so a human doing that gets containment. The cost is an unstaged file and a message saying why; `--no-verify` is still the escape hatch. The opposite mistake leaves no trace at all.
 
