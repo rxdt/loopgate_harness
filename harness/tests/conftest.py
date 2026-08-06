@@ -148,5 +148,7 @@ def scan_repo(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """A temp repo shared by the generated examples, since @given cannot take a per-test fixture."""
     repo = seed_repo(tmp_path_factory.mktemp("banned-patterns"))
     with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("RALPH_LOOP", "1")
         patch.setattr(gates, "repo_root", repo)
+        patch.setattr(gates, "commit_checks", {})
         yield repo

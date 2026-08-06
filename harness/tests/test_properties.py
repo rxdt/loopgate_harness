@@ -33,7 +33,7 @@ def scan_staged(repo: Path, source: str) -> list[str]:
     """Stage one file, run the real banned-pattern scan over the real index, then clear the index."""
     (repo / "x.py").write_text(source, encoding="utf-8")
     gate.run_git(["add", "x.py"], repo)
-    problems = gates.check_for_bad_patterns()
+    problems = gates.run_preflight()["fail"]
     gate.run_git(["reset", "-q"], repo)
     return problems
 
@@ -78,38 +78,49 @@ def test_mixed_case_forbidden_entry_still_matches(
     lowercase. A mixed-case entry has to match too, which it only does because the scan casefolds the
     pattern as well as the line.
     """
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    monkeypatch.setattr(gates, "commit_checks", {})
     monkeypatch.setattr(gates, "forbidden_patterns", (pattern_in_toml,))
     problems = scan_staged(git_repo, "value = 1  # hookspath\n")
     assert any(problem.startswith(f"'{pattern_in_toml}' line:") for problem in problems)
 
 
-def test_banned_pattern_ignores_the_diff_file_header(git_repo: Path) -> None:
+def test_banned_pattern_ignores_the_diff_file_header(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """A file whose name contains a forbidden pattern puts that pattern in the diff's '+++ b/...'
     header. The header is not code an agent added, so it must not be reported.
     """
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    monkeypatch.setattr(gates, "commit_checks", {})
     (git_repo / "noqa_helpers.py").write_text("value = 1\n", encoding="utf-8")
     gate.run_git(["add", "noqa_helpers.py"], git_repo)
-    assert gates.check_for_bad_patterns() == []
+    assert gates.run_preflight() == {"pass": [], "fail": [], "warn": []}
 
 
-def test_banned_pattern_ignores_a_removed_line(git_repo: Path) -> None:
+def test_banned_pattern_ignores_a_removed_line(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Deleting a line that carries an escape hatch is the fix, not the offense, so a removed '-' line
     is never reported.
     """
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    monkeypatch.setattr(gates, "commit_checks", {})
     scan_staged(git_repo, "value = 1  # noqa\n")
     gate.run_git(["add", "x.py"], git_repo)
     gate.run_git(["commit", "-q", "-m", "seed noqa"], git_repo)
     assert scan_staged(git_repo, "value = 1\n") == []
 
 
-def test_casefold_colliding_forbidden_paths_are_both_ejected(git_repo: Path) -> None:
+def test_casefold_colliding_forbidden_paths_are_both_ejected(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
     """Two forbidden paths differing only in case must both be unstaged. A case-insensitive filesystem
     cannot hold both as files, so they go into the index directly; neither may slip through.
     """
     colliding = ["harness/Gate.py", "harness/gate.py"]
+    monkeypatch.setenv("RALPH_LOOP", "1")
     blob = gate.run_git(["hash-object", "-w", "README.md"], git_repo).strip()
     for path in colliding:
         gate.run_git(["update-index", "--add", "--cacheinfo", f"100644,{blob},{path}"], git_repo)
-    results: dict[str, list[str]] = {"pass": [], "fail": [], "warn": []}
-    gates.run_non_human_checks(results)
-    assert gate.run_git(["diff", "--cached", "--name-only"]).splitlines() == []
+    monkeypatch.setattr(gates, "commit_checks", {})
+    assert (
+        gates.run_preflight(),
+        gate.run_git(["diff", "--cached", "--name-only"]).splitlines(),
+    ) == ({"pass": [], "fail": [], "warn": []}, [])

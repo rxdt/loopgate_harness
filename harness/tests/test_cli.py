@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import io
 import os
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -21,7 +20,7 @@ from click import unstyle
 from typer.testing import CliRunner
 
 from harness import cli, gate
-from harness.gate import gates
+from harness.gate import Gate, gates
 from harness.tests.conftest import REPO_ROOT, fake_popen
 
 if TYPE_CHECKING:
@@ -177,55 +176,57 @@ def test_every_supported_agent_has_a_nonempty_command() -> None:
     )
 
 
-def test_preflight_summary_names_every_check_for_agents(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
-) -> None:
-    """The CLI renders the result produced by the real preflight containment path."""
-    monkeypatch.setenv("RALPH_LOOP", "1")
-    monkeypatch.setattr(gates, "commit_checks", {})
-    source = git_repo / "src" / "mod.py"
-    source.parent.mkdir()
-    source.write_text("value = 1\n", encoding="utf-8")
-    gate.run_git(["add", "src/mod.py"], git_repo)
-    result = runner.invoke(cli.app, ["preflight"])
-    output = " ".join(unstyle(result.stdout).split())
-
-    assert (result.exit_code, output) == (
-        0,
-        (
-            "PHASE: AGENT CHECKS running non-human agent checks "
-            f"PHASE: DIFF SIZE 1 lines modified warn at 75% {WARNING_THRESHOLD} "
-            f"block at {gates.error_diff_lines} Suggestion: Refactor bloat, inline helpers, "
-            "reduce mis-direction, re-use fixtures, cut duplication, slim down if-elif-else blocks. "
-            "PHASE: BANNED PATTERNS CHECK checking for banned patterns in staged files "
-            "PHASE: USER PREFERENCES checking that user's preferences are respected "
-            "Harness Summary RESULT CHECK ok: preflight pass"
+@pytest.mark.parametrize(
+    ("command", "source", "expected"),
+    [
+        pytest.param(
+            "preflight",
+            "value = 1\n",
+            (0, "Harness Summary RESULT CHECK ok: preflight pass"),
+            id="preflight-passes",
         ),
-    )
-
-
-def test_gate_summary_names_every_check_for_agents(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """The CLI rejects the result produced by the real gate containment path."""
+        pytest.param(
+            "gate",
+            "_bad = 1\n",
+            (
+                1,
+                (
+                    "Harness Summary RESULT CHECK FAILED "
+                    "src/mod.py:1: Name '_bad' starts with underscore rejected by harness"
+                ),
+            ),
+            id="gate-rejects",
+        ),
+    ],
+)
+def test_cli_summaries_report_complete_agent_check_results(
+    command: str,
+    source: str,
+    expected: tuple[int, str],
+    monkeypatch: pytest.MonkeyPatch,
+    git_repo: Path,
+) -> None:
+    """Preflight and gate render every containment phase and preserve the final verdict exactly."""
+    exit_code, summary = expected
     monkeypatch.setenv("RALPH_LOOP", "1")
-    monkeypatch.setattr(gates, "full_checks", {})
-    source = git_repo / "src" / "mod.py"
-    source.parent.mkdir()
-    source.write_text("_bad = 1\n", encoding="utf-8")
+    monkeypatch.setattr(gates, "commit_checks" if command == "preflight" else "full_checks", {})
+    source_path = git_repo / "src" / "mod.py"
+    source_path.parent.mkdir()
+    source_path.write_text(source, encoding="utf-8")
     gate.run_git(["add", "src/mod.py"], git_repo)
-    result = runner.invoke(cli.app, ["gate"])
+    result = runner.invoke(cli.app, [command])
     output = " ".join(unstyle(result.stdout).split())
 
     assert (result.exit_code, output) == (
-        1,
+        exit_code,
         (
             "PHASE: AGENT CHECKS running non-human agent checks "
-            f"PHASE: DIFF SIZE 1 lines modified warn at 75% {WARNING_THRESHOLD} "
-            f"block at {gates.error_diff_lines} Suggestion: Refactor bloat, inline helpers, "
+            f"PHASE: DIFF SIZE 1 lines modified. WARN at 75% {WARNING_THRESHOLD} lines, "
+            f"ERROR at {gates.error_diff_lines}. Suggestion: Refactor bloat, inline helpers, "
             "reduce mis-direction, re-use fixtures, cut duplication, slim down if-elif-else blocks. "
             "PHASE: BANNED PATTERNS CHECK checking for banned patterns in staged files "
             "PHASE: USER PREFERENCES checking that user's preferences are respected "
-            "Harness Summary RESULT CHECK FAILED problems: src/mod.py:1: Name '_bad' starts with underscore "
-            "rejected by harness"
+            f"{summary}"
         ),
     )
 
@@ -583,85 +584,6 @@ def test_tracked_hooks_call_registered_commands_without_venv_paths(hook: str) ->
     assert "uv" not in text
 
 
-def run_resolver(git_repo: Path, path: str | None = None) -> subprocess.CompletedProcess[str]:
-    """Source the real resolver in a disposable Git repository."""
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    if path is not None:
-        env["PATH"] = path
-    env["RALPH_LOOP"] = "1"
-    return subprocess.run(
-        [
-            "/bin/sh",
-            "-eu",
-            "-c",
-            '. "$1"; printf \'%s\\n\' "$HARNESS"',
-            "resolver-test",
-            str(REPO_ROOT / ".githooks" / "_resolve"),
-        ],
-        cwd=git_repo,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-    )
-
-
-def test_resolver_uses_valid_recorded_harness(git_repo: Path) -> None:
-    """A valid harness record is used without repair."""
-    executable = shutil.which("harness")
-    assert executable
-    recorded = git_repo / ".git" / "harness-path"
-    recorded.write_text(f"{executable}\n", encoding="utf-8")
-
-    result = run_resolver(git_repo)
-
-    assert result.returncode == 0
-    assert result.stdout == f"{executable}\n"
-    assert not result.stderr
-    assert recorded.read_text(encoding="utf-8") == f"{executable}\n"
-
-
-def test_resolver_records_discoverable_harness(git_repo: Path) -> None:
-    """A missing record is restored from the installed harness on PATH."""
-    executable = shutil.which("harness")
-    assert executable
-
-    result = run_resolver(git_repo)
-
-    assert result.returncode == 0
-    assert result.stdout == f"{executable}\n"
-    assert (git_repo / ".git" / "harness-path").read_text(encoding="utf-8") == f"{executable}\n"
-    assert "Re-adding file 'harness-path'." in result.stderr
-
-
-def test_resolver_replaces_stale_harness_record(git_repo: Path) -> None:
-    """A stale record is replaced by the installed harness on PATH."""
-    executable = shutil.which("harness")
-    assert executable
-    recorded = git_repo / ".git" / "harness-path"
-    recorded.write_text(f"{git_repo / 'missing-harness'}\n", encoding="utf-8")
-
-    result = run_resolver(git_repo)
-
-    assert result.returncode == 0
-    assert result.stdout == f"{executable}\n"
-    assert recorded.read_text(encoding="utf-8") == f"{executable}\n"
-    assert "Re-adding file 'harness-path'." in result.stderr
-
-
-def test_resolver_names_install_when_harness_is_unavailable(git_repo: Path) -> None:
-    """A missing record and executable receives the install instruction."""
-    git = shutil.which("git")
-    assert git
-    system_path = str(Path(git).parent)
-    assert not shutil.which("harness", path=system_path)
-
-    result = run_resolver(git_repo, system_path)
-
-    assert result.returncode == 1
-    assert result.stderr == "loopgate: hooks are not installed. Run 'harness install' in this repo.\n"
-
-
 @pytest.mark.parametrize(
     ("arguments", "code"),
     [
@@ -675,11 +597,11 @@ def test_prepare_commit_msg_forwards_gits_own_arguments(
     """The hook command hands git's own arguments to the gate logic and exits with its status."""
     seen: list[list[str]] = []
 
-    def commit_msg(argv: list[str]) -> int:
+    def commit_msg(_gate: Gate, argv: list[str]) -> int:
         seen.append(argv)
         return code
 
-    monkeypatch.setattr(gates, "prepare_commit_msg", commit_msg)
+    monkeypatch.setattr(Gate, "prepare_commit_msg", commit_msg)
 
     result = runner.invoke(cli.app, ["prepare-commit-msg", *arguments])
 

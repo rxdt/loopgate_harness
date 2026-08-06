@@ -346,8 +346,7 @@ ignore = [
     "COM812",   # Let Ruff format own trailing commas to avoid formatter conflicts, missing-trailing-comma
     "PLR2004",  # Allow 'magic values" (unnamed numbers), start-process-with-partial-path
     "S607",     # Allow resolving git/uv from PATH, start-process-with-partial-path
-    "RUF201",    # Do not complain no string rule-codes-in-selectors (too new since v.0.15.22)
-    "PLR0904"
+    "RUF201"    # Do not complain no string rule-codes-in-selectors (too new since v.0.15.22)
 ]
 [tool.ruff.lint.pylint]      # Prevent unreadable complexity and code
 max-nested-blocks = 4        # Stop indentation madness

@@ -72,11 +72,11 @@ class Gate:
             else:
                 results["fail"].append(name)
         if os.environ.get("RALPH_LOOP"):
-            self.run_non_human_checks(results)
+            self._run_non_human_checks(results)
 
         return results
 
-    def run_non_human_checks(self, results: dict[str, list[str]]):
+    def _run_non_human_checks(self, results: dict[str, list[str]]):
         """Runs checks on non-humans only. Checks things that linters or other chekcs to do not check.
         Unstages files that should never be touched.
 
@@ -86,7 +86,7 @@ class Gate:
         colorize("AGENT CHECKs", "running non-human agent checks")
         ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else self.EMPTY_TREE
         stats = run_git(["diff", ref, "--numstat", "--find-renames"]).splitlines()
-        self.check_diff_size(stats, results)
+        self._check_diff_size(stats, results)
         staged = run_git([
             "diff",
             "--cached",
@@ -105,10 +105,10 @@ class Gate:
             if forbidden:
                 run_git(["reset", "-q", "HEAD", "--", *forbidden])
                 colorize("EJECTED", f"kept forbidden paths out of the commit: {forbidden}")
-            results["fail"].extend(self.check_for_bad_patterns())
-            results["fail"].extend(filter(None, self.check_for_preferences()))
+            results["fail"].extend(self._check_for_bad_patterns())
+            results["fail"].extend(filter(None, self._check_for_preferences()))
 
-    def check_for_bad_patterns(self) -> list[str]:
+    def _check_for_bad_patterns(self) -> list[str]:
         """Check staged files for banned patterns (agent-in-loop containment).
         Does not unstage anything. Later, if any problem lands in { "fail": ... } the commit is blocked.
 
@@ -129,7 +129,7 @@ class Gate:
                         problems.append(pattern_and_bare_line)
         return problems
 
-    def check_diff_size(self, stats: list[str], results: dict[str, list[str]]):
+    def _check_diff_size(self, stats: list[str], results: dict[str, list[str]]):
         """Report size of pending diff and block a bloated commit if past Lines Of Code (LOC) review cap.
 
         LOC = added + deleted. Count diff lines, staged and unstaged. An edit is
@@ -156,7 +156,7 @@ class Gate:
         elif total > warn_at_75:
             results["warn"].append(msg)
 
-    def check_for_preferences(self) -> list[str]:
+    def _check_for_preferences(self) -> list[str]:
         """Checks user preferences honored. Currently only a preferences.py file exists. New languages should
         add their own.
 
