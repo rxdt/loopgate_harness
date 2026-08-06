@@ -292,9 +292,12 @@ def test_agent_iteration_is_contained_and_rejected(
         get_logged_calls_and_clear(real_hook_repo),
     ) == (True, True, initial_head, [prepare])
     message_file = real_hook_repo / ".git" / "COMMIT_EDITMSG"
-    message_file.write_text("# generated comment only\n", encoding="utf-8")
+    message_file.write_text("\n\n# generated comment only\n", encoding="utf-8")
     assert gates.prepare_commit_msg(["prepare-commit-msg", str(message_file), "message"]) == 1
-    assert "Commit message is blank" in capsys.readouterr().out
+    assert capsys.readouterr().out == (
+        "PHASE: PRE COMMIT MESSAGE\n"
+        "Commit message is blank. Provide an informative message with your agent ID.\n\n"
+    )
 
     bad = git_process(real_hook_repo, "commit", "-q", "-m", "bad and forbidden work")
     assert (
@@ -381,7 +384,7 @@ def test_agent_iteration_that_does_the_work_lands(
         == 0
     )
     (git_repo / ".git" / "COMMIT_EDITMSG").write_text("add the feature\n", encoding="utf-8")
-    assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG", "commit"]) == 0
+    assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG"]) == 0
     monkeypatch.setattr(gates, "commit_checks", {})
     assert (
         gates.run_preflight(),
@@ -565,15 +568,16 @@ def test_diff_size_counts_only_relevant_changed_lines(
     """Count additions, deletions, and docs while excluding generated and binary files."""
     monkeypatch.setenv("RALPH_LOOP", "1")
     monkeypatch.setattr(gates, "commit_checks", {})
-    stage(git_repo, "src/mod.py", "".join(f"old_{line} = {line}\n" for line in range(5)))
+    stage(git_repo, "src/mod.py", "".join(f"old_{line} = {line}\n" for line in range(WARNING_THRESHOLD)))
     gate.run_git(["commit", "-q", "-m", "seed rewrite"], git_repo)
-    stage(git_repo, "src/mod.py", "".join(f"new_{line} = {line}\n" for line in range(3)))
+    stage(git_repo, "src/mod.py", "new = 1\n")
 
     rewritten = gates.run_preflight()
     rewrite_output = capfd.readouterr().out
 
     gate.run_git(["commit", "-q", "-m", "rewrite module"], git_repo)
-    stage(git_repo, "notes.md", "note\n" * 5)
+    filtered_lines = WARNING_THRESHOLD + 1
+    stage(git_repo, "notes.md", "note\n" * filtered_lines)
     stage(git_repo, "uv.lock", "generated\n" * 500)
     (git_repo / "logo.png").write_bytes(b"\0binary")
     gate.run_git(["add", "logo.png"], git_repo)
@@ -581,14 +585,11 @@ def test_diff_size_counts_only_relevant_changed_lines(
     filtered = gates.run_preflight()
     filtered_output = capfd.readouterr().out
 
-    assert (rewritten, "8 lines modified" in rewrite_output) == (
-        {"pass": [], "fail": [], "warn": []},
-        True,
-    )
-    assert (filtered, "5 lines modified" in filtered_output) == (
-        {"pass": [], "fail": [], "warn": []},
-        True,
-    )
+    rewritten_lines = WARNING_THRESHOLD + 1
+    assert (rewritten["pass"], rewritten["fail"], len(rewritten["warn"])) == ([], [], 1)
+    assert f"{rewritten_lines} lines modified" in rewrite_output
+    assert (filtered["pass"], filtered["fail"], len(filtered["warn"])) == ([], [], 1)
+    assert f"{filtered_lines} lines modified" in filtered_output
 
 
 @pytest.mark.parametrize(
@@ -634,14 +635,16 @@ def test_diff_size_measures_the_very_first_commit_of_a_repository(
     monkeypatch.setenv("RALPH_LOOP", "1")
     wipe_history(git_repo)
     filepath = "src/first.py"
-    stage(git_repo, filepath, "value = 1\n" * 9)
+    lines = WARNING_THRESHOLD + 1
+    stage(git_repo, filepath, "value = 1\n" * lines)
 
     assert not gate.run_git(["rev-parse", "--verify", "HEAD"], git_repo, check=False)
     monkeypatch.setattr(gates, "commit_checks", {})
-    assert (
-        gates.run_preflight(),
-        "9 lines modified" in capfd.readouterr().out,
-    ) == ({"pass": [], "fail": [], "warn": []}, True)
+    results = gates.run_preflight()
+    output = capfd.readouterr().out
+
+    assert (results["pass"], results["fail"], len(results["warn"])) == ([], [], 1)
+    assert f"{lines} lines modified" in output
 
 
 def test_diff_size_still_measures_a_commit_with_nothing_staged(

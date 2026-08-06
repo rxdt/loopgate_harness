@@ -145,6 +145,8 @@ class Gate:
             inserted, deleted, path = line.split("\t", 2)
             if not (inserted == "-" or path.endswith(".lock")):  # binary or lockfile
                 total += int(inserted) + int(deleted)
+        if total < warn_at_75:
+            return
         msg = (
             f"{total} lines modified. WARN at 75% {warn_at_75} lines, ERROR at {self.error_diff_lines}."
             "\nSuggestion: Refactor bloat, inline helpers, reduce mis-direction, re-use fixtures, cut "

@@ -32,21 +32,32 @@ def test_report_with_timeout_passes_and_renders(tmp_path: Path, capsys: pytest.C
     assert "MUTATION SCORE: 100.0" in output
 
 
-def test_actionable_result_fails(tmp_path: Path) -> None:
-    """A survived mutant is included in the report analysis."""
+def test_report_enforces_threshold(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Mutation scores at or above the minimum pass, while lower scores fail."""
     data = json.loads(Path(__file__).with_name("mutmut-cicd-stats.json").read_text(encoding="utf-8"))
     data["survived"] = 1
     data["total"] += 1
     report = tmp_path / "mutmut-cicd-stats.json"
     report.write_text(json.dumps(data), encoding="utf-8")
-    mutation_score = analyze_mutmut_report(report)
-    assert mutation_score >= 60.0
+    mutation_score = analyze_mutmut_report(str(report))
+    assert 60.0 <= mutation_score < 100.0
+
+    report.write_text(json.dumps({"killed": 3, "timeout": 0, "total": 5, "skipped": 0}), encoding="utf-8")
+    assert analyze_mutmut_report(str(report)) == pytest.approx(60.0)
+
+    report.write_text(json.dumps({"killed": 59, "timeout": 0, "total": 100, "skipped": 0}), encoding="utf-8")
+    with pytest.raises(typer.Exit) as exc_info:
+        analyze_mutmut_report(str(report))
+
+    assert exc_info.value.exit_code == 1
+    output = " ".join(unstyle(capsys.readouterr().out).split())
+    assert "MUTATION SCORE: 59.0" in output
 
 
 def test_missing_report_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A missing export errors CI."""
     with pytest.raises(typer.Exit) as exc_info:
-        analyze_mutmut_report(tmp_path / "missing.json")
+        analyze_mutmut_report(str(tmp_path / "missing.json"))
 
     assert exc_info.value.exit_code == 1
     assert "Error: Mutmut JSON report not found" in capsys.readouterr().out
@@ -58,4 +69,4 @@ def test_malformed_report_fails(tmp_path: Path) -> None:
     report.write_text("{", encoding="utf-8")
 
     with pytest.raises(json.JSONDecodeError):
-        analyze_mutmut_report(report)
+        analyze_mutmut_report(str(report))

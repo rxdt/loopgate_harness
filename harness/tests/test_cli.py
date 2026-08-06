@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 runner = CliRunner()
-WARNING_THRESHOLD = round(gates.error_diff_lines * 0.75)
 
 
 def stub_toolchain(
@@ -221,9 +220,6 @@ def test_cli_summaries_report_complete_agent_check_results(
         exit_code,
         (
             "PHASE: AGENT CHECKS running non-human agent checks "
-            f"PHASE: DIFF SIZE 1 lines modified. WARN at 75% {WARNING_THRESHOLD} lines, "
-            f"ERROR at {gates.error_diff_lines}. Suggestion: Refactor bloat, inline helpers, "
-            "reduce mis-direction, re-use fixtures, cut duplication, slim down if-elif-else blocks. "
             "PHASE: BANNED PATTERNS CHECK checking for banned patterns in staged files "
             "PHASE: USER PREFERENCES checking that user's preferences are respected "
             f"{summary}"

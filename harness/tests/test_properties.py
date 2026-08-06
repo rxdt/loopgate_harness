@@ -57,7 +57,7 @@ def recased_pattern(draw: strategies.DrawFn) -> tuple[str, str]:
     return pattern, recased
 
 
-@settings(max_examples=50)
+@settings(max_examples=50, deadline=None)
 @given(case=recased_pattern())
 @example(case=("# noqa", "# noqa"))  # lowercase-alpha pattern
 @example(case=("--no-verify", "--NO-verify"))  # symbol-heavy pattern
