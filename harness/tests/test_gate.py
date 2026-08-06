@@ -43,6 +43,7 @@ def stage_a_bad_iteration(repo: Path) -> None:
     stage(repo, "PyProject.TOML", "[tool.harness]\n")
     stage(repo, ".github/workflows/ci.yml", "jobs:\n  gate:\n    steps: []\n")
     stage(repo, ".githooks/pre-commit", "#!/bin/sh\nexit 0\n")
+    stage(repo, "docs/notes.md", "Run with `# noqa` to silence the linter.\n")
     stage(repo, "src/sloppy.py", "import os  # noqa\n")
     stage(repo, "release.sh", "git commit --no-verify -m ship\n")
     stage(repo, "src/named.py", "_bad = 1\n")
@@ -220,11 +221,15 @@ def test_agent_iteration_is_contained_and_rejected(
         gate.run_git(["rev-parse", "HEAD"], real_hook_repo).strip(),
         gate.run_git(["diff", "--cached", "--name-only"], real_hook_repo).splitlines(),
         get_logged_calls_and_clear(real_hook_repo),
-        [value in bad.stdout + bad.stderr for value in ("# noqa", "--no-verify", "_bad")],
+        [
+            value in bad.stdout + bad.stderr
+            for value in ("Run with `# noqa`", "# noqa", "--no-verify", "_bad")
+        ],
     ) == (
         True,
         initial_head,
         [
+            "docs/notes.md",
             "release.sh",
             "src/clean.py",
             "src/feature.py",
@@ -232,12 +237,12 @@ def test_agent_iteration_is_contained_and_rejected(
             "src/sloppy.py",
         ],
         [preflight],
-        [True, True, True],
+        [True, True, True, True],
     )
     assert (real_hook_repo / "harness" / "gate.py").exists()
 
     gate.run_git(
-        ["reset", "-q", "HEAD", "--", "release.sh", "src/named.py", "src/sloppy.py"],
+        ["reset", "-q", "HEAD", "--", "docs/notes.md", "release.sh", "src/named.py", "src/sloppy.py"],
         real_hook_repo,
     )
     good = git_process(real_hook_repo, "commit", "-q", "-m", "good work")
@@ -284,7 +289,6 @@ def test_agent_iteration_that_does_the_work_lands(
     monkeypatch.setenv("RALPH_LOOP", "1")
     monkeypatch.chdir(git_repo)
     stage(git_repo, "src/feature.py", "value = 2\n")
-    stage(git_repo, "docs/notes.md", "Run with `# noqa` to silence the linter.\n")
 
     (git_repo / ".git" / "COMMIT_EDITMSG").write_text("add the feature\n", encoding="utf-8")
     assert (
@@ -298,10 +302,7 @@ def test_agent_iteration_that_does_the_work_lands(
     (git_repo / ".git" / "COMMIT_EDITMSG").write_text("add the feature\n", encoding="utf-8")
     assert gate.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG", "commit"]) == 0
     assert gate.run_non_human_checks() == []
-    assert gate.run_git(["diff", "--cached", "--name-only"]).splitlines() == [
-        "docs/notes.md",
-        "src/feature.py",
-    ]
+    assert gate.run_git(["diff", "--cached", "--name-only"]).splitlines() == ["src/feature.py"]
 
     gate.run_git(["commit", "-q", "-m", "add the feature"], git_repo)
     wipe_history(git_repo)

@@ -149,15 +149,7 @@ def check_for_bad_patterns() -> list[str]:
         The banned-pattern hits plus any preference violations found in the staged files.
     """
     colorize("BANNED PATTERNS CHECK", "checking for banned patterns in staged files")
-    diff_args = [
-        "diff",
-        "--cached",
-        "--unified=0",
-        "--output-indicator-new=a",
-        "--",
-        f"*.{languages[0]}",
-        "*.sh",
-    ]
+    diff_args = ["diff", "--cached", "--unified=0", "--output-indicator-new=a", "--"]
     staged_lines = run_git(diff_args).splitlines()
     problems: list[str] = []
     for line in staged_lines:
