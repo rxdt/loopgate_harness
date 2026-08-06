@@ -7,4 +7,11 @@
 set -eu
 
 . "$(dirname "$0")/_resolve"
+
+# Same reasoning as pre-commit: the detector decides, not the environment variable.
+if harness/agent_detect.sh >/dev/null; then
+    RALPH_LOOP=1
+    export RALPH_LOOP
+fi
+
 exec "$HARNESS" gate

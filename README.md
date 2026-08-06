@@ -216,6 +216,28 @@ chaotic_continue_statements  # abolish unecessary nested continue statements, cl
 complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefer linear code
 ```
 
+## Agent detection (containment should not fail open)
+
+`gate.py` switches every containment check on `RALPH_LOOP`, and `ralph.sh` is what exports it. Lose that variable any way — an agent unsets it, a subshell starts with a cleared environment, an IDE agent that `ralph.sh` never launched — and forbidden-path ejection, the banned-pattern scan and the preferences walk all switch off silently.
+
+[`harness/agent_detect.sh`](harness/agent_detect.sh) decides the same question without reading it, and both hooks turn containment back on when it says agent. **It is fail-closed**: containment is assumed on, and the only thing that turns it off is positive evidence of a human.
+
+| signal | catches | misses |
+|---|---|---|
+| 1. environment marker (`CLAUDECODE`, `CODEX_*`, …) | agents that advertise themselves | most IDE agents |
+| 2. agent binary in the process ancestry | a CLI agent that unset its own variables | IDE agents — the chain is `node`/`code`, never an agent binary |
+| 3. **no controlling terminal** | everything above, plus IDE agents, CI, scripts | an agent that allocates a pty (signals 1–2 cover it) |
+
+Signal 3 is the one that generalises. A human types `git commit` at a terminal, so stdin is a pty — including the IDE's own integrated terminal. An agent spawning git through `child_process`/`subprocess` gets no pty, whatever editor it lives in.
+
+**Known false positive, in the safe direction:** committing from a GUI button (VS Code's Source Control panel, GitKraken) has no pty either, so a human doing that gets containment. The cost is an unstaged file and a message saying why; `--no-verify` is still the escape hatch. The opposite mistake leaves no trace at all.
+
+```sh
+harness/agent_detect.sh --explain   # run inside your editor/agent to see which signals fire
+```
+
+The marker and process-name lists are short on purpose. Confirmed from this repo's own runs: `RALPH_LOOP`, `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, and the three `CODEX_*` names. The rest are reported names **not verified here** — `--explain` in your own tool is how you replace a guess with a fact.
+
 </details>
 
 <details>
