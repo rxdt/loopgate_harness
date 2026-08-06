@@ -43,8 +43,7 @@ packages = [{ include = "harness" }]
 # ==============================================================================
 [tool.harness]
 languages = ["py"]
-warn_diff_lines = 300   # < 200 LOC generally ok
-error_diff_lines = 400  # ~90th percentile of pull requests
+error_diff_lines = 400  # ~90th percentile of pull requests, 200 LOC generally ok
 
 # argv preset per agent for `harness run <agent>`
 [tool.harness.agents]
@@ -256,6 +255,7 @@ parameter_documentation.accept-no-param-doc = false  # Require Args docs when Py
 reports.reports = "yes"              # Print detailed Pylint reports so humans see why score changed
 reports.score = true                 # Keep Pylint's score visible as a coarse trend signal
 "messages control".enable = ["F", "I", "R0022", "missing-param-doc"]  # Fatal/info, stale options, param docs
+design.max-attributes = 10
 
 # ==============================================================================
 # Unified Ruff Configuration
@@ -346,7 +346,7 @@ ignore = [
     "COM812",   # Let Ruff format own trailing commas to avoid formatter conflicts, missing-trailing-comma
     "PLR2004",  # Allow 'magic values" (unnamed numbers), start-process-with-partial-path
     "S607",     # Allow resolving git/uv from PATH, start-process-with-partial-path
-    "RUF201"    # Do not complain no string rule-codes-in-selectors (too new since v.0.15.22)
+    "RUF201",    # Do not complain no string rule-codes-in-selectors (too new since v.0.15.22)
     "PLR0904"
 ]
 [tool.ruff.lint.pylint]      # Prevent unreadable complexity and code
