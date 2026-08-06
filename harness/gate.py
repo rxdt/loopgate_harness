@@ -76,16 +76,14 @@ class Gate:
 
         return results
 
-    def run_non_human_checks(self, results: dict[str, list[str]]) -> dict[str, list[str]]:
+    def run_non_human_checks(self, results: dict[str, list[str]]):
         """Runs checks on non-humans only. Checks things that linters or other chekcs to do not check.
         Unstages files that should never be touched.
 
         Arguments:
             results: The original bucketing of each check name into "pass"/"fail"/"warn" lists.
-
-        Returns:
-            results: The full-checks result bucketing each check name into "pass"/"fail"/"warn" lists.
         """
+        colorize("AGENT CHECKs", "running non-human agent checks")
         ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else self.EMPTY_TREE
         stats = run_git(["diff", ref, "--numstat", "--find-renames"]).splitlines()
         self.check_diff_size(stats, results)
@@ -106,10 +104,9 @@ class Gate:
             ]
             if forbidden:
                 run_git(["reset", "-q", "HEAD", "--", *forbidden])
-                colorize("EJECTED", f"kept forbidden paths out of the commit: {', '.join(forbidden)}")
+                colorize("EJECTED", f"kept forbidden paths out of the commit: {forbidden}")
             results["fail"].extend(self.check_for_bad_patterns())
             results["fail"].extend(filter(None, self.check_for_preferences()))
-        return results
 
     def check_for_bad_patterns(self) -> list[str]:
         """Check staged files for banned patterns (agent-in-loop containment).
@@ -142,14 +139,14 @@ class Gate:
             stats: Git numstat rows to parse to get total Lines Of Code
             results: The full-checks result bucketing each check name into "pass"/"fail"/"warn" lists.
         """
-        warn_at_75: float = self.error_diff_lines * 0.75
+        warn_at_75: int = round(self.error_diff_lines * 0.75)
         total = 0
         for line in stats:
             inserted, deleted, path = line.split("\t", 2)
             if not (inserted == "-" or path.endswith(".lock")):  # binary or lockfile
                 total += int(inserted) + int(deleted)
         msg = (
-            f"{total} lines modified\nwarn at 75% {warn_at_75}\nblock at {self.error_diff_lines}"
+            f"{total} lines modified. WARN at 75% {warn_at_75} lines, ERROR at {self.error_diff_lines}."
             "\nSuggestion: Refactor bloat, inline helpers, reduce mis-direction, re-use fixtures, cut "
             "duplication, slim down if-elif-else blocks."
         )

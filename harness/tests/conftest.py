@@ -13,6 +13,7 @@ from typing import Self
 import pytest
 
 from harness import cli, gate
+from harness.gate import gates
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 collect_ignore = ["test_ralph.py"] if sys.platform == "win32" else ["test_ralph_ps1.py"]
@@ -41,7 +42,7 @@ def fake_popen(
 
     Git is never faked. run_git reaches Popen through subprocess.run, so a git command is handed
     straight to the real Popen and the real gate.run_git keeps working against the temp repo the
-    test points REPO_ROOT at. Only the checks around it are stand-ins.
+    test points gates.repo_root at. Only the checks around it are stand-ins.
 
     Every faked check reports exit 0 (pass) unless its exact argv is in fails, which reports exit 1.
     Every faked launch is recorded (command, cwd, env) so dispatch tests can assert what run_checks ran.
@@ -78,8 +79,8 @@ def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / ".gitignore").write_text("existing\n", encoding="utf-8")
     gate.run_git(["add", ".gitignore", "README.md", "README.template.md"], tmp_path)
     gate.run_git(["commit", "-q", "-m", "seed"], tmp_path)
-    monkeypatch.setattr(cli, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "REPO_ROOT_STR", str(tmp_path))
+    monkeypatch.setattr(gates, "repo_root", tmp_path)
     return tmp_path
 
 
@@ -112,11 +113,13 @@ real_file = repo / "harness.real"
 real_commands = real_file.read_text(encoding="utf-8").splitlines() if real_file.exists() else []
 if command == "prepare-commit-msg" or command in real_commands:
     os.chdir({str(REPO_ROOT)!r})
-    from harness import cli, gate
+    from harness import cli
+    from harness.gate import gates
     os.chdir(repo)
-    gate.REPO_ROOT = repo
+    gates.repo_root = repo
+    cli.REPO_ROOT_STR = str(repo)
     if command == "preflight":
-        gate.COMMIT_CHECKS = {{}}
+        gates.commit_checks = {{}}
     cli.main(arguments)
 status_file = repo / "harness.exit"
 raise SystemExit(int(status_file.read_text(encoding="utf-8")) if status_file.exists() else 0)
@@ -145,5 +148,5 @@ def scan_repo(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """A temp repo shared by the generated examples, since @given cannot take a per-test fixture."""
     repo = seed_repo(tmp_path_factory.mktemp("banned-patterns"))
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(gate, "REPO_ROOT", repo)
+        patch.setattr(gates, "repo_root", repo)
         yield repo

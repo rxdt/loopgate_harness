@@ -101,7 +101,7 @@ format = ["ruff", "format", "--no-cache", "--check"]
 complexipy = ["complexipy", "."]
 
 [tool.harness.gate]
-audit = ["pip-audit", ".", "--strict", "--progress-spinner", "off"]
+audit = ["pip-audit", ".", "--strict"]
 security = [
     "semgrep", "scan",
     "--error",  # exit nonzero on findings so the gate blocks the commit, not just reports

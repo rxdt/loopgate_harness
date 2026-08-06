@@ -26,13 +26,14 @@ import pytest
 from hypothesis import example, given, settings, strategies
 
 from harness import gate
+from harness.gate import gates
 
 
 def scan_staged(repo: Path, source: str) -> list[str]:
     """Stage one file, run the real banned-pattern scan over the real index, then clear the index."""
     (repo / "x.py").write_text(source, encoding="utf-8")
     gate.run_git(["add", "x.py"], repo)
-    problems = gate.check_for_bad_patterns()
+    problems = gates.check_for_bad_patterns()
     gate.run_git(["reset", "-q"], repo)
     return problems
 
@@ -47,7 +48,7 @@ def recased_pattern(draw: strategies.DrawFn) -> tuple[str, str]:
     Returns:
         (pattern, recased) where recased differs from pattern only in the case of its letters.
     """
-    pattern = draw(strategies.sampled_from(gate.FORBIDDEN_PATTERNS))
+    pattern = draw(strategies.sampled_from(gates.forbidden_patterns))
     # Recase each alphabetic character independently; symbols (e.g. in '--no-verify') pass through.
     recased = "".join(
         draw(strategies.sampled_from([char.lower(), char.upper()])) if char.isalpha() else char
@@ -77,7 +78,7 @@ def test_mixed_case_forbidden_entry_still_matches(
     lowercase. A mixed-case entry has to match too, which it only does because the scan casefolds the
     pattern as well as the line.
     """
-    monkeypatch.setattr(gate, "FORBIDDEN_PATTERNS", [pattern_in_toml])
+    monkeypatch.setattr(gates, "forbidden_patterns", (pattern_in_toml,))
     problems = scan_staged(git_repo, "value = 1  # hookspath\n")
     assert any(problem.startswith(f"'{pattern_in_toml}' line:") for problem in problems)
 
@@ -88,7 +89,7 @@ def test_banned_pattern_ignores_the_diff_file_header(git_repo: Path) -> None:
     """
     (git_repo / "noqa_helpers.py").write_text("value = 1\n", encoding="utf-8")
     gate.run_git(["add", "noqa_helpers.py"], git_repo)
-    assert gate.check_for_bad_patterns() == []
+    assert gates.check_for_bad_patterns() == []
 
 
 def test_banned_pattern_ignores_a_removed_line(git_repo: Path) -> None:
@@ -109,5 +110,6 @@ def test_casefold_colliding_forbidden_paths_are_both_ejected(git_repo: Path) -> 
     blob = gate.run_git(["hash-object", "-w", "README.md"], git_repo).strip()
     for path in colliding:
         gate.run_git(["update-index", "--add", "--cacheinfo", f"100644,{blob},{path}"], git_repo)
-    gate.run_non_human_checks()
+    results: dict[str, list[str]] = {"pass": [], "fail": [], "warn": []}
+    gates.run_non_human_checks(results)
     assert gate.run_git(["diff", "--cached", "--name-only"]).splitlines() == []

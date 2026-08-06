@@ -21,19 +21,14 @@ from click import unstyle
 from typer.testing import CliRunner
 
 from harness import cli, gate
-from harness.gate import (
-    AGENTS,
-    FORBIDDEN_DIRS,
-    FORBIDDEN_FILES,
-    FORBIDDEN_PATTERNS,
-    FULL_CHECKS,
-)
+from harness.gate import gates
 from harness.tests.conftest import REPO_ROOT, fake_popen
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 runner = CliRunner()
+WARNING_THRESHOLD = round(gates.error_diff_lines * 0.75)
 
 
 def stub_toolchain(
@@ -117,7 +112,7 @@ def test_entry_point_propagates_exit_codes_and_rejects_unknown_commands(
     assert runner.invoke(cli.app, ["bogus"]).exit_code == 2
     assert runner.invoke(cli.app, []).exit_code == 2
 
-    fake_popen(monkeypatch, fails=[gate.COMMIT_CHECKS["lint"], gate.COMMIT_CHECKS["format"]])
+    fake_popen(monkeypatch, fails=[gates.commit_checks["lint"], gates.commit_checks["format"]])
     rejected = runner.invoke(cli.app, ["preflight"])
     summary = " ".join(unstyle(rejected.stdout).split())
 
@@ -140,20 +135,20 @@ def test_help_and_info_surface_every_check_agent_and_containment_rule(
     flat = " ".join(unstyle(info.output).split())
     for phase in ("preflight", "gate"):
         assert phase in flat
-    for name, command in FULL_CHECKS.items():
+    for name, command in gates.full_checks.items():
         assert name in flat
         assert command[0] in flat
-    for pattern in FORBIDDEN_PATTERNS:
+    for pattern in gates.forbidden_patterns:
         assert pattern in flat
-    for path in (*FORBIDDEN_DIRS, *FORBIDDEN_FILES):
+    for path in (*gates.forbidden_dirs, *gates.forbidden_files):
         assert path in flat
-    for agent in AGENTS:
+    for agent in gates.agents:
         assert agent in flat
 
     run_help = runner.invoke(cli.app, ["run", "--help"])
 
     assert run_help.exit_code == 0
-    for agent in AGENTS:
+    for agent in gates.agents:
         assert agent in run_help.output
     assert "verbose" in run_help.output
     assert "--verbose" not in run_help.output
@@ -174,7 +169,7 @@ def test_every_supported_agent_has_a_nonempty_command() -> None:
         "tool"
     ]["harness"]["agents"]
 
-    assert agents == AGENTS
+    assert agents == gates.agents
     assert set(agents) == {"claude", "codex", "agy", "copilot"}
     assert all(isinstance(command, list) and bool(command) for command in agents.values())
     assert all(
@@ -187,7 +182,7 @@ def test_preflight_summary_names_every_check_for_agents(
 ) -> None:
     """The CLI renders the result produced by the real preflight containment path."""
     monkeypatch.setenv("RALPH_LOOP", "1")
-    monkeypatch.setattr(gate, "COMMIT_CHECKS", {})
+    monkeypatch.setattr(gates, "commit_checks", {})
     source = git_repo / "src" / "mod.py"
     source.parent.mkdir()
     source.write_text("value = 1\n", encoding="utf-8")
@@ -198,9 +193,10 @@ def test_preflight_summary_names_every_check_for_agents(
     assert (result.exit_code, output) == (
         0,
         (
-            f"PHASE: DIFF SIZE 1 lines modified warn at {gate.WARN_DIFF_LINES} "
-            f"block at {gate.ERROR_DIFF_LINES} Suggestion: Refactor bloat, inline helpers, "
-            "reduce mis-direction, re-use fixtures, cut duplication. "
+            "PHASE: AGENT CHECKS running non-human agent checks "
+            f"PHASE: DIFF SIZE 1 lines modified warn at 75% {WARNING_THRESHOLD} "
+            f"block at {gates.error_diff_lines} Suggestion: Refactor bloat, inline helpers, "
+            "reduce mis-direction, re-use fixtures, cut duplication, slim down if-elif-else blocks. "
             "PHASE: BANNED PATTERNS CHECK checking for banned patterns in staged files "
             "PHASE: USER PREFERENCES checking that user's preferences are respected "
             "Harness Summary RESULT CHECK ok: preflight pass"
@@ -211,7 +207,7 @@ def test_preflight_summary_names_every_check_for_agents(
 def test_gate_summary_names_every_check_for_agents(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """The CLI rejects the result produced by the real gate containment path."""
     monkeypatch.setenv("RALPH_LOOP", "1")
-    monkeypatch.setattr(gate, "FULL_CHECKS", {})
+    monkeypatch.setattr(gates, "full_checks", {})
     source = git_repo / "src" / "mod.py"
     source.parent.mkdir()
     source.write_text("_bad = 1\n", encoding="utf-8")
@@ -222,9 +218,10 @@ def test_gate_summary_names_every_check_for_agents(monkeypatch: pytest.MonkeyPat
     assert (result.exit_code, output) == (
         1,
         (
-            f"PHASE: DIFF SIZE 1 lines modified warn at {gate.WARN_DIFF_LINES} "
-            f"block at {gate.ERROR_DIFF_LINES} Suggestion: Refactor bloat, inline helpers, "
-            "reduce mis-direction, re-use fixtures, cut duplication. "
+            "PHASE: AGENT CHECKS running non-human agent checks "
+            f"PHASE: DIFF SIZE 1 lines modified warn at 75% {WARNING_THRESHOLD} "
+            f"block at {gates.error_diff_lines} Suggestion: Refactor bloat, inline helpers, "
+            "reduce mis-direction, re-use fixtures, cut duplication, slim down if-elif-else blocks. "
             "PHASE: BANNED PATTERNS CHECK checking for banned patterns in staged files "
             "PHASE: USER PREFERENCES checking that user's preferences are respected "
             "Harness Summary RESULT CHECK FAILED problems: src/mod.py:1: Name '_bad' starts with underscore "
@@ -505,7 +502,7 @@ def test_windows_skips_posix_steps_and_launches_the_powershell_twin(
     assert launched[0][:3] == ["powershell.exe", "-NoProfile", "-File"]
     assert launched[0][3].endswith("ralph.ps1")
     assert launched[0][4:6] == ["2", "5"]
-    assert launched[0][6:] == list(AGENTS["claude"])
+    assert launched[0][6:] == list(gates.agents["claude"])
 
 
 def test_windows_run_uses_powershell_without_path_lookup(
@@ -586,29 +583,21 @@ def test_tracked_hooks_call_registered_commands_without_venv_paths(hook: str) ->
     assert "uv" not in text
 
 
-@pytest.mark.parametrize(
-    ("recorded", "message"),
-    [
-        pytest.param(
-            None,
-            "hooks are not installed. Run 'harness install' in this repo.",
-            id="never-ran",
-        ),
-        pytest.param("missing-harness", "is gone. Re-run 'harness install'.", id="stale-record"),
-    ],
-)
-def test_hooks_name_the_fix_when_the_recorded_harness_is_missing_or_stale(
-    recorded: str | None, message: str, git_repo: Path
-) -> None:
-    """A repo without the install record, or one whose environment was rebuilt, gets instructions."""
-    shutil.copytree(REPO_ROOT / ".githooks", git_repo / ".githooks", dirs_exist_ok=True)
-    if recorded:
-        (git_repo / ".git" / "harness-path").write_text(f"{git_repo / recorded}\n", encoding="utf-8")
+def run_resolver(git_repo: Path, path: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Source the real resolver in a disposable Git repository."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    gate.run_git(["config", "core.hooksPath", ".githooks"], git_repo)
-
-    result = subprocess.run(
-        ["git", "commit", "--allow-empty", "-m", "exercise pre-commit"],
+    if path is not None:
+        env["PATH"] = path
+    env["RALPH_LOOP"] = "1"
+    return subprocess.run(
+        [
+            "/bin/sh",
+            "-eu",
+            "-c",
+            '. "$1"; printf \'%s\\n\' "$HARNESS"',
+            "resolver-test",
+            str(REPO_ROOT / ".githooks" / "_resolve"),
+        ],
         cwd=git_repo,
         capture_output=True,
         text=True,
@@ -616,8 +605,61 @@ def test_hooks_name_the_fix_when_the_recorded_harness_is_missing_or_stale(
         env=env,
     )
 
+
+def test_resolver_uses_valid_recorded_harness(git_repo: Path) -> None:
+    """A valid harness record is used without repair."""
+    executable = shutil.which("harness")
+    assert executable
+    recorded = git_repo / ".git" / "harness-path"
+    recorded.write_text(f"{executable}\n", encoding="utf-8")
+
+    result = run_resolver(git_repo)
+
+    assert result.returncode == 0
+    assert result.stdout == f"{executable}\n"
+    assert not result.stderr
+    assert recorded.read_text(encoding="utf-8") == f"{executable}\n"
+
+
+def test_resolver_records_discoverable_harness(git_repo: Path) -> None:
+    """A missing record is restored from the installed harness on PATH."""
+    executable = shutil.which("harness")
+    assert executable
+
+    result = run_resolver(git_repo)
+
+    assert result.returncode == 0
+    assert result.stdout == f"{executable}\n"
+    assert (git_repo / ".git" / "harness-path").read_text(encoding="utf-8") == f"{executable}\n"
+    assert "Re-adding file 'harness-path'." in result.stderr
+
+
+def test_resolver_replaces_stale_harness_record(git_repo: Path) -> None:
+    """A stale record is replaced by the installed harness on PATH."""
+    executable = shutil.which("harness")
+    assert executable
+    recorded = git_repo / ".git" / "harness-path"
+    recorded.write_text(f"{git_repo / 'missing-harness'}\n", encoding="utf-8")
+
+    result = run_resolver(git_repo)
+
+    assert result.returncode == 0
+    assert result.stdout == f"{executable}\n"
+    assert recorded.read_text(encoding="utf-8") == f"{executable}\n"
+    assert "Re-adding file 'harness-path'." in result.stderr
+
+
+def test_resolver_names_install_when_harness_is_unavailable(git_repo: Path) -> None:
+    """A missing record and executable receives the install instruction."""
+    git = shutil.which("git")
+    assert git
+    system_path = str(Path(git).parent)
+    assert not shutil.which("harness", path=system_path)
+
+    result = run_resolver(git_repo, system_path)
+
     assert result.returncode == 1
-    assert message in result.stderr
+    assert result.stderr == "loopgate: hooks are not installed. Run 'harness install' in this repo.\n"
 
 
 @pytest.mark.parametrize(
@@ -637,7 +679,7 @@ def test_prepare_commit_msg_forwards_gits_own_arguments(
         seen.append(argv)
         return code
 
-    monkeypatch.setattr(cli, "commit_msg", commit_msg)
+    monkeypatch.setattr(gates, "prepare_commit_msg", commit_msg)
 
     result = runner.invoke(cli.app, ["prepare-commit-msg", *arguments])
 
@@ -678,7 +720,7 @@ def test_a_harnessed_run_writes_numbered_receipts_and_propagates_exit_codes(
     assert not first.stdout
     assert launched[0][0].endswith("ralph.sh")
     assert launched[0][1:3] == ["1", "2"]
-    assert launched[0][3:] == list(AGENTS["claude"])
+    assert launched[0][3:] == list(gates.agents["claude"])
     receipts = git_repo / "scratchpad" / "runs" / "20990102" / "claude"
     assert (receipts / "0001.jsonl").read_text(encoding="utf-8") == '{"type":"result","result":"ok"}\n'
     assert os.environ["RALPH_PROMPT"] == "Your agent id is `0001`\n\ndo the most important thing"
@@ -686,7 +728,7 @@ def test_a_harnessed_run_writes_numbered_receipts_and_propagates_exit_codes(
     second = runner.invoke(cli.app, ["run", "claude", "1", "2", "False", "--model", "haiku"])
 
     assert second.exit_code == 0
-    swapped = list(AGENTS["claude"])
+    swapped = list(gates.agents["claude"])
     swapped[swapped.index("--model") + 1] = "haiku"
     assert launched[1][3:] == swapped
     assert launched[1].count("--model") == 1
@@ -756,7 +798,7 @@ def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyP
         encoding="utf-8",
     )
     preset = [sys.executable, str(worker), "--model", "opus", "-p"]
-    monkeypatch.setitem(cli.AGENTS, "claude", preset)
+    monkeypatch.setitem(gates.agents, "claude", preset)
     monkeypatch.chdir(git_repo)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(cli, "REPO_ROOT_STR", str(git_repo))
