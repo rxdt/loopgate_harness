@@ -94,6 +94,46 @@ def test_pre_commit_hook_dispatches_preflight_and_controls_commit(
     )
 
 
+@pytest.mark.parametrize("real_hook_repo", [("pre-commit",)], indirect=True)
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param((gate.WARN_DIFF_LINES, gate.WARN_DIFF_LINES, True, None), id="at-warning-threshold"),
+        pytest.param((gate.WARN_DIFF_LINES + 1, gate.WARN_DIFF_LINES + 1, True, "WARNED"), id="warn"),
+        pytest.param((gate.ERROR_DIFF_LINES, gate.ERROR_DIFF_LINES, True, "WARNED"), id="at-error-threshold"),
+        pytest.param((gate.ERROR_DIFF_LINES + 1, gate.WARN_DIFF_LINES, False, "FAILED"), id="fail"),
+    ],
+)
+def test_pre_commit_hook_warns_then_blocks_on_combined_diff_size(
+    case: tuple[int, int, bool, str | None], real_hook_repo: Path
+) -> None:
+    """The real hook warns above the review threshold and blocks only above the combined diff cap."""
+    total, staged_lines, lands, verdict = case
+    (real_hook_repo / "harness.real").write_text("preflight\n", encoding="utf-8")
+    stage(real_hook_repo, "notes.txt", "staged line\n" * staged_lines)
+    unstaged_lines = total - staged_lines
+    if unstaged_lines:
+        (real_hook_repo / "README.md").write_text(
+            "seed\n" + "unstaged line\n" * unstaged_lines,
+            encoding="utf-8",
+        )
+    before = gate.run_git(["rev-parse", "HEAD"], real_hook_repo).strip()
+
+    result = git_process(real_hook_repo, "commit", "-q", "-m", f"{total} line iteration")
+    output = result.stdout + result.stderr
+    after = gate.run_git(["rev-parse", "HEAD"], real_hook_repo).strip()
+
+    assert result.returncode == (0 if lands else 1)
+    assert (after != before) is lands
+    assert f"{total} lines modified" in output
+    assert get_logged_calls_and_clear(real_hook_repo) == [{"arguments": ["preflight"], "RALPH_LOOP": "1"}]
+    if verdict is None:
+        assert "WARNED" not in output
+        assert "FAILED" not in output
+    else:
+        assert verdict in output
+
+
 @pytest.mark.parametrize("real_hook_repo", [("pre-commit", "pre-push")], indirect=True)
 def test_pre_push_hook_dispatches_gate_and_blocks_push(real_hook_repo: Path) -> None:
     """The tracked pre-push hook invokes gate and prevents a local remote ref update on failure."""

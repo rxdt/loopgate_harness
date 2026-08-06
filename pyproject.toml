@@ -43,7 +43,7 @@ packages = [{ include = "harness" }]
 # ==============================================================================
 [tool.harness]
 languages = ["py"]
-warn_diff_lines = 300   # < 200 generally ok
+warn_diff_lines = 300   # < 200 LOC generally ok
 error_diff_lines = 400  # ~90th percentile of pull requests
 
 # argv preset per agent for `harness run <agent>`
@@ -347,6 +347,7 @@ ignore = [
     "PLR2004",  # Allow 'magic values" (unnamed numbers), start-process-with-partial-path
     "S607",     # Allow resolving git/uv from PATH, start-process-with-partial-path
     "RUF201"    # Do not complain no string rule-codes-in-selectors (too new since v.0.15.22)
+    "PLR0904"
 ]
 [tool.ruff.lint.pylint]      # Prevent unreadable complexity and code
 max-nested-blocks = 4        # Stop indentation madness
