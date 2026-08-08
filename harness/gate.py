@@ -19,7 +19,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-console = Console(force_terminal=True)
+console = Console(force_terminal=True, color_system="256")
 try:
     from preferences.preferences import preferences_violations as prefs
 except ImportError:  # humans can delete preferences.py

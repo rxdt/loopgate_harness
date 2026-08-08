@@ -112,6 +112,7 @@ with (repo / "harness.calls").open("a", encoding="utf-8") as handle:
 real_file = repo / "harness.real"
 real_commands = real_file.read_text(encoding="utf-8").splitlines() if real_file.exists() else []
 if command == "prepare-commit-msg" or command in real_commands:
+    sys.path.insert(0, {str(REPO_ROOT)!r})
     os.chdir({str(REPO_ROOT)!r})
     from harness import cli
     from harness.gate import gates

@@ -13,7 +13,6 @@ from pathlib import Path
 from unittest.mock import Mock, call
 
 import pytest
-from rich.console import Console
 
 from harness import gate
 from harness.gate import Gate, gates
@@ -128,7 +127,9 @@ def test_pre_commit_hook_dispatches_preflight_and_controls_commit(
         assert not recorded.exists()
         assert result.stderr == "loopgate: hooks are not installed. Run 'harness install' in this repo.\n"
     else:
-        assert recorded.read_text(encoding="utf-8") == expected_record
+        # Git Bash records `command -v` hits as MSYS paths (/c/Users/...); compare tail, not drive
+        recorded_path = Path(recorded.read_text(encoding="utf-8").strip())
+        assert recorded_path.parts[-3:] == Path(expected_record.strip()).parts[-3:]
 
 
 @pytest.mark.parametrize("real_hook_repo", [("pre-commit",)], indirect=True)
@@ -489,15 +490,14 @@ def test_gate_runs_exactly_what_pyproject_configures(
         Path(gate.run_git(["rev-parse", "--show-toplevel"], REPO_ROOT).strip()),
     ) == (git_repo, REPO_ROOT)
     monkeypatch.setenv("GIT_DIR", str(git_repo / "no-such-dir"))
+    monkeypatch.delenv("RALPH_LOOP", raising=False)
     assert Path(gate.run_git(["rev-parse", "--show-toplevel"]).strip()) == git_repo
     monkeypatch.delenv("GIT_DIR")
-    monkeypatch.delenv("RALPH_LOOP", raising=False)
     absent = ["rev-parse", "--verify", "refs/heads/absent"]
     assert not gate.run_git(absent, git_repo, check=False)
     with pytest.raises(subprocess.CalledProcessError):
         gate.run_git(absent, git_repo)
 
-    monkeypatch.setattr(gate, "console", Console(force_terminal=True, color_system="256", no_color=False))
     live = gates.run_checks({
         "ruff lint": [sys.executable, "-c", "print('hello from the check')"],
         "pyright types": [sys.executable, "-c", "raise SystemExit(7)"],
@@ -561,6 +561,17 @@ def test_gate_runs_exactly_what_pyproject_configures(
         ],
         "warn": [],
     }
+    printed = capfd.readouterr().out
+    assert printed == (
+        "PHASE: AGENT CHECKS"
+        "\nrunning non-human agent checks"
+        "\nPHASE: BANNED PATTERNS CHECK"
+        "\nchecking for banned patterns in staged files"
+        "\nPHASE: USER PREFERENCES"
+        "\nchecking that user's preferences are respected\n"
+    )
+    assert "\x1b" not in printed  # agents in the loop get plain text, never ANSI
+    assert gate.run_git(["diff-index", "--cached", "--name-only", "HEAD"]) == "src/mod.py\n"
 
 
 def test_diff_size_counts_only_relevant_changed_lines(
