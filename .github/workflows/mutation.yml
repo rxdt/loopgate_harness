@@ -44,7 +44,7 @@ jobs:
         run: uv run --no-sync mutmut export-cicd-stats
 
       - name: Upload Mutmut JSON Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutmut-json-report
           path: mutants/mutmut-cicd-stats.json
