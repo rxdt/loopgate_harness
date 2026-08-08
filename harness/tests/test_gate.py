@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import Mock, call
 
 import pytest
+from rich.console import Console
 
 from harness import gate
 from harness.gate import Gate, gates
@@ -83,9 +84,7 @@ def get_logged_calls_and_clear(repo: Path) -> list[object]:
     ],
 )
 def test_pre_commit_hook_dispatches_preflight_and_controls_commit(
-    case: tuple[str, int, bool, bool],
-    real_hook_repo: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    case: tuple[str, int, bool, bool], real_hook_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The tracked pre-commit hook resolves preflight and owns the commit verdict."""
     recorded = real_hook_repo / ".git" / "harness-path"
@@ -154,8 +153,7 @@ def test_pre_commit_hook_warns_then_blocks_on_combined_diff_size(
     unstaged_lines = total - staged_lines
     if unstaged_lines:
         (real_hook_repo / "README.md").write_text(
-            "seed\n" + "unstaged line\n" * unstaged_lines,
-            encoding="utf-8",
+            "seed\n" + "unstaged line\n" * unstaged_lines, encoding="utf-8"
         )
     before = gate.run_git(["rev-parse", "HEAD"], real_hook_repo).strip()
 
@@ -188,42 +186,26 @@ def test_pre_push_hook_dispatches_gate_and_blocks_push(real_hook_repo: Path) -> 
     (real_hook_repo / "harness.exit").write_text("1", encoding="utf-8")
     push = git_process(real_hook_repo, "push", "-q", "origin", "HEAD:main")
     remote_ref = git_process(
-        real_hook_repo,
-        "--git-dir",
-        str(remote),
-        "rev-parse",
-        "--verify",
-        "refs/heads/main",
+        real_hook_repo, "--git-dir", str(remote), "rev-parse", "--verify", "refs/heads/main"
     )
 
-    assert (
-        push.returncode != 0,
-        get_logged_calls_and_clear(real_hook_repo),
-        remote_ref.returncode == 0,
-    ) == (True, [{"arguments": ["gate"], "RALPH_LOOP": "1"}], False)
+    assert (push.returncode != 0, get_logged_calls_and_clear(real_hook_repo), remote_ref.returncode == 0) == (
+        True,
+        [{"arguments": ["gate"], "RALPH_LOOP": "1"}],
+        False,
+    )
 
 
 @pytest.mark.parametrize("real_hook_repo", [("prepare-commit-msg",)], indirect=True)
-def test_prepare_commit_msg_hook_rejects_empty_agent_then_accepts_staged_work(
-    real_hook_repo: Path,
-) -> None:
+def test_prepare_commit_msg_hook_rejects_empty_agent_then_accepts_staged_work(real_hook_repo: Path) -> None:
     """The hook rejects an empty agent commit, then accepts the agent's staged work."""
     before = gate.run_git(["rev-parse", "HEAD"], real_hook_repo).strip()
     agent_empty = git_process(
-        real_hook_repo,
-        "commit",
-        "--allow-empty",
-        "--no-verify",
-        "-q",
-        "-m",
-        "agent empty",
+        real_hook_repo, "commit", "--allow-empty", "--no-verify", "-q", "-m", "agent empty"
     )
     assert agent_empty.returncode != 0
     assert get_logged_calls_and_clear(real_hook_repo) == [
-        {
-            "arguments": ["prepare-commit-msg", "COMMIT_EDITMSG", "message"],
-            "RALPH_LOOP": "1",
-        }
+        {"arguments": ["prepare-commit-msg", "COMMIT_EDITMSG", "message"], "RALPH_LOOP": "1"}
     ]
     assert gate.run_git(["rev-parse", "HEAD"], real_hook_repo).strip() == before
     assert "Empty commit detected" in agent_empty.stdout + agent_empty.stderr
@@ -232,31 +214,27 @@ def test_prepare_commit_msg_hook_rejects_empty_agent_then_accepts_staged_work(
     agent_work = git_process(real_hook_repo, "commit", "-q", "-m", "agent work")
     assert agent_work.returncode == 0
     assert get_logged_calls_and_clear(real_hook_repo) == [
-        {
-            "arguments": ["prepare-commit-msg", "COMMIT_EDITMSG", "message"],
-            "RALPH_LOOP": "1",
-        }
+        {"arguments": ["prepare-commit-msg", "COMMIT_EDITMSG", "message"], "RALPH_LOOP": "1"}
     ]
     assert gate.run_git(["show", "--name-only", "--format=", "HEAD"], real_hook_repo).splitlines() == [
         "feature.py"
     ]
 
+    # githooks(5): the hook's first parameter is always the message file; a plain
+    # `git commit` (no -m/-t/merge/squash/amend) passes no source argument at all.
+    stage(real_hook_repo, "plain.py", "plain = 1\n")
+    git_process(real_hook_repo, "-c", "core.editor=true", "commit", "-q")
+    assert get_logged_calls_and_clear(real_hook_repo) == [
+        {"arguments": ["prepare-commit-msg", "COMMIT_EDITMSG"], "RALPH_LOOP": "1"}
+    ]
+
 
 @pytest.mark.parametrize("real_hook_repo", [("prepare-commit-msg",)], indirect=True)
-def test_prepare_commit_msg_hook_allows_human_empty_commit(
-    real_hook_repo: Path,
-) -> None:
+def test_prepare_commit_msg_hook_allows_human_empty_commit(real_hook_repo: Path) -> None:
     """A human bypasses the harness executable entirely and can create an empty commit."""
     before = gate.run_git(["rev-parse", "HEAD"], real_hook_repo).strip()
     human_empty = git_process(
-        real_hook_repo,
-        "commit",
-        "--allow-empty",
-        "--no-verify",
-        "-q",
-        "-m",
-        "human empty",
-        loop=False,
+        real_hook_repo, "commit", "--allow-empty", "--no-verify", "-q", "-m", "human empty", loop=False
     )
 
     assert (
@@ -275,10 +253,7 @@ def test_agent_iteration_is_contained_and_rejected(
 ) -> None:
     """Real commits reject blank, bad, forbidden, and empty attempts before landing only good work."""
     preflight = {"arguments": ["preflight"], "RALPH_LOOP": "1"}
-    prepare = {
-        "arguments": ["prepare-commit-msg", "COMMIT_EDITMSG", "message"],
-        "RALPH_LOOP": "1",
-    }
+    prepare = {"arguments": ["prepare-commit-msg", "COMMIT_EDITMSG", "message"], "RALPH_LOOP": "1"}
     stage_a_bad_iteration(real_hook_repo)
     get_logged_calls_and_clear(real_hook_repo)
     (real_hook_repo / "harness.real").write_text("preflight\n", encoding="utf-8")
@@ -312,14 +287,7 @@ def test_agent_iteration_is_contained_and_rejected(
     ) == (
         True,
         initial_head,
-        [
-            "docs/notes.md",
-            "release.sh",
-            "src/clean.py",
-            "src/feature.py",
-            "src/named.py",
-            "src/sloppy.py",
-        ],
+        ["docs/notes.md", "release.sh", "src/clean.py", "src/feature.py", "src/named.py", "src/sloppy.py"],
         [preflight],
         [True, True, True, True],
     )
@@ -349,15 +317,7 @@ def test_agent_iteration_is_contained_and_rejected(
         get_logged_calls_and_clear(real_hook_repo),
     ) == (True, True, good_head, [], [preflight, prepare])
 
-    empty = git_process(
-        real_hook_repo,
-        "commit",
-        "-q",
-        "--allow-empty",
-        "--no-verify",
-        "-m",
-        "empty work",
-    )
+    empty = git_process(real_hook_repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "empty work")
     assert (
         empty.returncode != 0,
         "Empty commit detected" in empty.stdout + empty.stderr,
@@ -375,35 +335,36 @@ def test_agent_iteration_that_does_the_work_lands(
     stage(git_repo, "src/feature.py", "value = 2\n")
 
     (git_repo / ".git" / "COMMIT_EDITMSG").write_text("add the feature\n", encoding="utf-8")
-    assert (
-        gates.prepare_commit_msg([
-            "prepare-commit-msg",
-            ".git/COMMIT_EDITMSG",
-            "message",
-        ])
-        == 0
-    )
+    assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG", "message"]) == 0
     (git_repo / ".git" / "COMMIT_EDITMSG").write_text("add the feature\n", encoding="utf-8")
     assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG"]) == 0
+    with pytest.raises(IsADirectoryError):  # no message file: the "" default resolves to the directory "."
+        gates.prepare_commit_msg(["prepare-commit-msg"])
     monkeypatch.setattr(gates, "commit_checks", {})
-    assert (
-        gates.run_preflight(),
-        gate.run_git(["diff", "--cached", "--name-only"]).splitlines(),
-    ) == ({"pass": [], "fail": [], "warn": []}, ["src/feature.py"])
+    assert (gates.run_preflight(), gate.run_git(["diff", "--cached", "--name-only"]).splitlines()) == (
+        {"pass": [], "fail": [], "warn": []},
+        ["src/feature.py"],
+    )
 
     gate.run_git(["commit", "-q", "-m", "add the feature"], git_repo)
     wipe_history(git_repo)
     stage(git_repo, "first.py", "x = 1\n")
     (git_repo / ".git" / "COMMIT_EDITMSG").write_text("first commit\n", encoding="utf-8")
-    assert (
-        gates.prepare_commit_msg([
-            "prepare-commit-msg",
-            ".git/COMMIT_EDITMSG",
-            "message",
-        ])
-        == 0
-    )
+    assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG", "message"]) == 0
     assert "[COMMIT BLOCKED]" not in capsys.readouterr().out
+
+    git_calls: list[tuple[list[str], bool | None]] = []
+
+    def record(args: list[str], check: bool = True) -> str:
+        git_calls.append((args, check))
+        return "abc123\n" if args[0] == "rev-parse" else "first.py\n"
+
+    monkeypatch.setattr(gate, "run_git", record)
+    assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG"]) == 0
+    assert git_calls == [
+        (["rev-parse", "--verify", "HEAD"], False),
+        (["diff-index", "--cached", "--name-only", "HEAD"], True),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -436,15 +397,13 @@ def test_agent_cannot_commit_an_empty_iteration(
 
     wipe_history(git_repo)
     (git_repo / ".git" / "COMMIT_EDITMSG").write_text("did nothing\n", encoding="utf-8")
-    assert (
-        gates.prepare_commit_msg([
-            "prepare-commit-msg",
-            ".git/COMMIT_EDITMSG",
-            "message",
-        ])
-        == 1
-    )
+    assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG", "message"]) == 1
     assert capsys.readouterr().out == f"PHASE: PRE COMMIT MESSAGE\n{empty}\n"
+
+    blank = "Commit message is blank. Provide an informative message with your agent ID.\n"
+    (git_repo / ".git" / "COMMIT_EDITMSG").write_text("", encoding="utf-8")
+    assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG", "message"]) == 1
+    assert capsys.readouterr().out == f"PHASE: PRE COMMIT MESSAGE\n{empty}{blank}\n"
 
 
 def test_human_running_the_same_commands_is_not_policed(
@@ -459,14 +418,7 @@ def test_human_running_the_same_commands_is_not_policed(
     before = gate.run_git(["diff", "--cached", "--name-only"]).splitlines()
 
     (git_repo / ".git" / "COMMIT_EDITMSG").write_text("", encoding="utf-8")
-    assert (
-        gates.prepare_commit_msg([
-            "prepare-commit-msg",
-            ".git/COMMIT_EDITMSG",
-            "message",
-        ])
-        == 0
-    )
+    assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG", "message"]) == 0
     assert not capsys.readouterr().out
 
     calls = fake_popen(monkeypatch)
@@ -474,7 +426,11 @@ def test_human_running_the_same_commands_is_not_policed(
     recorder.assert_not_called()
     assert gate.run_git(["diff", "--cached", "--name-only"]).splitlines() == before
     assert "harness/gate.py" in before
-    assert all(env["FORCE_COLOR"] == "1" for _, _, env in calls)
+    assert all(
+        (env["FORCE_COLOR"], env["CLICOLOR_FORCE"], env["SEMGREP_FORCE_COLOR"]) == ("1", "1", "1")
+        for _, _, env in calls
+    )
+    assert all(cwd == git_repo for _, cwd, _ in calls)
     assert not [key for _, _, env in calls for key in env if key.startswith("GIT_")]
 
 
@@ -525,35 +481,82 @@ def test_gate_runs_exactly_what_pyproject_configures(
         "error_diff_lines": raw_toml["error_diff_lines"],
     }
     assert vars(gates) == {**vars(configured), "repo_root": git_repo}
+    (git_repo / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    with pytest.raises(KeyError):
+        Gate(git_repo)
     assert (
         Path(gate.run_git(["rev-parse", "--show-toplevel"]).strip()),
         Path(gate.run_git(["rev-parse", "--show-toplevel"], REPO_ROOT).strip()),
     ) == (git_repo, REPO_ROOT)
+    monkeypatch.setenv("GIT_DIR", str(git_repo / "no-such-dir"))
+    assert Path(gate.run_git(["rev-parse", "--show-toplevel"]).strip()) == git_repo
+    monkeypatch.delenv("GIT_DIR")
     monkeypatch.delenv("RALPH_LOOP", raising=False)
+    absent = ["rev-parse", "--verify", "refs/heads/absent"]
+    assert not gate.run_git(absent, git_repo, check=False)
+    with pytest.raises(subprocess.CalledProcessError):
+        gate.run_git(absent, git_repo)
 
+    monkeypatch.setattr(gate, "console", Console(force_terminal=True, color_system="256", no_color=False))
     live = gates.run_checks({
         "ruff lint": [sys.executable, "-c", "print('hello from the check')"],
         "pyright types": [sys.executable, "-c", "raise SystemExit(7)"],
         "ruff format": [sys.executable, "-c", "raise SystemExit(1)"],
     })
-    assert live == {
-        "pass": ["ruff lint"],
-        "fail": ["pyright types"],
-        "warn": ["ruff format"],
-    }
+    assert live == {"pass": ["ruff lint"], "fail": ["pyright types"], "warn": ["ruff format"]}
     printed = capfd.readouterr().out
     assert "hello from the check" in printed
     assert "PHASE: RUFF LINT" in printed
+    assert "\x1b[5;36;48;5;235m" in printed  # rule drawn in the blink-cyan-on-grey15 style
+    assert " \x1b[2;3" in printed  # command line centered (leading spaces), in dim italic
 
     monkeypatch.setenv("RALPH_LOOP", "1")
     monkeypatch.setattr(gates, "full_checks", {})
-    stage(git_repo, "src/mod.py", "_bad = 1\nf = lambda: 0\n")
+    stage(
+        git_repo,
+        "src/mod.py",
+        "_bad = 1\n"
+        "f = lambda: 0\n"
+        "for item in []:\n"
+        "    for inner in []:\n"
+        "        continue\n"
+        "for item in []:\n"
+        "    if item:\n"
+        "        continue\n"
+        "while flag:\n"
+        "    if flag:\n"
+        "        continue\n"
+        "class Pointless:\n"
+        "    def only(self):\n"
+        "        pass\n"
+        "class Based(dict):\n"
+        "    pass\n"
+        "class Keyed(metaclass=type):\n"
+        "    pass\n"
+        "class TwoMethods:\n"
+        "    def one(self):\n"
+        "        pass\n"
+        "    def two(self):\n"
+        "        pass\n"
+        "assert True\n"
+        "globals()\n"
+        "locals()\n"
+        "print(*[1, 2])\n"
+        "pairs = [x for x in [] for y in [] if x]\n",
+    )
     assert gates.run_gate() == {
         "pass": [],
         "fail": [
             (
-                "src/mod.py:1: Name '_bad' starts with underscore\nsrc/mod.py:2: Lambda found "
-                "hurting readability and adding complexity."
+                "src/mod.py:9: 'continue' inside a while loop banned to prevent infinite freezes\n"
+                "src/mod.py:12: 'Pointless': no base, decorator, or behavior: use function or Pydantic\n"
+                "src/mod.py:24: Lazy test assertion detected\n"
+                "src/mod.py:1: Name '_bad' starts with underscore\n"
+                "src/mod.py:2: Lambda found hurting readability and adding complexity.\n"
+                "src/mod.py:25: Dynamic injection of memory registry spotted\n"
+                "src/mod.py:26: Dynamic injection of memory registry spotted\n"
+                "src/mod.py:28: Overly complex comprehension, use a loop or type Set math\n"
+                "src/mod.py:5: Overly-nested 'continue' detected inside multiple if/for blocks"
             )
         ],
         "warn": [],
@@ -561,9 +564,7 @@ def test_gate_runs_exactly_what_pyproject_configures(
 
 
 def test_diff_size_counts_only_relevant_changed_lines(
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], git_repo: Path
 ) -> None:
     """Count additions, deletions, and docs while excluding generated and binary files."""
     monkeypatch.setenv("RALPH_LOOP", "1")
@@ -578,6 +579,7 @@ def test_diff_size_counts_only_relevant_changed_lines(
     gate.run_git(["commit", "-q", "-m", "rewrite module"], git_repo)
     filtered_lines = WARNING_THRESHOLD + 1
     stage(git_repo, "notes.md", "note\n" * filtered_lines)
+    stage(git_repo, "src/tiny.py", "tiny_one = 1\ntiny_two = 2\n")
     stage(git_repo, "uv.lock", "generated\n" * 500)
     (git_repo / "logo.png").write_bytes(b"\0binary")
     gate.run_git(["add", "logo.png"], git_repo)
@@ -589,7 +591,7 @@ def test_diff_size_counts_only_relevant_changed_lines(
     assert (rewritten["pass"], rewritten["fail"], len(rewritten["warn"])) == ([], [], 1)
     assert f"{rewritten_lines} lines modified" in rewrite_output
     assert (filtered["pass"], filtered["fail"], len(filtered["warn"])) == ([], [], 1)
-    assert f"{filtered_lines} lines modified" in filtered_output
+    assert f"{filtered_lines + 2} lines modified" in filtered_output
 
 
 @pytest.mark.parametrize(
@@ -625,7 +627,7 @@ def test_diff_size_warns_then_blocks_as_the_change_grows(
     if verdict != "quiet":
         expected["fail" if verdict == "blocked" else "warn"].append(message)
 
-    assert (results, message in output) == (expected, True)
+    assert (results, message in output, "PHASE: DIFF SIZE" in output) == (expected, True, True)
 
 
 def test_diff_size_measures_the_very_first_commit_of_a_repository(
@@ -773,11 +775,7 @@ def test_preferences_read_each_staged_blob_not_the_worktree(
             (git_repo / "src/b.py").read_text(encoding="utf-8"),
         ],
     ) == (
-        {
-            "pass": [],
-            "fail": ["src/a.py:1: Name '_staged_only' starts with underscore"],
-            "warn": [],
-        },
+        {"pass": [], "fail": ["src/a.py:1: Name '_staged_only' starts with underscore"], "warn": []},
         ["working_tree_clean = 3\n", "_also_not_staged = 4\n"],
     )
 

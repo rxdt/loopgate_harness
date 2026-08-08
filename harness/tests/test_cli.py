@@ -5,6 +5,7 @@ only the external toolchain (gate checks, package managers, the worker subproces
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 import sys
@@ -319,19 +320,20 @@ def test_installing_the_template_cleans_the_repo_sets_hooks_and_reruns_cleanly(
     }
     assert document["tool"]["pyright"] == {
         "typeCheckingMode": "strict",
-        "include": ["src", "preferences"],
+        "include": ["src", "preferences", "mutation"],
     }
+    assert document["tool"]["mutmut"] == {"source_paths": ["src", "preferences", "mutation"]}
     assert document["tool"]["pytest"]["ini_options"] == {
         "addopts": ["-ra"],
         "testpaths": ["tests"],
         "pythonpath": [".", "src"],
     }
     assert document["tool"]["coverage"] == {
-        "run": {"source": ["src", "preferences"]},
+        "run": {"source": ["src", "preferences", "mutation"]},
         "report": {"fail_under": 100},
     }
     assert document["tool"]["complexipy"] == {
-        "paths": ["src", "preferences"],
+        "paths": ["src", "preferences", "mutation"],
         "max-complexity-allowed": 10,
     }
     assert document["tool"]["ruff"]["exclude"] == [".git", "harness"]
@@ -641,7 +643,9 @@ def test_a_harnessed_run_writes_numbered_receipts_and_propagates_exit_codes(
     assert launched[0][3:] == list(gates.agents["claude"])
     receipts = git_repo / "scratchpad" / "runs" / "20990102" / "claude"
     assert (receipts / "0001.jsonl").read_text(encoding="utf-8") == '{"type":"result","result":"ok"}\n'
-    assert os.environ["RALPH_PROMPT"] == "Your agent id is `0001`\n\ndo the most important thing"
+    assert os.environ["RALPH_PROMPT"] == (
+        "Your agent id prefix is `claude-0001`\n\ndo the most important thing"
+    )
 
     second = runner.invoke(cli.app, ["run", "claude", "1", "2", "False", "--model", "haiku"])
 
@@ -728,7 +732,7 @@ def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyP
 
     assert result.exit_code == 0
     assert (git_repo / "claude-count").read_text(encoding="utf-8") == "2"
-    identity = "Your agent id is `0001`\n\n"
+    identity = "Your agent id prefix is `claude-0001`\n\n"
     assert (git_repo / "prompt-1.txt").read_text(encoding="utf-8") == (
         f"{identity}build from specs\n\nRALPH_ITERATION=1/2\n"
     )
@@ -740,6 +744,8 @@ def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyP
         *preset_args,
         *preset_args,
     ]
-    assert (git_repo / "scratchpad" / "runs" / "20990102" / "claude" / "0001.jsonl").read_text(
-        encoding="utf-8"
-    ) == '{"type": "result", "result": "ok"}\n{"type": "result", "result": "ok"}\n'
+    receipt = git_repo / "scratchpad" / "runs" / "20990102" / "claude" / "0001.jsonl"
+    events = [json.loads(line) for line in receipt.read_text(encoding="utf-8").splitlines()]
+    assert [event["type"] for event in events] == ["ralph", "result", "ralph", "result", "ralph"]
+    assert [event.get("iteration") for event in events] == [1, None, 2, None, None]
+    assert events[-1]["completed"] == 2

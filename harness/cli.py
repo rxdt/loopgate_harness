@@ -211,19 +211,22 @@ def cleanup(cwd: Path, name: str | None) -> bool:
         "name": canonicalize_name(name) if name and is_normalized_name(name) else "my-app-name",
         "version": "0.0.0",
     })
+    paths = ["src", "preferences", "mutation"]
     tool = document.setdefault("tool", tomlkit.table())
-    tool.setdefault("pyright", tomlkit.table()).update({"include": ["src", "preferences"]})
+    tool.setdefault("pyright", tomlkit.table()).update({"include": paths})
+    tool.setdefault("mutmut", tomlkit.table()).update({"source_paths": paths})
     tool.setdefault("pytest", tomlkit.table()).setdefault("ini_options", tomlkit.table()).update({
         "testpaths": ["tests"],
         "pythonpath": [".", "src"],
     })
     coverage = tool.setdefault("coverage", tomlkit.table())
-    coverage.setdefault("run", tomlkit.table()).update({"source": ["src", "preferences"]})
-    tool.setdefault("complexipy", tomlkit.table()).update({"paths": ["src", "preferences"]})
+    coverage.setdefault("run", tomlkit.table()).update({"source": paths})
+    tool.setdefault("complexipy", tomlkit.table()).update({"paths": paths})
     tool.setdefault("ruff", tomlkit.table()).setdefault("exclude", tomlkit.array()).append("harness")
     tool.setdefault("pylint", tomlkit.table()).setdefault("main", tomlkit.table()).setdefault(
         "ignore", tomlkit.array()
     ).append("harness")
+
     rprint(f"\n[cyan2]project name[/cyan2] '{project['name']}' set in `pyproject.toml`")
     (cwd / "pyproject.toml").write_text(tomlkit.dumps(document), encoding="utf-8")
     return True
@@ -329,7 +332,7 @@ def run(
     worker_id = f"{max((int(p.stem) for p in runs.glob('[0-9][0-9][0-9][0-9].jsonl')), default=0) + 1:04d}"
     # Hand the agent a fixed identity to use in claims and commits
     prompt = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")
-    os.environ["RALPH_PROMPT"] = f"Your agent id is `{worker_id}`\n\n{prompt}"
+    os.environ["RALPH_PROMPT"] = f"Your agent id prefix is `{agent}-{worker_id}`\n\n{prompt}"
     log = runs / f"{worker_id}.jsonl"  # each log file is one run / ralph invocation, not one iteration
     loop_dir = Path(__file__).resolve().parent
     # Windows has no POSIX shell/timeout so run PowerShell ralph.ps1 twin

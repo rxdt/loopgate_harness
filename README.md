@@ -24,7 +24,7 @@
 
 ## TL;DR
 
-1. `gh repo create <your-github-username>/<your-new-app-name> --template rxdt/loopgate_harness --private --clone && cd <your-new-app-name> && uv run harness install <your-new-app-name> && source .venv/bin/activate`
+1. `gh repo create <your-github-username>/<your-new-app-name> --template rxdt/loopgate_harness --private --clone && cd <your-new-app-name> && uv run harness install <your-new-app-name> && source .venv/bin/activate && git add . && git commit --amend --no-edit`
 2. `harness run codex`
 
 **Requirements**: `pip`, `uv`, or `poetry`. Python 3.11. Linux or MacOS (Windows is experimental.)
@@ -49,7 +49,8 @@ Each run starts fresh, has clear limits, saves its logs, protects key files, and
 - **No-waste**: Timeouts and time-limits for all loops ⏰
 - **Diff size guardrails**: Agent changes warn at 300 lines and block at 400 📖
 - **No empty work**: Agents blocked from empty commits
-- **Agent containment prioritized**: Stop the madness (and [Semgrep](https://semgrep.dev/) for safety) 🔓
+- **Agent containment prioritized**: Stop the madness
+- **Industry-grade Security** Enabled with [Semgrep](https://semgrep.dev/) 🔓
 
 ---
 
@@ -58,10 +59,12 @@ Each run starts fresh, has clear limits, saves its logs, protects key files, and
 > [!IMPORTANT]
 > Default configurations In [`pyproject.toml`](pyproject.toml) Update tool settings, add agent calls, remove or include checks... or leave as is.
 
-`docs/PROMPT.md` tells each agent to pick a `spec` and build. `docs/specs/` say _what_ to build. The agent decides _what next_. You keep `docs/plan.md` current, and specs get rewritten from it (agent is told in `docs/PROMPT.md` to update the specs). Each iteration the agent updates its spec and `PROJECT_STATUS`. Ideas from [ghuntley](https://github.com/ghuntley), How to Ralph Wiggum.
+[docs/plan.md](`docs/plan.md`) is where you define what you want the end product to be. You must be _very_ clear on what the finished product should and should **not** contain. Do **not** let agents guess.
+
+`docs/PROMPT.md` tells each agent to pick a `spec` and build. `docs/specs/` say _what_ to build. The agent decides _what next_. You keep `docs/plan.md` current, and specs get rewritten from it (agent is told in `docs/PROMPT.md` to update the specs). Each iteration the agent updates its spec and `PROJECT_STATUS`.
 
 > [!TIP]
-> If you don't like _ANYTHING_ in this framework, update it.
+> If you don't like _ANYTHING_ in this framework, [update it](#expanding-your-harness).
 
 ### Start a project
 
@@ -280,8 +283,7 @@ A shell loop only reruns an agent. LoopGate ensures fresh context, durable repo 
 
   ```
   Other agents are working this repo. Before touching code, pick a spec whose claim line is
-  <unclaimed>, replace it with your name, and commit that claim first. Own that spec's file and its
-  tests. Set the line back to <unclaimed> on your last commit.
+  <unclaimed>, replace it with your exact name `<your-agent-id>-<spec-you-worked>-<RALPH_ITERATION>/<MAX_ITERATIONS>`, e.g. `claude-0003-backend-3/3`, and commit that claim first. Own that spec's file and its tests. Set the line back to <unclaimed> on your last commit.
   ```
 
 - What fails when agents do not claim specs/work: agents all pick the top-priority spec, duplicate work, and leave a half-staged git index.

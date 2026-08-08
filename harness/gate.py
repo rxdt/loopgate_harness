@@ -236,9 +236,8 @@ def run_git(args: list[str], repo: Path | None = None, check: bool = True) -> st
 
     Arguments:
         args: Git subcommand and its arguments
-        repo: the repository directory to run the git command from; defaults to REPO_ROOT
-        check: If check is True and the exit code was non-zero, it raises a CalledProcessError which has
-          returncode attribute, and output attribute
+        repo: the repository directory to run the git command from. Defaults to REPO_ROOT.
+        check: If check is True and the exit code was non-zero, it raises a CalledProcessError.
 
     Returns:
         The command's raw stdout string (callers will .splitlines() as needed)

@@ -50,7 +50,7 @@ error_diff_lines = 400  # ~90th percentile of pull requests, 200 LOC generally o
 claude = [
     "claude",
     "--model", "opus",
-    "--permission-mode", "acceptEdits",
+    "--permission-mode", "auto",
     # "--bare" # for one-shot minimal run: skips MCP, hooks, plugins, CLAUDE.md, reduced startup, and sets
     # CLAUDE_CODE_SIMPLE + uses CLAUDE_CODE_OAUTH_TOKEN (ANTHROPIC_API_KEY billed), no .claude log
     "--no-session-persistence",  # no-save session data good for disposable auto tasks
@@ -120,10 +120,8 @@ pytest = [
 DIRS = ["harness/", ".githooks/", ".github/", "preferences/", "tests/preferences/", ".git/"]
 FILES = [
     "agents.md",
-    "pyproject.toml",
     "docs/prompt.md",
-    "docs/plan.md",     # delete or comment out if you want agents to manage the vision
-    "uv.lock",
+    "docs/plan.md",  # delete/comment line if you want agents to manage the core plan
     # tooling/config files that would weaken checks in this file
     "pytest.ini",
     "tox.ini",
@@ -135,7 +133,11 @@ FILES = [
     "pyrightconfig.json",
     ".pylintrc",
     ".gitmodules",
-    ".gitattributes"
+    ".gitattributes",
+    "pyproject.toml",  # agents will claim inability to add dependencies with this forbidden
+    "requirements.txt",
+    "uv.lock",  # if *.lock remains, agents will leave it uncommitted if file changes
+    "poetry.lock"
 ]
 PATTERNS = [
     "# noqa",
@@ -209,12 +211,8 @@ skip_covered = false               # Same behavior for older coverage config rea
 # ==============================================================================
 [tool.mutmut]
 max-children = 2
-source_paths = ["preferences/preferences.py", "harness/gate.py"]        # what to mutate
+source_paths = ["preferences", "src", "mutation"]  # what to mutate
 also_copy = ["harness", ".githooks"]  # not mutated paths, copied for imports
-do_not_mutate = ["harness/tests/*"]   # mutmut can't tell what's a test file
-pytest_add_cli_args_test_selection = [
-    "harness/tests/test_properties.py",  "harness/tests/test_gate.py",
-]
 
 # ==============================================================================
 # Complexipy Configuration
