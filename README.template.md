@@ -2,7 +2,8 @@
 
 Now that you have the template locally:
 
-1. `uv sync` OR `poetry install` OR ` pip install -r requirements.txt`, then `harness install <your-project-name> && git add . && git commit`
+1. `uv sync` OR `poetry install` OR ` pip install -r requirements.txt`, then `harness install <your-project-name>
+git add . && git commit`
 2. Write your project goal in [docs/plan.md](docs/plan.md)
 3. `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
 4. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
@@ -22,12 +23,14 @@ Now that you have the template locally:
 ```sh
 uv sync
 source .venv/bin/activate
-harness install <your-project-name> && git add . && git commit
+harness install <your-project-name>
+git add . && git commit
 harness gate
 harness run <agent>>
 
 poetry install
-poetry run harness install <your-project-name> && git add . && git commit
+poetry run harness install <your-project-name>
+git add . && git commit
 poetry run harness gate
 poetry run harness <agent>
 
