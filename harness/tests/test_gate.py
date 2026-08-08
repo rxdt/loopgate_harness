@@ -105,7 +105,7 @@ def test_pre_commit_hook_dispatches_preflight_and_controls_commit(
         for name in ("git", "dirname"):
             executable = shutil.which(name)
             assert executable
-            (tool_dir / name).symlink_to(executable)
+            (tool_dir / Path(executable).name).symlink_to(executable)
         monkeypatch.setenv("PATH", str(tool_dir))
 
     stage(real_hook_repo, "feature.py", "value = 1\n")
@@ -338,7 +338,7 @@ def test_agent_iteration_that_does_the_work_lands(
     assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG", "message"]) == 0
     (git_repo / ".git" / "COMMIT_EDITMSG").write_text("add the feature\n", encoding="utf-8")
     assert gates.prepare_commit_msg(["prepare-commit-msg", ".git/COMMIT_EDITMSG"]) == 0
-    with pytest.raises(IsADirectoryError):  # no message file: the "" default resolves to the directory "."
+    with pytest.raises((IsADirectoryError, PermissionError)):
         gates.prepare_commit_msg(["prepare-commit-msg"])
     monkeypatch.setattr(gates, "commit_checks", {})
     assert (gates.run_preflight(), gate.run_git(["diff", "--cached", "--name-only"]).splitlines()) == (

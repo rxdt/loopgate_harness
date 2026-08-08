@@ -88,11 +88,13 @@ Each run starts fresh, has clear limits, saves its logs, protects key files, and
 uv sync
 source .venv/bin/activate
 harness install <your-project-name>
+git add . && git commit
 harness gate
 harness run <agent>
 
 poetry install
 poetry run harness install <your-project-name>
+git add . && git commit
 poetry run harness gate
 poetry run harness run <agent>
 
@@ -100,6 +102,7 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt -e .
 harness install <your-project-name>
+git add . && git commit
 harness gate
 harness run <agent>
 ```
