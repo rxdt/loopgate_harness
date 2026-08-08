@@ -48,13 +48,14 @@ def test_every_check_shaped_function_is_registered() -> None:
     """Every check-shaped function in preferences.py (one param, returns `str | None`) must be in CHECKS.
     Catches a check that is defined but never wired up -- e.g. dropping
     `function_argument_assignment_underscore_lead` from the registry would silently stop enforcing it.
-    Helpers like `starless_literal` (returns bool) and `preferences_violations` (two args) are excluded.
+    Helpers like `preferences_violations` (two args) and mutmut's generated clones are excluded.
     """
     registered = set(CHECKS.values())
     unregistered = [
         name
         for name, fn in inspect.getmembers(preferences, inspect.isfunction)
         if fn.__module__ == preferences.__name__
+        and "mutmut" not in name  # mutmut clones every check; only the trampoline keeps the name
         and list(inspect.signature(fn).parameters) == ["node"]
         and fn.__annotations__.get("return") == "str | None"
         and fn not in registered

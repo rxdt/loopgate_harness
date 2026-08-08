@@ -1,7 +1,7 @@
 [project]
 name = "harness"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.10,<4"
 dependencies = [
     "packaging",
     "tomlkit",
@@ -41,12 +41,16 @@ packages = [{ include = "harness" }]
 # CI runs `harness gate`, so it uses the same commands.
 # Humans own this file (it is agent-forbidden below).
 # ==============================================================================
+[tool.harness]
+languages = ["py"]
+error_diff_lines = 400  # ~90th percentile of pull requests, 200 LOC generally ok
+
 # argv preset per agent for `harness run <agent>`
 [tool.harness.agents]
 claude = [
     "claude",
     "--model", "opus",
-    "--permission-mode", "acceptEdits",
+    "--permission-mode", "auto",
     # "--bare" # for one-shot minimal run: skips MCP, hooks, plugins, CLAUDE.md, reduced startup, and sets
     # CLAUDE_CODE_SIMPLE + uses CLAUDE_CODE_OAUTH_TOKEN (ANTHROPIC_API_KEY billed), no .claude log
     "--no-session-persistence",  # no-save session data good for disposable auto tasks
@@ -67,7 +71,7 @@ agy = [
     "--model", "gemini-3.5-flash-low",
     "--dangerously-skip-permissions",
     "--add-dir", ".",
-    "--log-file", "{log_file}",
+    "--log-file", "{log_path}",
     "--prompt", "-"
 ]
 copilot = [
@@ -76,10 +80,6 @@ copilot = [
     "--output-format", "json", "--stream", "on",
     "--allow-all", "--no-ask-user",
 ]
-
-[tool.harness]
-languages = ["py"]
-
 # EXAMPLE OF WHAT Javascript checks might be
 #
 # [tool.harness.preflight]
@@ -101,6 +101,7 @@ format = ["ruff", "format", "--no-cache", "--check"]
 complexipy = ["complexipy", "."]
 
 [tool.harness.gate]
+audit = ["pip-audit", ".", "--strict"]
 security = [
     "semgrep", "scan",
     "--error",  # exit nonzero on findings so the gate blocks the commit, not just reports
@@ -119,10 +120,8 @@ pytest = [
 DIRS = ["harness/", ".githooks/", ".github/", "preferences/", "tests/preferences/", ".git/"]
 FILES = [
     "agents.md",
-    "pyproject.toml",
     "docs/prompt.md",
-    "docs/plan.md",     # delete or comment out if you want agents to manage the vision
-    "uv.lock",
+    "docs/plan.md",  # delete/comment line if you want agents to manage the core plan
     # tooling/config files that would weaken checks in this file
     "pytest.ini",
     "tox.ini",
@@ -134,6 +133,11 @@ FILES = [
     "pyrightconfig.json",
     ".pylintrc",
     ".gitmodules",
+    ".gitattributes",
+    "pyproject.toml",  # agents will claim inability to add dependencies with this forbidden
+    "requirements.txt",
+    "uv.lock",  # if *.lock remains, agents will leave it uncommitted if file changes
+    "poetry.lock"
 ]
 PATTERNS = [
     "# noqa",
@@ -207,12 +211,8 @@ skip_covered = false               # Same behavior for older coverage config rea
 # ==============================================================================
 [tool.mutmut]
 max-children = 2
-source_paths = ["preferences/preferences.py", "harness/gate.py"]        # what to mutate
+source_paths = ["preferences", "src", "mutation"]  # what to mutate
 also_copy = ["harness", ".githooks"]  # not mutated paths, copied for imports
-do_not_mutate = ["harness/tests/*"]   # mutmut can't tell what's a test file
-pytest_add_cli_args_test_selection = [
-    "harness/tests/test_properties.py",  "harness/tests/test_gate.py",
-]
 
 # ==============================================================================
 # Complexipy Configuration
@@ -253,6 +253,7 @@ parameter_documentation.accept-no-param-doc = false  # Require Args docs when Py
 reports.reports = "yes"              # Print detailed Pylint reports so humans see why score changed
 reports.score = true                 # Keep Pylint's score visible as a coarse trend signal
 "messages control".enable = ["F", "I", "R0022", "missing-param-doc"]  # Fatal/info, stale options, param docs
+design.max-attributes = 10
 
 # ==============================================================================
 # Unified Ruff Configuration

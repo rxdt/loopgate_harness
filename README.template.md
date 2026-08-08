@@ -2,7 +2,8 @@
 
 Now that you have the template locally:
 
-1. `uv sync` OR `poetry install` OR ` pip install -r requirements.txt`, then `harness install <your-project-name>`
+1. `uv sync` OR `poetry install` OR ` pip install -r requirements.txt`, then `harness install <your-project-name>
+git add . && git commit`
 2. Write your project goal in [docs/plan.md](docs/plan.md)
 3. `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
 4. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
@@ -13,7 +14,9 @@ Now that you have the template locally:
 
 > [!IMPORTANT]
 > Default configurations In [`pyproject.toml`](pyproject.toml) Update tool settings, add agent calls, remove or include checks... or leave as is.
-> If you don't like _ANYTHING_ in this framework, remove it.
+
+> [!TIP]
+> If you don't like _ANYTHING_ in this framework, [update it](#expanding-your-harness).
 
 ### Start a project
 
@@ -21,18 +24,20 @@ Now that you have the template locally:
 uv sync
 source .venv/bin/activate
 harness install <your-project-name>
+git add . && git commit
 harness gate
 harness run <agent>>
 
 poetry install
 poetry run harness install <your-project-name>
+git add . && git commit
 poetry run harness gate
 poetry run harness <agent>
 
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt -e .
-harness install <your-project-name>
+harness install <your-project-name>  && git add . && git commit
 harness gate
 harness run <agent>
 ```
@@ -157,12 +162,27 @@ The gate bounds what any **commit** may touch, but the worker itself is **not** 
 
 ## Expanding your harness </summary>
 
-- Edit rules at [pyproject.toml](pyproject.toml) for [ruff](https://docs.astral.sh/ruff/), [pylint](https://pypi.org/project/pylint/), [pydoclint](https://pypi.org/project/pydoclint/0.9.1/), [pyright](https://github.com/microsoft/pyright), [pytest](https://docs.pytest.org/en/stable/), [hypothesis](https://hypothesis.readthedocs.io/), [complexipy](https://github.com/rohaquinlop/complexipy)
-- Add forbidden files, directories, or patterns in `[tool.harness.gate]` at [pyproject.toml](pyproject.toml)
-- Add [Hypothesis](https://hypothesis.readthedocs.io/) tests when generated cases improve coverage beyond example-based tests. `tests/`
-- [semgrep](https://docs.semgrep.dev/semgrep-ci/sample-ci-configs) has no repo config here. It uses registry configs plus Semgrep's built-in defaults which ignore tests.
-- Edit `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). [ci.yml](.github/workflows/ci.yml) runs the same `harness gate`.
-- Remove or add preferences not caught by Ruff, Pylint, etc. at [preferences.py](preferences/preferences.py).
+- Edit rules at [pyproject.toml](pyproject.toml) for [ruff](https://docs.astral.sh/ruff/), [pylint](https://pypi.org/project/pylint/), [pydoclint](https://pypi.org/project/pydoclint/0.9.1/), [pyright](https://github.com/microsoft/pyright), [pytest](https://docs.pytest.org/en/stable/), [hypothesis](https://hypothesis.readthedocs.io/), [complexipy](https://github.com/rohaquinlop/complexipy), [mutmut](https://mutmut.readthedocs.io/)
+- Add forbidden files, directories, or patterns in `[tool.harness]` at [pyproject.toml](pyproject.toml)
+- Add [Hypothesis](https://hypothesis.readthedocs.io/) tests in any test directory, examples at [test_properties.py](tests/preferences/test_properties.py).
+- Run [mutmut](https://mutmut.readthedocs.io/) by hand with `uv run mutmut run`, then `uv run mutmut browse`. A surviving mutant is a covered line no assertion checks. It is not a gate check: `mutmut run` exits 0 even with survivors and it should be run ~1x/week. Its mutants are cached in a JSON and should be used to identify weak tests. Example at [check_mutmut.py](https://github.com/rxdt/loopgate_harness/blob/main/mutation/check_mutmut.py).
+- [semgrep](https://docs.semgrep.dev/semgrep-ci/sample-ci-configs) has no repo config here. It uses registry configs / Semgrep's built-in defaults which ignore tests.
+- Update `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). [ci.yml](.github/workflows/ci.yml) runs those **same exact** `harness gate` checks.
+- Add or remove coding preferences [preferences.py](preferences/preferences.py) that only agents in loops **must** respect. Current preferences:
+
+```py
+function_argument_assignment_has_star  # agents use non-specific `def fun(*)`
+function_argument_assignment_underscore_lead  # agents love over-using underscore names `def _fun()`
+hidden_signature_star_args  # Complain when a function uses *args or **kwargs (it hides function signatures)
+dynamic_star_call  # Calls to def fun(*items) breaks when you can't tell how many arguments f is getting
+pointless_class  # ensure classes are added for good reasons (carry state, values, methods)
+lazy_assert  # enforce real assertions, stronger tests
+objects_injected_into_runtime_memory  # finds calls that manipulate global state (dangerous, tricky)
+lambda_found  # abolish lambdas, make agents keep their code simple
+lazy_any_type_hints  # abolish type `Any` used to bypass strict type-checking
+chaotic_continue_statements  # abolish unecessary nested continue statements, clean code
+complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefer linear code
+```
 
 </details>
 
@@ -209,11 +229,10 @@ npm run --prefix harness/js-scaffold preflight
   Spec claimed by agent: <unclaimed>
   ```
 
-- **The agents:** paste this exact block into [PROMPT.md line 3](docs/PROMPT.md#L3):
+- **This exact block** into [PROMPT.md line 3](docs/PROMPT.md#L3):
 
   ```
-  Other agents are working this repo. Before touching code, pick a spec whose claim line is
-  <unclaimed>, replace it with your name, and commit that claim first. Own that spec's file and its
+  Other agents are working this repo. Before touching code, pick a spec whose claim line is <unclaimed>, replace it with your exact name `<your-agent-id>-<spec-you-worked>-<RALPH_ITERATION>/<MAX_ITERATIONS>`, and commit that claim first. Own that spec's file and its
   tests. Set the line back to <unclaimed> on your last commit.
   ```
 

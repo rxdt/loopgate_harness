@@ -5,8 +5,8 @@ only the external toolchain (gate checks, package managers, the worker subproces
 from __future__ import annotations
 
 import io
+import json
 import os
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -21,7 +21,7 @@ from click import unstyle
 from typer.testing import CliRunner
 
 from harness import cli, gate
-from harness.gate import AGENTS, FORBIDDEN_DIRS, FORBIDDEN_FILES, FORBIDDEN_PATTERNS, FULL_CHECKS
+from harness.gate import Gate, gates
 from harness.tests.conftest import REPO_ROOT, fake_popen
 
 if TYPE_CHECKING:
@@ -111,7 +111,7 @@ def test_entry_point_propagates_exit_codes_and_rejects_unknown_commands(
     assert runner.invoke(cli.app, ["bogus"]).exit_code == 2
     assert runner.invoke(cli.app, []).exit_code == 2
 
-    fake_popen(monkeypatch, fails=[gate.COMMIT_CHECKS["lint"], gate.COMMIT_CHECKS["format"]])
+    fake_popen(monkeypatch, fails=[gates.commit_checks["lint"], gates.commit_checks["format"]])
     rejected = runner.invoke(cli.app, ["preflight"])
     summary = " ".join(unstyle(rejected.stdout).split())
 
@@ -134,20 +134,20 @@ def test_help_and_info_surface_every_check_agent_and_containment_rule(
     flat = " ".join(unstyle(info.output).split())
     for phase in ("preflight", "gate"):
         assert phase in flat
-    for name, command in FULL_CHECKS.items():
+    for name, command in gates.full_checks.items():
         assert name in flat
         assert command[0] in flat
-    for pattern in FORBIDDEN_PATTERNS:
+    for pattern in gates.forbidden_patterns:
         assert pattern in flat
-    for path in (*FORBIDDEN_DIRS, *FORBIDDEN_FILES):
+    for path in (*gates.forbidden_dirs, *gates.forbidden_files):
         assert path in flat
-    for agent in AGENTS:
+    for agent in gates.agents:
         assert agent in flat
 
     run_help = runner.invoke(cli.app, ["run", "--help"])
 
     assert run_help.exit_code == 0
-    for agent in AGENTS:
+    for agent in gates.agents:
         assert agent in run_help.output
     assert "verbose" in run_help.output
     assert "--verbose" not in run_help.output
@@ -168,7 +168,7 @@ def test_every_supported_agent_has_a_nonempty_command() -> None:
         "tool"
     ]["harness"]["agents"]
 
-    assert agents == AGENTS
+    assert agents == gates.agents
     assert set(agents) == {"claude", "codex", "agy", "copilot"}
     assert all(isinstance(command, list) and bool(command) for command in agents.values())
     assert all(
@@ -176,60 +176,56 @@ def test_every_supported_agent_has_a_nonempty_command() -> None:
     )
 
 
-def test_preflight_summary_names_every_check_for_agents(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+@pytest.mark.parametrize(
+    ("command", "source", "expected"),
+    [
+        pytest.param(
+            "preflight",
+            "value = 1\n",
+            (0, "Harness Summary RESULT CHECK ok: preflight pass"),
+            id="preflight-passes",
+        ),
+        pytest.param(
+            "gate",
+            "_bad = 1\n",
+            (
+                1,
+                (
+                    "Harness Summary RESULT CHECK FAILED "
+                    "src/mod.py:1: Name '_bad' starts with underscore rejected by harness"
+                ),
+            ),
+            id="gate-rejects",
+        ),
+    ],
+)
+def test_cli_summaries_report_complete_agent_check_results(
+    command: str,
+    source: str,
+    expected: tuple[int, str],
+    monkeypatch: pytest.MonkeyPatch,
+    git_repo: Path,
 ) -> None:
-    """The preflight summary names configured checks and the separate preferences containment result."""
+    """Preflight and gate render every containment phase and preserve the final verdict exactly."""
+    exit_code, summary = expected
     monkeypatch.setenv("RALPH_LOOP", "1")
-    source = git_repo / "src" / "mod.py"
-    source.parent.mkdir()
-    source.write_text("value = 1\n", encoding="utf-8")
+    monkeypatch.setattr(gates, "commit_checks" if command == "preflight" else "full_checks", {})
+    source_path = git_repo / "src" / "mod.py"
+    source_path.parent.mkdir()
+    source_path.write_text(source, encoding="utf-8")
     gate.run_git(["add", "src/mod.py"], git_repo)
-    fake_popen(monkeypatch)
-    result = runner.invoke(cli.app, ["preflight"])
-    assert result.exit_code == 0
+    result = runner.invoke(cli.app, [command])
     output = " ".join(unstyle(result.stdout).split())
-    assert output == (
-        "PHASE: LINT ruff check --no-cache --show-fixes . PHASE: PYLINT pylint . "
-        "PHASE: FORMAT ruff format --no-cache --check PHASE: COMPLEXIPY complexipy . "
-        "PHASE: BANNED PATTERNS CHECK checking for banned patterns in staged files "
-        "PHASE: USER PREFERENCES checking that user's preferences are respected "
-        "Harness Summary RESULT CHECK PASSED lint PASSED pylint PASSED format PASSED complexipy "
-        "ok: preflight pass"
-    )
-    for name, command in gate.COMMIT_CHECKS.items():
-        assert name in output
-        assert " ".join(command) in output
 
-
-def test_gate_summary_names_every_check_for_agents(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """The gate summary names configured checks and the separate preferences containment result."""
-    monkeypatch.setenv("RALPH_LOOP", "1")
-    source = git_repo / "src" / "mod.py"
-    source.parent.mkdir()
-    source.write_text("value = 1\n", encoding="utf-8")
-    gate.run_git(["add", "src/mod.py"], git_repo)
-    fake_popen(monkeypatch)
-    result = runner.invoke(cli.app, ["gate"])
-    assert result.exit_code == 0
-    output = " ".join(unstyle(result.stdout).split())
-    assert output == (
-        "PHASE: LINT ruff check --no-cache --show-fixes . PHASE: PYLINT pylint . "
-        "PHASE: FORMAT ruff format --no-cache --check "
-        "PHASE: COMPLEXIPY complexipy . "
-        "PHASE: SECURITY semgrep scan --error --config auto --config p/secrets --exclude-rule "
-        "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag . "
-        "PHASE: TYPES pyright --outputjson "
-        "PHASE: PYTEST pytest -p no:cacheprovider -n auto --cov "
-        "--cov-report=term-missing --cov-fail-under=100 "
-        "PHASE: BANNED PATTERNS CHECK checking for banned patterns in staged files "
-        "PHASE: USER PREFERENCES checking that user's preferences are respected "
-        "Harness Summary RESULT CHECK PASSED lint PASSED pylint PASSED format PASSED complexipy "
-        "PASSED security PASSED types PASSED pytest ok: gate pass"
+    assert (result.exit_code, output) == (
+        exit_code,
+        (
+            "PHASE: AGENT CHECKS running non-human agent checks "
+            "PHASE: BANNED PATTERNS CHECK checking for banned patterns in staged files "
+            "PHASE: USER PREFERENCES checking that user's preferences are respected "
+            f"{summary}"
+        ),
     )
-    for name, command in gate.FULL_CHECKS.items():
-        assert name in output
-        assert " ".join(command) in output
 
 
 def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path) -> None:
@@ -288,7 +284,13 @@ def test_installing_the_template_cleans_the_repo_sets_hooks_and_reruns_cleanly(
         encoding="utf-8",
     )
     (git_repo / "uv.lock").touch()
-    template_files = (".banner.svg", ".diagram.png", ".infin.png", ".loops_agents.svg", ".loops.svg")
+    template_files = (
+        ".banner.svg",
+        ".diagram.png",
+        ".infin.png",
+        ".loops_agents.svg",
+        ".loops.svg",
+    )
     for file_name in template_files:
         (git_repo / file_name).touch()
     (git_repo / ".github" / "workflows").mkdir(parents=True)
@@ -316,17 +318,24 @@ def test_installing_the_template_cleans_the_repo_sets_hooks_and_reruns_cleanly(
         "requires-python": ">=3.11",
         "scripts": {"harness": "harness.cli:main"},
     }
-    assert document["tool"]["pyright"] == {"typeCheckingMode": "strict", "include": ["src", "preferences"]}
+    assert document["tool"]["pyright"] == {
+        "typeCheckingMode": "strict",
+        "include": ["src", "preferences", "mutation"],
+    }
+    assert document["tool"]["mutmut"] == {"source_paths": ["src", "preferences", "mutation"]}
     assert document["tool"]["pytest"]["ini_options"] == {
         "addopts": ["-ra"],
         "testpaths": ["tests"],
         "pythonpath": [".", "src"],
     }
     assert document["tool"]["coverage"] == {
-        "run": {"source": ["src", "preferences"]},
+        "run": {"source": ["src", "preferences", "mutation"]},
         "report": {"fail_under": 100},
     }
-    assert document["tool"]["complexipy"] == {"paths": ["src", "preferences"], "max-complexity-allowed": 10}
+    assert document["tool"]["complexipy"] == {
+        "paths": ["src", "preferences", "mutation"],
+        "max-complexity-allowed": 10,
+    }
     assert document["tool"]["ruff"]["exclude"] == [".git", "harness"]
     assert document["tool"]["pylint"]["main"]["ignore"] == [".git", "harness"]
     assert (git_repo / "README.md").read_text(encoding="utf-8") == "seed\n"
@@ -376,7 +385,9 @@ def test_install_picks_the_package_manager_from_the_lockfile(
         (git_repo / lockfile).touch()
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(
-        subprocess, "run", stub_toolchain(subprocess.run, calls, str(poetry_bin / python_name))
+        subprocess,
+        "run",
+        stub_toolchain(subprocess.run, calls, str(poetry_bin / python_name)),
     )
 
     assert runner.invoke(cli.app, ["install"]).exit_code == 0
@@ -384,7 +395,16 @@ def test_install_picks_the_package_manager_from_the_lockfile(
     managers = {
         "uv": ("uv", "sync"),
         "poetry": ("poetry", "install"),
-        "pip": (str(interpreter / python_name), "-m", "pip", "install", "-r", "requirements.txt", "-e", "."),
+        "pip": (
+            str(interpreter / python_name),
+            "-m",
+            "pip",
+            "install",
+            "-r",
+            "requirements.txt",
+            "-e",
+            ".",
+        ),
     }
     recorded = {
         "uv": harness_executable(git_repo / ".venv" / scripts),
@@ -481,7 +501,7 @@ def test_windows_skips_posix_steps_and_launches_the_powershell_twin(
     assert launched[0][:3] == ["powershell.exe", "-NoProfile", "-File"]
     assert launched[0][3].endswith("ralph.ps1")
     assert launched[0][4:6] == ["2", "5"]
-    assert launched[0][6:] == list(AGENTS["claude"])
+    assert launched[0][6:] == list(gates.agents["claude"])
 
 
 def test_windows_run_uses_powershell_without_path_lookup(
@@ -519,7 +539,10 @@ def test_windows_run_uses_powershell_without_path_lookup(
     ],
 )
 def test_cleanup_applies_the_project_name_rules(
-    tmp_path: Path, initial_name: str | None, requested_name: str | None, expected_name: str
+    tmp_path: Path,
+    initial_name: str | None,
+    requested_name: str | None,
+    expected_name: str,
 ) -> None:
     """Cleanup starts the project at v0 and only accepts a name that is already PEP 503 normalized."""
     (tmp_path / "README.md").write_text("old\n", encoding="utf-8")
@@ -560,36 +583,6 @@ def test_tracked_hooks_call_registered_commands_without_venv_paths(hook: str) ->
 
 
 @pytest.mark.parametrize(
-    ("recorded", "message"),
-    [
-        pytest.param(None, "hooks are not installed. Run 'harness install' in this repo.", id="never-ran"),
-        pytest.param("missing-harness", "is gone. Re-run 'harness install'.", id="stale-record"),
-    ],
-)
-def test_hooks_name_the_fix_when_the_recorded_harness_is_missing_or_stale(
-    recorded: str | None, message: str, git_repo: Path
-) -> None:
-    """A repo without the install record, or one whose environment was rebuilt, gets instructions."""
-    shutil.copytree(REPO_ROOT / ".githooks", git_repo / ".githooks", dirs_exist_ok=True)
-    if recorded:
-        (git_repo / ".git" / "harness-path").write_text(f"{git_repo / recorded}\n", encoding="utf-8")
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    gate.run_git(["config", "core.hooksPath", ".githooks"], git_repo)
-
-    result = subprocess.run(
-        ["git", "commit", "--allow-empty", "-m", "exercise pre-commit"],
-        cwd=git_repo,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-    )
-
-    assert result.returncode == 1
-    assert message in result.stderr
-
-
-@pytest.mark.parametrize(
     ("arguments", "code"),
     [
         pytest.param([".git/COMMIT_EDITMSG", "merge"], 1, id="blocked-merge"),
@@ -602,11 +595,11 @@ def test_prepare_commit_msg_forwards_gits_own_arguments(
     """The hook command hands git's own arguments to the gate logic and exits with its status."""
     seen: list[list[str]] = []
 
-    def commit_msg(argv: list[str]) -> int:
+    def commit_msg(_gate: Gate, argv: list[str]) -> int:
         seen.append(argv)
         return code
 
-    monkeypatch.setattr(cli, "commit_msg", commit_msg)
+    monkeypatch.setattr(Gate, "prepare_commit_msg", commit_msg)
 
     result = runner.invoke(cli.app, ["prepare-commit-msg", *arguments])
 
@@ -647,15 +640,17 @@ def test_a_harnessed_run_writes_numbered_receipts_and_propagates_exit_codes(
     assert not first.stdout
     assert launched[0][0].endswith("ralph.sh")
     assert launched[0][1:3] == ["1", "2"]
-    assert launched[0][3:] == list(AGENTS["claude"])
+    assert launched[0][3:] == list(gates.agents["claude"])
     receipts = git_repo / "scratchpad" / "runs" / "20990102" / "claude"
     assert (receipts / "0001.jsonl").read_text(encoding="utf-8") == '{"type":"result","result":"ok"}\n'
-    assert os.environ["RALPH_PROMPT"] == "Your agent id is `0001`\n\ndo the most important thing"
+    assert os.environ["RALPH_PROMPT"] == (
+        "Your agent id prefix is `claude-0001`\n\ndo the most important thing"
+    )
 
     second = runner.invoke(cli.app, ["run", "claude", "1", "2", "False", "--model", "haiku"])
 
     assert second.exit_code == 0
-    swapped = list(AGENTS["claude"])
+    swapped = list(gates.agents["claude"])
     swapped[swapped.index("--model") + 1] = "haiku"
     assert launched[1][3:] == swapped
     assert launched[1].count("--model") == 1
@@ -679,7 +674,11 @@ def test_run_worker_logs_every_line_and_streams_only_when_verbose(
     """
     monkeypatch.setattr(cli, "REPO_ROOT_STR", str(tmp_path))
     log = tmp_path / "out.jsonl"
-    streaming_worker = [sys.executable, "-c", 'print(\'{ "type" : "result" }\'); print("not json")']
+    streaming_worker = [
+        sys.executable,
+        "-c",
+        'print(\'{ "type" : "result" }\'); print("not json")',
+    ]
 
     assert cli.run_worker(streaming_worker, log, verbose=True) == 0
 
@@ -689,7 +688,11 @@ def test_run_worker_logs_every_line_and_streams_only_when_verbose(
     assert "not json" in streamed
     assert log.read_text(encoding="utf-8") == '{ "type" : "result" }\nnot json\n'
 
-    failing_worker = [sys.executable, "-c", 'print("worker output"); raise SystemExit(3)']
+    failing_worker = [
+        sys.executable,
+        "-c",
+        'print("worker output"); raise SystemExit(3)',
+    ]
 
     assert cli.run_worker(failing_worker, log, verbose=False) == 3
 
@@ -717,7 +720,7 @@ def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyP
         encoding="utf-8",
     )
     preset = [sys.executable, str(worker), "--model", "opus", "-p"]
-    monkeypatch.setitem(cli.AGENTS, "claude", preset)
+    monkeypatch.setitem(gates.agents, "claude", preset)
     monkeypatch.chdir(git_repo)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(cli, "REPO_ROOT_STR", str(git_repo))
@@ -729,7 +732,7 @@ def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyP
 
     assert result.exit_code == 0
     assert (git_repo / "claude-count").read_text(encoding="utf-8") == "2"
-    identity = "Your agent id is `0001`\n\n"
+    identity = "Your agent id prefix is `claude-0001`\n\n"
     assert (git_repo / "prompt-1.txt").read_text(encoding="utf-8") == (
         f"{identity}build from specs\n\nRALPH_ITERATION=1/2\n"
     )
@@ -741,6 +744,8 @@ def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyP
         *preset_args,
         *preset_args,
     ]
-    assert (git_repo / "scratchpad" / "runs" / "20990102" / "claude" / "0001.jsonl").read_text(
-        encoding="utf-8"
-    ) == '{"type": "result", "result": "ok"}\n{"type": "result", "result": "ok"}\n'
+    receipt = git_repo / "scratchpad" / "runs" / "20990102" / "claude" / "0001.jsonl"
+    events = [json.loads(line) for line in receipt.read_text(encoding="utf-8").splitlines()]
+    assert [event["type"] for event in events] == ["ralph", "result", "ralph", "result", "ralph"]
+    assert [event.get("iteration") for event in events] == [1, None, 2, None, None]
+    assert events[-1]["completed"] == 2

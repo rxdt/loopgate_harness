@@ -51,10 +51,12 @@ fi
 
 i=1
 while [ "$i" -le "$MAX_ITERATIONS" ]; do
-    echo "ralph: iteration $i/$MAX_ITERATIONS" >&2
+    printf '{"type":"ralph","iteration":%s,"max_iterations":%s,"timestamp":"%s"}\n' \
+    "$i" "$MAX_ITERATIONS" "$(date '+%Y-%m-%dT%H:%M')"
+
     printf '%s\n\nRALPH_ITERATION=%s/%s\n' "$RALPH_PROMPT" "$i" "$MAX_ITERATIONS" \
         | "$TIMEOUT" "$((MAX_MINUTES * 60))" "$@"
     i=$((i + 1))
 done
 
-echo "ralph: completed $MAX_ITERATIONS iteration(s)" >&2
+printf '{"type":"ralph","completed":%s, "timestamp":"%s"}\n' "$MAX_ITERATIONS" "$(date '+%Y-%m-%dT%H:%M')"

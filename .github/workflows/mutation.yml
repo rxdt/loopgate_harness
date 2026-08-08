@@ -38,7 +38,7 @@ jobs:
         run: uv run --no-sync harness gate # need tests for Mutmut to target
 
       - name: Run Mutmut
-        run: uv run --no-sync mutmut run || true
+        run: uv run --no-sync mutmut run
 
       - name: Export CI/CD Stats
         run: uv run --no-sync mutmut export-cicd-stats
@@ -48,3 +48,6 @@ jobs:
         with:
           name: mutmut-json-report
           path: mutants/mutmut-cicd-stats.json
+
+      - name: Check Mutation Score
+        run: uv run --no-sync python mutation/check_mutmut.py

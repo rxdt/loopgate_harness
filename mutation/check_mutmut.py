@@ -56,6 +56,7 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console(force_terminal=True)
+MINIMUM_MUTATION_SCORE = 60.0
 
 JsonDocument = dict[str, object] | list[object] | str | int | float | bool | None
 
@@ -71,7 +72,7 @@ def analyze_mutmut_report(file_path: str = "mutants/mutmut-cicd-stats.json") -> 
 
     Raises:
         JSONDecodeError: If the report does not contain valid JSON.
-        Exit: If the report file does not exist.
+        Exit: If the report file does not exist or the mutation score is below the minimum.
     """
     if not Path(file_path).exists():
         rprint(rf"[red]Error: Mutmut JSON report not found at [\]'{file_path}'")
@@ -96,8 +97,11 @@ def analyze_mutmut_report(file_path: str = "mutants/mutmut-cicd-stats.json") -> 
     table = Table(title="\n[cyan2]MUTMUT MUTATION RESULTS[/]\n", box=None, padding=(0, 2))
     for stat, result in data.items():
         table.add_row(f"[turquoise]  {stat}[/]", f"[blue] {result}[/]")
-    table.add_row(f"[bold italic turquoise]  MUTATION SCORE: [/][bold italic blue]{mutation_score}[/]")
+    table.add_row(f"[bold italic cyan2]  MUTATION SCORE: [/][bold italic yellow2]{mutation_score}[/]")
     console.print(table, justify="center")
+    if mutation_score < MINIMUM_MUTATION_SCORE:
+        raise typer.Exit(code=1)
+
     return mutation_score
 
 

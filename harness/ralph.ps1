@@ -36,6 +36,11 @@ if ($maxIterations -lt 1 -or $maxMinutes -le 0) {
 
 for ($i = 1; $i -le $maxIterations; $i++) {
     [Console]::Error.WriteLine("ralph: iteration $i/$maxIterations")
+    # Receipt line, same stdout contract as ralph.sh: `harness run` saves stdout as the run's .jsonl.
+    # The worker inherits this handle, so flush before starting it or the records interleave.
+    $timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm")
+    [Console]::Out.WriteLine("{""type"":""ralph"",""iteration"":$i,""max_iterations"":$maxIterations,""timestamp"":""$timestamp""}")
+    [Console]::Out.Flush()
     $stdin = "$($env:RALPH_PROMPT)`n`nRALPH_ITERATION=$i/$maxIterations`n"
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $rest[0]
@@ -60,4 +65,7 @@ for ($i = 1; $i -le $maxIterations; $i++) {
     }
 }
 
+$timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm")
+[Console]::Out.WriteLine("{""type"":""ralph"",""completed"":$maxIterations, ""timestamp"":""$timestamp""}")
+[Console]::Out.Flush()
 [Console]::Error.WriteLine("ralph: completed $maxIterations iteration(s)")
