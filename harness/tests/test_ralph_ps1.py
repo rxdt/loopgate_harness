@@ -83,6 +83,11 @@ def test_defaults_run_twice_and_pass_prompt_marker_and_environment(tmp_path: Pat
         )
         assert (tmp_path / f"loop-{iteration}.txt").read_text(encoding="utf-8") == "1"
     assert "completed 2 iteration(s)" in result.stderr
+    # stdout is the run receipt `harness run` saves as .jsonl, so it must match ralph.sh's contract
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert [event["type"] for event in events] == ["ralph", "ralph", "ralph"]
+    assert [event.get("iteration") for event in events] == [1, 2, None]
+    assert events[-1]["completed"] == 2
 
 
 def test_explicit_one_iteration_completes(tmp_path: Path) -> None:
@@ -133,6 +138,7 @@ def test_nonzero_worker_exit_propagates_and_stops(tmp_path: Path) -> None:
     assert "iteration 1/2" in result.stderr
     assert "iteration 2/2" not in result.stderr
     assert "completed" not in result.stderr
+    assert "completed" not in result.stdout  # a failed loop never writes a completion receipt
 
 
 def test_fractional_timeout_returns_124_and_stops_process_tree(tmp_path: Path) -> None:
@@ -146,3 +152,4 @@ def test_fractional_timeout_returns_124_and_stops_process_tree(tmp_path: Path) -
     assert "iteration 1/2" in result.stderr
     assert "iteration 2/2" not in result.stderr
     assert "completed" not in result.stderr
+    assert "completed" not in result.stdout  # a timed-out loop never writes a completion receipt
