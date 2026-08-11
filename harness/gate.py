@@ -19,7 +19,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-console = Console(force_terminal=True, color_system="256")
+console = Console(force_terminal=True, color_system=None if os.environ.get("RALPH_LOOP") else "256")
+
 try:
     from preferences.preferences import preferences_violations as prefs
 except ImportError:  # humans can delete preferences.py
