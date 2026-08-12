@@ -485,12 +485,18 @@ def test_gate_runs_exactly_what_pyproject_configures(
     (git_repo / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
     with pytest.raises(KeyError):
         Gate(git_repo)
+    expected_repo_root = Path(
+        subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=REPO_ROOT, text=True).strip()
+    )
     assert (
         Path(gate.run_git(["rev-parse", "--show-toplevel"]).strip()),
         Path(gate.run_git(["rev-parse", "--show-toplevel"], REPO_ROOT).strip()),
-    ) == (git_repo, REPO_ROOT)
+    ) == (git_repo, expected_repo_root)
     monkeypatch.setenv("GIT_DIR", str(git_repo / "no-such-dir"))
     monkeypatch.delenv("RALPH_LOOP", raising=False)
+    monkeypatch.setattr(
+        gate, "console", gate.Console(force_terminal=True, color_system="256", no_color=False)
+    )
     assert Path(gate.run_git(["rev-parse", "--show-toplevel"]).strip()) == git_repo
     monkeypatch.delenv("GIT_DIR")
     absent = ["rev-parse", "--verify", "refs/heads/absent"]

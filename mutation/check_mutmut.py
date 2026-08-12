@@ -48,6 +48,7 @@ would change, equivalent code swap e.g. i < 10 => i != 10
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import typer
@@ -55,8 +56,9 @@ from rich import print as rprint
 from rich.console import Console
 from rich.table import Table
 
-console = Console(force_terminal=True)
-MINIMUM_MUTATION_SCORE = 60.0
+console = Console(force_terminal=True, color_system=None if os.environ.get("RALPH_LOOP") else "256")
+
+MINIMUM_MUTATION_SCORE = 80.0
 
 JsonDocument = dict[str, object] | list[object] | str | int | float | bool | None
 

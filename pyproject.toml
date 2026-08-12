@@ -3,6 +3,7 @@ name = "harness"
 version = "0.1.0"
 requires-python = ">=3.10,<4"
 dependencies = [
+    "mutmut>=3.7.0",
     "packaging",
     "tomlkit",
     "typer",
@@ -211,8 +212,9 @@ skip_covered = false               # Same behavior for older coverage config rea
 # ==============================================================================
 [tool.mutmut]
 max-children = 2
-source_paths = ["preferences", "src", "mutation"]  # what to mutate
-also_copy = ["harness", ".githooks"]  # not mutated paths, copied for imports
+source_paths = ["preferences", "src", "harness"]  # what to mutate
+also_copy = ["mutation", ".githooks"]  # not mutated paths, copied for imports
+do_not_mutate = ["harness/tests/*"]
 
 # ==============================================================================
 # Complexipy Configuration
