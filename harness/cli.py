@@ -27,9 +27,9 @@ app = typer.Typer(
     help="Commands to harness the loops",
     no_args_is_help=True,
     add_completion=False,
-    rich_markup_mode="rich",
+    rich_markup_mode=None if os.environ.get("RALPH_LOOP") else "rich",
 )
-console = Console(force_terminal=True)
+console = Console(force_terminal=True, color_system=None if os.environ.get("RALPH_LOOP") else "256")
 REPO_ROOT_STR = str(gates.repo_root)
 
 
@@ -198,6 +198,7 @@ def cleanup(cwd: Path, name: str | None) -> bool:
         ".loops.svg",
         ".github/workflows/publish.yml",
         "CONTRIBUTING.md",
+        "LICENSE.md",
     ):
         (cwd / file_name).unlink(missing_ok=True)
     for directory in (cwd / "dist", cwd / "harness" / "tests"):

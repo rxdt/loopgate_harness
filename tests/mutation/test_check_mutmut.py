@@ -11,7 +11,7 @@ import pytest
 import typer
 from click import unstyle
 
-from mutation.check_mutmut import analyze_mutmut_report
+from mutation.check_mutmut import MINIMUM_MUTATION_SCORE, analyze_mutmut_report
 
 
 def test_report_with_timeout_passes_and_renders(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -40,18 +40,22 @@ def test_report_enforces_threshold(tmp_path: Path, capsys: pytest.CaptureFixture
     report = tmp_path / "mutmut-cicd-stats.json"
     report.write_text(json.dumps(data), encoding="utf-8")
     mutation_score = analyze_mutmut_report(str(report))
-    assert 60.0 <= mutation_score < 100.0
+    assert MINIMUM_MUTATION_SCORE <= mutation_score < 100.0
 
-    report.write_text(json.dumps({"killed": 3, "timeout": 0, "total": 5, "skipped": 0}), encoding="utf-8")
-    assert analyze_mutmut_report(str(report)) == pytest.approx(60.0)
+    passing_report = {"killed": MINIMUM_MUTATION_SCORE, "timeout": 0, "total": 100, "skipped": 0}
+    report.write_text(json.dumps(passing_report), encoding="utf-8")
+    assert analyze_mutmut_report(str(report)) == pytest.approx(MINIMUM_MUTATION_SCORE)
 
-    report.write_text(json.dumps({"killed": 59, "timeout": 0, "total": 100, "skipped": 0}), encoding="utf-8")
+    failing_score = MINIMUM_MUTATION_SCORE - 1
+    report.write_text(
+        json.dumps({"killed": failing_score, "timeout": 0, "total": 100, "skipped": 0}), encoding="utf-8"
+    )
     with pytest.raises(typer.Exit) as exc_info:
         analyze_mutmut_report(str(report))
 
     assert exc_info.value.exit_code == 1
     output = " ".join(unstyle(capsys.readouterr().out).split())
-    assert "MUTATION SCORE: 59.0" in output
+    assert f"MUTATION SCORE: {failing_score}" in output
 
 
 def test_missing_report_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
