@@ -4,61 +4,60 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
+from configparser import ConfigParser
+from copy import deepcopy
+from datetime import datetime, timezone
+from importlib import util
 from pathlib import Path
-from typing import Annotated
+from shutil import copy2, rmtree, which
+from typing import Annotated, Any
 
-import tomlkit
-import typer
-from packaging.utils import canonicalize_name, is_normalized_name
 from rich import print as rprint
-from rich.console import Console
 from rich.json import JSON
-from rich.table import Table
+from rich.table import Table, box
+from tomlkit import TOMLDocument, document, dumps, parse, table
+from typer import Argument, Exit, Option, Typer, colors, confirm, echo, secho, style
 
-from harness.gate import gates, run_git
+from harness.config import ASSETS, CATEGORIES, CLAUDE_RULES, CODEX_RULES, PHASES, TOOLS
+from harness.gate import console, gates, run_git
 
-app = typer.Typer(
+app = Typer(
     name="loopgate",
-    help="Commands to harness the loops",
+    help="Commands to harness loops into meeting quality standards",
     no_args_is_help=True,
     add_completion=False,
     rich_markup_mode=None if os.environ.get("RALPH_LOOP") else "rich",
 )
-console = Console(force_terminal=True, color_system=None if os.environ.get("RALPH_LOOP") else "256")
-REPO_ROOT_STR = str(gates.repo_root)
+REPO_ROOT = gates().repo_root
+REPO_ROOT_STR = str(REPO_ROOT)
+IS_WINDOWS = sys.platform == "win32"
 
 
-def setup_git_hooks(env_bin: Path, is_windows: bool) -> Path:
-    """Saves the installed `harness` executable's PATH for Git hooks to run.
-
-    `harness install` calls setup_git_hooks after dependencies and git hooks are in. Because we have this in
-    pyproject.toml we create an executable: `[project.scripts] harness = "harness.cli:main"`
-    With an executable and recorded path, there's no dependance. A hook uses a path instead of needing
-    e.g. active `.venv` or calling `uv run...`
+def setup_git_hooks(env_bin: Path) -> Path:
+    """Saves the installed `harness` executable's PATH for Git hooks to run. `pyproject.toml [project.scripts]
+    harness = "harness.cli:main"` creates an executable and we record its path here. A hook uses a path "
+    instead of needing e.g. active `.venv` or calling `uv run`
 
     Arguments:
         env_bin: bin directory of the environment the dependency install just populated
-        is_windows: Operating System platform is Windows "win32"
 
     Returns:
         The path of the file that records the harness command.
     """
-    rprint("\n[cyan2]Setting git hooks[/cyan2] `git config core.hooksPath .githooks`")
+    rprint("\n[cyan2]setting git hooks[/cyan2] `git config core.hooksPath .githooks`")
     subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=REPO_ROOT_STR, check=True)
-    binary = env_bin / ("harness.exe" if is_windows else "harness")
-    recorded = (
-        Path(run_git(["rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()) / "harness-path"
-    )
+    binary = env_bin / ("harness.exe" if IS_WINDOWS else "harness")
+    recorded = REPO_ROOT / run_git(["rev-parse", "--git-common-dir"]).strip() / "harness-path"
     recorded.write_text(f"{binary.as_posix()}\n", encoding="utf-8", newline="\n")
-    if is_windows:
+    if IS_WINDOWS:
         rprint("Windows is experimental. Reoprt issues https://github.com/rxdt/loopgate_harness/issues")
     else:
         subprocess.run(("ls", "-l", ".githooks"), cwd=REPO_ROOT_STR, check=True)
+    rprint(f"\nRecorded in {recorded} is the path to executable {env_bin}")
+
     return recorded
 
 
@@ -83,7 +82,7 @@ def run_worker(command: list[str], log: Path, verbose: bool) -> int:
                 handle.write(line)
                 handle.flush()
                 try:
-                    rendered = JSON(line, indent=None)  # JSON() parses the string itself, raises on non-JSON
+                    rendered = JSON(line, indent=None)
                 except json.JSONDecodeError:
                     rendered = line
                 with console.capture() as captured:
@@ -104,37 +103,36 @@ def check(name: str, command: Callable[[], dict[str, list[str]]]) -> dict[str, l
         typer.Exit: always — code 1 if anything failed, else code 0.
     """
     results = command()
-    table = Table(title="\nHarness Summary\n", title_style="bold grey74", box=None, padding=(0, 5))
-    table.add_column("RESULT")
-    table.add_column("CHECK", style="bold dim white")
+    summary = Table(title="\nHarness Summary\n", title_style="bold grey82", box=None, padding=(0, 5))
+    summary.add_column("RESULT")
+    summary.add_column("CHECK", style="bold dim white")
     for passed in results["pass"]:
-        table.add_row("[green]PASSED[/]", passed)
+        summary.add_row("[green]PASSED[/]", passed)
     for fail in results["fail"]:
-        table.add_row("[bold red]FAILED[/]", fail)
+        summary.add_row("[bold red]FAILED[/]", fail)
     for warn in results["warn"]:
-        table.add_row("[yellow]WARNED[/]", warn)
-    console.print(table, justify="center")
+        summary.add_row("[yellow]WARNED[/]", warn)
+    console.print(summary, justify="center")
     final = "\n[bold red]rejected by harness[/]" if results["fail"] else f"[green]ok: {name} pass[/]"
     console.print(final, justify="center")
-
-    raise typer.Exit(code=1 if results["fail"] else 0)
+    raise Exit(code=1 if results["fail"] else 0)
 
 
 @app.command(help="Fast pre-commit checks (lint/format) plus agent containment")
 def preflight() -> None:
     """Dumb pass-through to the fast pre-commit gate."""
-    check("preflight", gates.run_preflight)
+    check("preflight", gates().run_preflight)
 
 
 @app.command(help="Pre-push checks match the CI gate exactly (lint, types, security, etc.)")
 def gate() -> None:
     """Dumb pass-through to the full pre-push gate; exit nonzero if anything fails."""
-    check("gate", gates.run_gate)
+    check("gate", gates().run_gate)
 
 
 @app.command(hidden=True, help="Git prepare-commit-msg hook. Called by .githooks, not by people.")
 def prepare_commit_msg(
-    args: Annotated[list[str] | None, typer.Argument(help="What git passes the hook")] = None,
+    args: Annotated[list[str] | None, Argument(help="What git passes the hook")] = None,
 ) -> None:
     """Dumb pass-through to prepare_commit_msg hook logic. Hidden git-only usage, not a human command.
 
@@ -144,92 +142,52 @@ def prepare_commit_msg(
     Raises:
         typer.Exit: the hook's status; git aborts the commit on 1.
     """
-    raise typer.Exit(code=gates.prepare_commit_msg(["prepare-commit-msg", *(args or [])]))
+    raise Exit(code=gates().prepare_commit_msg(["prepare-commit-msg", *(args or [])]))
 
 
 @app.command(help="Show harness configuration and capabilitie in pyproject.toml")
 def info() -> None:
     """Print everything the harness reads from [tool.harness] so nobody has to open pyproject.toml."""
-    table = Table(
+    config = Table(
         title="\n[cyan2]Basic Harness Configuration Settings[/]\n[dim cyan2]See pyproject.toml for more[/]",
-        box=None,
-        padding=(0, 2),
+        box=box.MINIMAL,
     )
-    phases = (
-        ("agents", gates.agents),
-        ("preflight", gates.commit_checks),
-        ("gate", gates.full_checks),
-        ("forbidden", gates.forbidden),
-    )
-    for title, checks in phases:
-        table.add_row(f"[bold cyan]{title}[/]", "")
+    for title, checks in PHASES:
+        config.add_row(f"[bold cyan]{title}[/]", "")
         for name, command in checks.items():
-            table.add_row(f"  {name}", f"[dim]{' '.join(command)}[/]")
-    console.print(table)
+            config.add_row(f"  {name}", f"[dim]{' '.join(command)}[/]")
+    console.print(config)
 
 
 @app.command(help="Count agent run logs under scratchpad/runs")
 def status() -> None:
     """Count run logs and point at the newest one."""
-    runs = gates.repo_root / "scratchpad" / "runs"
-    logs = sorted(runs.glob("*.jsonl")) if runs.is_dir() else []
-    typer.secho(f"{len(logs)} run log(s) in {runs}", fg=typer.colors.CYAN, bold=True)
-    if logs:
-        typer.secho(f"newest: {logs[-1]}", fg=typer.colors.GREEN, bold=True)
+    runs = REPO_ROOT / "scratchpad" / "runs"
+    logs = sorted(runs.glob("*.jsonl")) if runs.is_dir() else [""]
+    secho(f"{len(logs)} run log(s) in {runs}\nnewest: {logs[-1]}", fg=colors.CYAN, bold=True)
 
 
-def cleanup(cwd: Path, name: str | None) -> bool:
-    """Cleans the new local repository of old loopgate things
+def cleanup(cwd: Path) -> bool:
+    """Cleans the new local repository of old loopgate things.
+
     Arguments:
         cwd: the current working directory to leave a clean template in
-        name: the new name for the project
 
     Returns:
         bool True if successful
     """
-    if not (cwd / "README.template.md").is_file():
+    if not ((cwd / "README.template.md").is_file() and (cwd / "temp.pyproject.toml").is_file()):
         return False
+    clean_tree = not run_git(["status", "--porcelain"], cwd).strip()
     (cwd / "README.template.md").replace(cwd / "README.md")
-    for file_name in (
-        ".banner.svg",
-        ".diagram.png",
-        ".infin.png",
-        ".loops_agents.svg",
-        ".loops.svg",
-        ".github/workflows/publish.yml",
-        "CONTRIBUTING.md",
-        "LICENSE.md",
-    ):
+    (cwd / "temp.pyproject.toml").replace(cwd / "pyproject.toml")
+    for file_name in (".github/workflows/publish.yml", "CONTRIBUTING.md"):
         (cwd / file_name).unlink(missing_ok=True)
-    for directory in (cwd / "dist", cwd / "harness" / "tests"):
+    for directory in (cwd / "dist", cwd / "harness" / "tests", cwd / ".assets"):
         if directory.exists():
-            shutil.rmtree(directory)
-    gitignore = cwd / ".gitignore"
-    gitignore.write_text(gitignore.read_text(encoding="utf-8").removesuffix("\nuv.lock\n"), encoding="utf-8")
-    document = tomlkit.parse((cwd / "pyproject.toml").read_text(encoding="utf-8"))
-    project = document.setdefault("project", tomlkit.table())
-    project.update({
-        "name": canonicalize_name(name) if name and is_normalized_name(name) else "my-app-name",
-        "version": "0.0.0",
-    })
-    paths = ["src", "preferences", "mutation"]
-    tool = document.setdefault("tool", tomlkit.table())
-    tool.setdefault("pyright", tomlkit.table()).update({"include": paths})
-    tool.setdefault("mutmut", tomlkit.table()).update({"source_paths": paths})
-    tool.setdefault("pytest", tomlkit.table()).setdefault("ini_options", tomlkit.table()).update({
-        "testpaths": ["tests"],
-        "pythonpath": [".", "src"],
-    })
-    coverage = tool.setdefault("coverage", tomlkit.table())
-    coverage.setdefault("run", tomlkit.table()).update({"source": paths})
-    tool.setdefault("complexipy", tomlkit.table()).update({"paths": paths})
-    tool.setdefault("ruff", tomlkit.table()).setdefault("exclude", tomlkit.array()).append("harness")
-    tool.setdefault("pylint", tomlkit.table()).setdefault("main", tomlkit.table()).setdefault(
-        "ignore", tomlkit.array()
-    ).append("harness")
-
-    rprint(f"\n[cyan2]project name[/cyan2] '{project['name']}' set in `pyproject.toml`")
-    (cwd / "pyproject.toml").write_text(tomlkit.dumps(document), encoding="utf-8")
+            rmtree(directory)
+    if run_git(["rev-parse", "--short", "HEAD"], cwd).startswith("867f2df") and clean_tree:
+        run_git(["commit", "-a", "--amend", "--no-edit"], cwd)
     return True
 
 
@@ -237,123 +195,352 @@ def cleanup(cwd: Path, name: str | None) -> bool:
     help="Only run this if setting up a project from the template cloned from Github at project root: injects"
     " project name in pyproject.toml, syncs dependencies, adds githooks, DELETES unecessary files!"
 )
-def install(name: Annotated[str | None, typer.Argument(help="Set up project for loops")] = None) -> None:
-    """Used by template cloned from Github. Not used by library from PyPi.
-    Injects NAME (PEP 503) into pyproject, syncs dependencies, and activates the git hooks.
-
-    Args:
-        name: Optional project name, canonicalized to a PEP 503 form before being written. If name is given,
-        will overwrite existing name in pyproject.toml. When ommitted, project name is left untouched.
-    """
+def install() -> None:
+    """Used by template cloned from Github. Syncs dependencies, and activates the git hooks."""
     rprint("\n[cyan2]installing dependencies[/cyan2]")
-    is_windows = sys.platform == "win32"
-    # Record the env the manager just filled that holds the harness executable
-    if (gates.repo_root / "uv.lock").is_file():
-        subprocess.run(("uv", "sync"), cwd=REPO_ROOT_STR, check=True)
-        env_bin = gates.repo_root / ".venv" / ("Scripts" if is_windows else "bin")
-    elif (gates.repo_root / "poetry.lock").is_file():
-        subprocess.run(("poetry", "install"), cwd=REPO_ROOT_STR, check=True)
-        poetry_env = subprocess.run(
-            ("poetry", "env", "info", "--executable"), capture_output=True, text=True, check=True
-        )
-        env_bin = Path(poetry_env.stdout.strip()).parent
-        name = "harness"
-    else:
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-e", "."],
+    env_bin, args = infer_env_manager()
+    subprocess.run(tuple(args), cwd=REPO_ROOT_STR, check=True)
+    if args[0] == "poetry":
+        poetry_python = subprocess.run(
+            ["poetry", "env", "info", "--executable"],
             cwd=REPO_ROOT_STR,
             check=True,
-        )
-        env_bin = Path(sys.executable).parent
-    cleanup(gates.repo_root, name)
-    recorded = setup_git_hooks(env_bin, is_windows)
-    if not is_windows:
-        check_for_timeout_and_prompt(env_bin)
-    rprint(f"\nRecorded in {recorded} is the path to executable {env_bin}")
-    rprint("\n[red]COMMIT UNSTAGED CHANGES[/red]")
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        env_bin = Path(poetry_python).parent
+    cleanup(REPO_ROOT)
+    setup_git_hooks(env_bin)
+    check_for_timeout_and_prompt()
+    rprint("\n[cyan2]If install left git dirty, commit unstaged changes[/]")
 
 
-def check_for_timeout_and_prompt(env_bin: Path) -> None:
-    """Offer install when macOS lacks a timeout tool. Linux has `timeout`, macOS needs coreutils.gtimeout.
-    Args:
-        env_bin: Path to the harness executable
+def infer_env_manager() -> tuple[Path, list[str]]:
+    """Use environment signals to make a best-guess of which dependency manager is used.
+
+    Returns:
+        env_bin: the path to the binary of the virtual env
+        args: arguments needed to install dependencies
     """
-    if not (shutil.which("timeout") or shutil.which("gtimeout")):
-        rprint("\n[yellow]macOS harness needs timeout/gtimeout from coreutils to loop[/yellow]")
-        if not shutil.which("brew"):
+    python_path = sys.executable
+    env = os.environ.get("VIRTUAL_ENV", "")
+    env_bin = Path(python_path).parent
+    scripts = "Scripts" if IS_WINDOWS else "bin"
+    if (REPO_ROOT / "uv.lock").is_file():
+        env_bin = REPO_ROOT / ".venv" / scripts
+        args = ["uv", "sync"]
+    elif (REPO_ROOT / "poetry.lock").is_file():
+        args = ["poetry", "install"]
+    elif (
+        any(key.startswith("UV_") for key in os.environ)
+        or which("uv") is not None
+        or "uv" in Path(env).name.lower()
+    ):
+        env_bin = REPO_ROOT / ".venv" / scripts
+        args = ["uv", "sync"]
+    elif "pypoetry" in env or "pypoetry" in python_path:
+        args = ["poetry", "install"]
+    else:
+        args = [python_path, "-m", "pip", "install", "-r", "requirements.txt", "-e", "."]
+    return env_bin, args
+
+
+@app.command(hidden=True)
+def check_for_timeout_and_prompt() -> str | None:
+    """Offer install when macOS lacks a timeout tool. Linux has `timeout`, macOS needs coreutils.gtimeout.
+    Returns:
+        which gtimeout/timeout a Linux or MocOS user has installed
+    """
+    if IS_WINDOWS:
+        return None
+    if not (which("gtimeout") or which("timeout")):
+        rprint("\n[yellow]macOS harness needs timeout/gtimeout from coreutils to run loops[/yellow]")
+        if not which("brew"):
             rprint("Get Homebrew https://brew.sh then run `brew install coreutils` or `sudo port install`")
-        elif typer.confirm("[magenta]Install now `brew install coreutils`?[/magenta]"):
-            subprocess.run(("brew", "install", "coreutils"), check=False)
-        else:
-            rprint("[yellow]skipped[/yellow]: run `brew install coreutils` before `harness run`.")
-    rprint(
-        "\nIf timeout or gtimeout is installed, you can run loops after activating the environment"
-        f"\nActivate env with [turquoise2]`source {env_bin / 'activate'}`[/turquoise2] "
-        "to use the [green]`harness`[/green] commands.\n"
-        "\n[turquoise2]python:[/turquoise2] project supports >=3.11"
-        "\nOptionally pin newer local Python with [turquoise2]`uv python pin 3.13 && uv sync`[/turquoise2]"
-    )
+        elif (
+            confirm("\nInstall `brew install coreutils` now?", abort=True)
+            and subprocess.run(("brew", "install", "coreutils"), check=False).returncode == 0
+        ):
+            rprint(
+                "\nIf timeout or gtimeout is installed, you can run loops with `harness run`"
+                "\nIf using `uv` or `pip` activate env to use [green]`harness`[/green] commands[turquoise2]"
+            )
+    return which("gtimeout") or which("timeout")
 
 
 @app.command(
     help="Run one harnessed ralph loop with <agent>, e.g. harness run claude 3 20.\n\n"
-    f"Integrated agents (from tool.harness.agents): {', '.join(gates.agents)}"
+    f"Agents in pyproject.toml (from tool.harness.agents): {', '.join(gates().agents)}"
 )
 def run(
     agent: str,
-    num_iterations: Annotated[int, typer.Argument()] = 2,
-    max_minutes: Annotated[int, typer.Argument()] = 20,
-    verbose: Annotated[bool, typer.Argument()] = True,
-    model: Annotated[str | None, typer.Option(help="Override the agent's model")] = None,
+    num_iterations: Annotated[int, Argument()] = 2,
+    max_minutes: Annotated[int, Argument()] = 20,
+    verbose: Annotated[bool, Argument()] = True,
+    model: Annotated[str | None, Option(help="Override the agent's model")] = None,
 ) -> None:
     """ralph.sh runs once for one agent.
 
     Args:
-        agent: Agent key to run. Case-folded and looked up in AGENTS.
-        num_iterations: Number of ralph loop iterations. Must be >= 1.
-        max_minutes: Wall-clock budget per run in minutes. Must be >= 1.
+        agent: Agent key to run.
+        num_iterations: Number of ralph loop iterations.
+        max_minutes: Wall-clock budget per run in minutes.
         verbose: When True, stream the worker's output live to the terminal.
         model: Optional model id replaces the default
 
     Raises:
         typer.Exit: code 2 for an unknown agent or non-positive counts, else the worker's exit code.
     """
-    agent = agent.casefold()
-    if agent not in gates.agents:
-        typer.secho(f"Unknown agent name '{agent}'", err=True, fg=typer.colors.MAGENTA, bold=True)
-        raise typer.Exit(code=2)
-    if num_iterations < 1 or max_minutes < 1:
-        typer.secho(
-            "num_iterations and max_minutes must be >= 1", err=True, fg=typer.colors.MAGENTA, bold=True
-        )
-        raise typer.Exit(code=2)
+    raise_issues(agent, num_iterations, max_minutes)
     cwd = Path.cwd()
-    runs = cwd / "scratchpad" / "runs" / datetime.now(tz=UTC).strftime("%Y%m%d") / agent
+    runs = cwd / "scratchpad" / "runs" / datetime.now(tz=timezone.utc).strftime("%Y%m%d") / agent
     runs.mkdir(parents=True, exist_ok=True)
     worker_id = f"{max((int(p.stem) for p in runs.glob('[0-9][0-9][0-9][0-9].jsonl')), default=0) + 1:04d}"
-    # Hand the agent a fixed identity to use in claims and commits
-    prompt = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")
+    prompt = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")  # hand agent fixed ID
     os.environ["RALPH_PROMPT"] = f"Your agent id prefix is `{agent}-{worker_id}`\n\n{prompt}"
     log = runs / f"{worker_id}.jsonl"  # each log file is one run / ralph invocation, not one iteration
     loop_dir = Path(__file__).resolve().parent
-    # Windows has no POSIX shell/timeout so run PowerShell ralph.ps1 twin
     launcher = (
         ["powershell.exe", "-NoProfile", "-File", str(loop_dir / "ralph.ps1")]
-        if sys.platform == "win32"  # support windows
+        if IS_WINDOWS  # support windows with twin script
         else [str(loop_dir / "ralph.sh")]
     )
-    agent_argv = [tok.replace("{log_path}", str(log)) for tok in gates.agents[agent]]
+    agent_argv = [tok.replace("{log_path}", str(log)) for tok in gates().agents[agent]]
     if model:
         agent_argv[agent_argv.index("--model") + 1] = model
     command = [*launcher, str(num_iterations), str(max_minutes), *agent_argv]
-    typer.echo(f"harness: {' '.join(command)} -> {log}", err=True)
-    raise typer.Exit(code=run_worker(command, log, verbose))
+    echo(f"harness: {' '.join(command)} -> {log}", err=True)
+    raise Exit(code=run_worker(command, log, verbose))
+
+
+def raise_issues(agent: str, num_iterations: int, max_minutes: int):
+    """Raise issues with input or otherwise
+
+    Args:
+        agent: Agent name to loop. Case-folded and looked up in AGENTS.
+        num_iterations: Number of ralph loop iterations. Must be >= 1.
+        max_minutes: Wall-clock budget per run in minutes. Must be >= 1.
+
+    Raises:
+        Exit: typer.Exit(code=2) for an unknown agent or non-positive counts, else the worker's exit code.
+
+    Returns:
+        true if successfully set env var and no issues raised
+    """
+    msg1 = msg2 = msg3 = ""
+    agent = agent.casefold()
+    if agent not in gates().agents:
+        msg1 = f"Unknown agent name '{agent}'"
+    if num_iterations < 1 or max_minutes < 1:
+        msg2 = "iterations and max_minutes must be >= 1"
+    timeout = check_for_timeout_and_prompt()
+    if not IS_WINDOWS and not timeout:
+        msg3 = "gtimeout or timeout is required"
+    if msg1 or msg2 or msg3:
+        secho(f"{msg1} {msg2} {msg3}", err=True, fg=colors.MAGENTA, bold=True)
+        raise Exit(code=2)
+    os.environ["TIMEOUT"] = timeout or ""
+    return bool(os.environ["TIMEOUT"])
+
+
+@app.command(
+    help="Bootstraps harness into an existing repository. Set up your project for loops and gates. Run this "
+    "if you've installed into an existing project and are setting up for the first time. Adds to configs."
+)
+def init() -> None:
+    """Add harness assets, merge tool config, write the CI gate, and enable hooks"""
+    init_confirm = confirm(
+        style("\n1. Confirm loopgate can read configs and write configs to wire checks:", fg=10), default=True
+    )
+    if not init_confirm:
+        secho("Run `harness init` to configure loopgate", fg=colors.MAGENTA, bold=True)
+        raise Exit(code=0)
+    if write_harness_config():
+        init_confirm = confirm(
+            style("\n2. Can we wire githooks so quality checks run?", fg=10), default=True, abort=True
+        )
+    if init_confirm:
+        hoisted = hoist()
+        hooks = setup_git_hooks(Path(sys.executable).parent)
+        timeout = check_for_timeout_and_prompt() or IS_WINDOWS
+        agents = configure_agents()
+        rprint(
+            f"\n[bold cyan2]RESULT:[/]\nfiles added: {hoisted}\ngit hooks available via path: {hooks}"
+            f"\ntimeout-ready: {timeout}\nagents configured: {agents}"
+            f"\n[bold cyan2]Can likely run loops: [/]{bool(hoisted and hooks and timeout)}\n"
+            "\n[italic]Ensure your environemnt is activated to use the `harness run` command[/]\n"
+        )
+
+
+def write_harness_config() -> bool:
+    """Takes user's configs and creates a pyproject.toml or appends to an existing pyproject.toml."""
+    pyproject_path = REPO_ROOT / "pyproject.toml"
+    user_pyproject: TOMLDocument = document()
+    user_pyproject_tools: dict[str, Any] = {}
+    if pyproject_path.is_file():
+        user_pyproject: TOMLDocument = parse(pyproject_path.read_text(encoding="utf-8"))
+        user_pyproject_tools: dict[str, Any] = user_pyproject.setdefault("tool", table())
+        user_harness = user_pyproject_tools.get("harness", {})
+        checks = user_harness.get("gate", {})
+        if checks and checks.get("test"):
+            confirm(style("Seems loopgate may be wired already. Continue?", fg=10), default=True, abort=True)
+    template: Path = Path(__file__).resolve().with_name("temp.pyproject.toml")
+    template_contents: TOMLDocument = parse(template.read_text(encoding="utf-8"))
+    for t in template_contents["tool"]:
+        if t in user_pyproject_tools:
+            template_contents["tool"][t] = deepcopy(user_pyproject_tools[t])
+    contents = ConfigParser(interpolation=None)
+    contents.read([(REPO_ROOT / "tox.ini"), (REPO_ROOT / "setup.cfg")], encoding="utf-8")
+    section_names = contents.sections()
+    inspect_configs(section_names, user_pyproject_tools, deepcopy(CATEGORIES), template_contents["tool"])
+    user_pyproject.setdefault("tool", {}).update(template_contents["tool"])
+    return bool(pyproject_path.write_text(dumps(user_pyproject), encoding="utf-8"))
+
+
+# ruff: ignore[complex-structure,too-many-branches,too-many-locals] # complexipy: ignore
+def inspect_configs(  # pylint: disable=locally-disabled,too-many-branches,too-many-locals
+    section_names: list[str],
+    user_pyproject_tools: dict[str, Any],
+    categories: dict[str, dict[str, list[str]]],
+    template: dict[str, Any],
+) -> None:
+    """For each tool in a pre-built internal map, see if user has the tool installed and configured.
+
+    Args:
+        section_names: Configuration section names found outside pyproject.toml.
+        user_pyproject_tools: Tool configurations from the user's pyproject.toml.
+        categories: Installed tools grouped by check category.
+        template: Tool configurations from the harness template.
+    """
+    preflight_stage = template["harness"]["preflight"]
+    gate_stage = template["harness"]["gate"]
+    for tool_name, tool_config in TOOLS.items():
+        standalone, in_pyproject, other_config, pop_table = False, False, False, True
+        category: str = tool_config["category"]
+        harness_stage = preflight_stage if category in {"complexity", "format", "lint"} else gate_stage
+        args = tool_config.get("args")
+        if not args:
+            continue
+        if not (util.find_spec(tool_name) or which(args[0])):
+            harness_stage.pop(tool_name, None)
+            template.pop(args[0], None)
+            continue
+        for name in tool_config.get("filenames", []):
+            if (REPO_ROOT / name).is_file():
+                standalone = True
+        if standalone is False and args[0] in user_pyproject_tools:
+            pop_table = False
+            in_pyproject = True
+        if not (standalone or in_pyproject):
+            if tool_name in section_names or f"tool:{args[0]}" in section_names:
+                other_config = True
+            elif (
+                not categories["test"]
+                and tool_name == "pytest"
+                and "testenv" in section_names
+                and which("tox")
+            ):
+                other_config = True
+                command = "tox"
+                args = [command]
+
+        if standalone or in_pyproject or other_config:
+            current_tool_in_category = harness_stage.get(category) or tool_name
+            if not categories[category]:
+                if "ruff" in current_tool_in_category and not tool_name.startswith("ruff"):
+                    template.get("ruff", {}).pop(category[0], None)
+                elif pop_table:
+                    template.pop(current_tool_in_category[0], None)
+            harness_stage.pop(tool_name, None)
+            harness_stage[category if not categories[category] else tool_name] = args
+            categories[category][tool_name] = args
+            if pop_table:
+                template.pop(args[0], None)
+
+
+def hoist() -> bool:
+    """Hoist files expected for loops to root of repo."""
+    if not (ASSETS["docs"][0].is_dir() and ASSETS["githooks"][0].is_dir()):
+        rprint("Harness is missing required assets: `docs/` and `githooks/`")
+        return False
+    rprint(
+        "\n[bold yellow]We will need to add these files[/]\n* Git hooks are what ensure quality checks run"
+        "\n* Mutation tests promote good tests.\n* `preferences` allow for checks beyond what tooling catches"
+        "and demonstrate Hypothesis property tests\n* `docs` contain the instructions and memory for loops "
+        "\n*`scratchpad/` allows local agent use and contains a `runs/` directory for logs."
+    )
+    confirm(
+        style(
+            "3. Confirm, loopgate can add those files? Pre-existing files in the expected paths will remain "
+            "and loopgate will skip adding them.",
+            fg=10,
+        ),
+        default=True,
+        abort=True,
+    )
+    repo_root = REPO_ROOT
+    ASSETS["githooks"][1].mkdir(parents=True, exist_ok=True)
+    hoist_script: str = (ASSETS["githooks"][0] / "hoist").as_posix()
+    run_git(["-c", 'alias.loopgate-hoist=!f() { sh "$1"; }; f', "loopgate-hoist", hoist_script], REPO_ROOT)
+    console.print(f"[green]\n4. Ran {hoist_script}[/]\n")
+    for key, paths in ASSETS.items():
+        source, destination = paths
+        for source_path in source.rglob("*"):
+            destination_path = destination / source_path.relative_to(source)
+            if source_path.is_dir():
+                destination_path.mkdir(parents=True, exist_ok=True)
+            elif not destination_path.exists():
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                copy2(source_path, destination_path)
+        rprint(f"`{key}/` exists {destination.exists()}")
+    (repo_root / "scratchpad" / "runs").mkdir(parents=True, exist_ok=True)
+    (repo_root / "scratchpad" / "runs" / ".gitkeep").touch()
+    rprint(f"`scratchpad/` and `runs/` also added at {repo_root}")
+    return True
+
+
+@app.command(
+    help="This will set an env variable in Claude and Codex configuration files and add rules that they "
+    "cannot edit that variable. This ensures interactive agents (e.g. in IDEs) are held to the same standards"
+    " as headless agents. It makes gates un-bypassable. You can always return to rerun this later too."
+)
+def configure_agents() -> bool:
+    """Configure Claude and Codex for contained loops."""
+    home = Path.home()
+    claude_path, codex_path, bak = (
+        home / ".claude/settings.json",
+        home / ".codex/config.toml",
+        home / ".codex/config.toml.bak",
+    )
+    claude = json.loads(claude_path.read_text("utf-8") if claude_path.is_file() else "{}")
+    codex = parse(codex_path.read_text("utf-8") if codex_path.is_file() else "")
+    cl_confirm = confirm(
+        style("\n5.1. Can we update CLAUDE rules and settings?", fg=10), default=True, abort=True
+    )
+    if cl_confirm and claude_path.is_file():
+        rprint(f"settings.json edited. Original copy at {copy2(claude_path, f'{claude_path}.bak')}")
+    claude.setdefault("env", {})["RALPH_LOOP"] = "1"
+    permissions: dict[str, Any] = claude.setdefault("permissions", {})
+    permissions["deny"] = list(set(permissions.get("deny", [])) | CLAUDE_RULES)
+    cx_confirm = confirm(
+        style("5.2. Can we update CODEX rules and settings?", fg=10), default=True, abort=True
+    )
+    if cx_confirm and codex_path.is_file():
+        rprint(f"config.toml edited. Original backup at {copy2(codex_path, bak)}\n")
+    codex.setdefault("shell_environment_policy", {}).setdefault("set", {})["RALPH_LOOP"] = "1"
+    claude_path.parent.mkdir(parents=True, exist_ok=True)
+    claude_path.write_text(f"{json.dumps(claude, indent=2)}\n", encoding="utf-8")
+    codex_path.parent.mkdir(parents=True, exist_ok=True)
+    codex_path.write_text(dumps(codex), encoding="utf-8")
+    codex_rules_path = home / ".codex" / "rules" / "loopgate.rules"
+    codex_rules_path.parent.mkdir(parents=True, exist_ok=True)
+    codex_rules_path.write_text(CODEX_RULES, encoding="utf-8")
+    return True
 
 
 def main(argv: list[str] | None = None) -> None:
     """Console-script entry point: run the app so typer.Exit sets the process exit code.
-
     Args:
-        argv: Command-line arguments to pass to the app, or None to read from sys.argv.
+        argv: Optional command-line arguments passed to the Typer app.
     """
     app(args=argv)

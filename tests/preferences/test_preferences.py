@@ -47,7 +47,7 @@ def test_every_check_key_matches_its_function_name() -> None:
 def test_every_check_shaped_function_is_registered() -> None:
     """Every check-shaped function in preferences.py (one param, returns `str | None`) must be in CHECKS.
     Catches a check that is defined but never wired up -- e.g. dropping
-    `function_argument_assignment_underscore_lead` from the registry would silently stop enforcing it.
+    `named_with_underscore_and_not_in_class_or_dunder` from the registry would silently stop enforcing it.
     Helpers like `preferences_violations` (two args) and mutmut's generated clones are excluded.
     """
     registered = set(CHECKS.values())
@@ -67,24 +67,29 @@ def test_every_check_shaped_function_is_registered() -> None:
 
 
 def test_underscore_names_flagged() -> None:
-    """Function, argument, and assigned names starting with a lone underscore are flagged."""
-    source = "def _hidden(_arg):\n    _value = 1\n    return _value\n"
-    found = complaints("function_argument_assignment_underscore_lead", source)
+    """Private-style underscore names are flagged while the exact discard name is exempt."""
+    flagged_source = "def _hidden(_arg):\n    _value = 1\n    return _value\n"
+    found = complaints("named_with_underscore_and_not_in_class_or_dunder", flagged_source)
     assert len(found) == 3
     assert any("'_hidden'" in message for message in found)
     assert any("'_arg'" in message for message in found)
     assert any("'_value'" in message for message in found)
-
-
-def test_bare_underscore_flagged() -> None:
-    """The throwaway underscore variable is also banned."""
-    assert len(complaints("function_argument_assignment_underscore_lead", "for _ in [1]:\n    pass\n")) == 1
+    allowed_source = (
+        "_ = 1\nvalue, _ = pair\nfor _ in values:\n    pass\n\ndef consume(_):\n    return None\n"
+    )
+    assert complaints("named_with_underscore_and_not_in_class_or_dunder", allowed_source) == []
+    assert not preferences_violations("harness/cli.py", "env_bin, _ = infer_env_manager()\n")
+    class_source = "class Box:\n    def _private(self):\n        _value = 1\n        return _value\n"
+    assert "starts with underscore" not in preferences_violations("m.py", class_source)
 
 
 def test_dunder_names_exempt() -> None:
     """Dunder names like __all__ and __init__ are not flagged."""
     source = "__all__ = []\n\n\nclass Box(dict):\n    def __init__(self):\n        super().__init__()\n"
-    assert complaints("function_argument_assignment_underscore_lead", source) == []
+    assert complaints("named_with_underscore_and_not_in_class_or_dunder", source) == []
+    assert complaints("named_with_underscore_and_not_in_class_or_dunder", "__private = 1\n") == [
+        "Name '__private starts with a dunder, rename it"
+    ]
 
 
 def test_hidden_signature_star_args_flagged() -> None:
@@ -113,16 +118,13 @@ def test_hidden_signature_flags_async_def() -> None:
     assert len(complaints("hidden_signature_star_args", "async def f(*args):\n    return args\n")) == 1
 
 
-def test_bare_star_and_slash_separators_not_flagged() -> None:
-    """The '*' keyword-only separator and '/' positional-only marker are not *args/**kwargs, so a def
-    using them with named parameters is allowed.
-    """
-    assert complaints("hidden_signature_star_args", "def f(a, *, b):\n    return b\n") == []  # kw-only
-    assert complaints("hidden_signature_star_args", "def f(a, b, /):\n    return a\n") == []  # pos-only
-
-
-# Nested dict unpacking is owned by Ruff PIE800 (see test_gate.py::
-# test_ruff_catches_nested_dict_unpacking_and_suggests_flat_merge), so preferences.py does not duplicate it.
+def test_bare_star_and_slash_separators_not_allowed() -> None:
+    """The '*' in a def using them with named parameters is unallowed - obfuscates types."""
+    message = "'*args', '**kwargs', '*', and '/' hide the function signature, use explicit parameters"
+    assert complaints("hidden_signature_star_args", "def f(a, *, b):\n    return b\n") == [message]  # kw-only
+    assert complaints("hidden_signature_star_args", "def f(a, b, /):\n    return a\n") == [
+        message
+    ]  # pos-only
 
 
 def test_dynamic_star_call_flagged() -> None:
@@ -292,7 +294,7 @@ def test_locationless_node_violation_reports_unknown_line(monkeypatch: pytest.Mo
     del lambda_node.lineno
     monkeypatch.setattr(ast, "parse", Mock(return_value=tree))
 
-    expected = "m.py:?: Lambda found hurting readability and adding complexity."
+    expected = "m.py:?: Lambda found hurting readability and adding complexity, prefer map() or filter()"
     assert preferences_violations("m.py", source) == expected
 
 
@@ -313,7 +315,9 @@ def test_a_clean_file_reports_only_the_kind_that_fired() -> None:
     fires here, so the underscore/star messages must be absent.
     """
     violations = preferences_violations("m.py", "value = lambda a: a\n")  # only lambda_found fires
-    assert violations == "m.py:1: Lambda found hurting readability and adding complexity."
+    assert violations == (
+        "m.py:1: Lambda found hurting readability and adding complexity, prefer map() or filter()"
+    )
     assert "starts with underscore" not in violations
     assert "Star unpacking" not in violations
 
@@ -387,7 +391,7 @@ def flags(source: str, needle: str) -> bool:
 @given(name=identifiers())
 def test_underscore_lead_flagged_iff_leading_underscore_not_dunder(name: str) -> None:
     """Assignment targets are flagged exactly when they use a non-dunder leading underscore."""
-    expected = name.startswith("_") and not name.endswith("__")
+    expected = name != "_" and name.startswith("_") and not name.startswith("__") and not name.endswith("__")
     assert flags(f"{name} = 1\n", "starts with underscore") is expected
 
 
@@ -395,7 +399,7 @@ def test_underscore_lead_flagged_iff_leading_underscore_not_dunder(name: str) ->
 def test_underscore_rule_holds_for_function_and_argument_names(name: str) -> None:
     """The underscore rule applies equally to function and argument names."""
     assume(not name.endswith("__"))
-    expected = name.startswith("_")
+    expected = name != "_" and name.startswith("_") and not name.startswith("__")
     assert flags(f"def {name}():\n    return 1\n", "starts with underscore") is expected
     assert flags(f"def f({name}):\n    return {name}\n", "starts with underscore") is expected
 

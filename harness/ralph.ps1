@@ -1,71 +1,84 @@
 # Ralph (Windows twin of ralph.sh). Hand docs/PROMPT.md to a fresh-context agent and loop.
 # Keep Ralph Dumb: start the worker, give it the prompt, print a line, repeat. Nothing else.
-# Windows has no POSIX `timeout`, so this uses Wait-Process + taskkill /T to bound each iteration.
+# Windows has no POSIX `timeout`, so this uses Process.WaitForExit + taskkill /T.
 #
-# Usage: pwsh -File ralph.ps1 [max_iterations] [max_minutes_per_iteration] <agent command...>
+# Usage:
+#   powershell.exe -File ralph.ps1 <max_iterations> <max_minutes_per_iteration> <agent command...>
 
 $ErrorActionPreference = "Stop"
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
-$env:RALPH_LOOP = "1"   # mark loop commits so the gate applies containment to the worker
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+# Mark loop commits so the gate (run by the git hooks) applies containment to the worker.
+$env:RALPH_LOOP = "1"
 
 function ConvertTo-WindowsArgument([string]$argument) {
     $escaped = [regex]::Replace($argument, '(\\*)"', '$1$1\"')
     return '"' + $escaped + [regex]::Match($argument, '(\\*)$').Groups[1].Value + '"'
 }
 
-$maxIterations = 2
-$maxMinutes = [double]20
-$rest = @($args)
-if ($rest.Count -gt 0 -and $rest[0] -match '^\d+$') {
-    $maxIterations = [int]$rest[0]
-    $rest = @($rest | Select-Object -Skip 1)
-}
-if ($rest.Count -gt 0 -and $rest[0] -match '^\d+(?:\.\d+)?$') {
-    $maxMinutes = [double]$rest[0]
-    $rest = @($rest | Select-Object -Skip 1)
-}
-
-if ($rest.Count -lt 1) {
-    [Console]::Error.WriteLine("defaults: max_iterations=$maxIterations max_minutes_per_iteration=$maxMinutes")
-    exit 2
-}
-if ($maxIterations -lt 1 -or $maxMinutes -le 0) {
-    [Console]::Error.WriteLine("ralph: max_iterations must be >= 1 and max_minutes must be > 0")
-    exit 2
-}
-
-for ($i = 1; $i -le $maxIterations; $i++) {
-    [Console]::Error.WriteLine("ralph: iteration $i/$maxIterations")
-    # Receipt line, same stdout contract as ralph.sh: `harness run` saves stdout as the run's .jsonl.
-    # The worker inherits this handle, so flush before starting it or the records interleave.
-    $timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm")
-    [Console]::Out.WriteLine("{""type"":""ralph"",""iteration"":$i,""max_iterations"":$maxIterations,""timestamp"":""$timestamp""}")
+function Write-RalphEvent([System.Collections.IDictionary]$payload) {
+    [Console]::Out.WriteLine(($payload | ConvertTo-Json -Compress))
     [Console]::Out.Flush()
-    $stdin = "$($env:RALPH_PROMPT)`n`nRALPH_ITERATION=$i/$maxIterations`n"
-    $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $rest[0]
-    if ($rest.Count -gt 1) {
-        $psi.Arguments = (($rest[1..($rest.Count - 1)] | ForEach-Object { ConvertTo-WindowsArgument $_ }) -join ' ')
-    }
-    $psi.RedirectStandardInput = $true
-    $psi.UseShellExecute = $false
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    # feed the prompt on stdin, then bound the run; taskkill /T kills the agent AND its children
-    $proc.StandardInput.Write($stdin); $proc.StandardInput.Close()
-    # Bound the run. Like ralph.sh's `set -e` + timeout: a timeout or a nonzero worker exit stops the
-    # loop and propagates failure, so `harness run` never reports success for a failed iteration.
-    $timeoutMilliseconds = [int][Math]::Ceiling($maxMinutes * 60 * 1000)
-    if (-not $proc.WaitForExit($timeoutMilliseconds)) {
-        taskkill.exe /F /T /PID $proc.Id | Out-Null
-        $proc.WaitForExit()
-        exit 124   # match GNU timeout's exit code
-    }
-    if ($proc.ExitCode -ne 0) {
-        exit $proc.ExitCode
-    }
 }
 
-$timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm")
-[Console]::Out.WriteLine("{""type"":""ralph"",""completed"":$maxIterations, ""timestamp"":""$timestamp""}")
-[Console]::Out.Flush()
-[Console]::Error.WriteLine("ralph: completed $maxIterations iteration(s)")
+if ($args.Count -lt 3) {
+    [Console]::Error.WriteLine(
+        "Usage: ralph.ps1 <max_iterations> <max_minutes_per_iteration> <agent command...>"
+    )
+    exit 2
+}
+
+$maxIterations = [int]$args[0]
+$maxMinutes = [double]$args[1]
+$worker = @($args | Select-Object -Skip 2)
+$timeoutMilliseconds = [int][Math]::Ceiling($maxMinutes * 60 * 1000)
+
+$iteration = 1
+while ($iteration -le $maxIterations) {
+    Write-RalphEvent ([ordered]@{
+        type = "ralph"
+        iteration = $iteration
+        max_iterations = $maxIterations
+        max_minutes = $maxMinutes
+        timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm")
+    })
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $worker[0]
+    if ($worker.Count -gt 1) {
+        $startInfo.Arguments = (($worker[1..($worker.Count - 1)] | ForEach-Object {
+            ConvertTo-WindowsArgument $_
+        }) -join ' ')
+    }
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.UseShellExecute = $false
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $prompt = "$($env:RALPH_PROMPT)`n`nRALPH_ITERATION=$iteration/$maxIterations`n"
+    $process.StandardInput.Write($prompt)
+    $process.StandardInput.Close()
+
+    if (-not $process.WaitForExit($timeoutMilliseconds)) {
+        taskkill.exe /F /T /PID $process.Id | Out-Null
+        $process.WaitForExit()
+        $process.Dispose()
+        exit 124
+    }
+
+    $process.WaitForExit()
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+    if ($exitCode -ne 0) {
+        exit $exitCode
+    }
+
+    $iteration += 1
+}
+
+Write-RalphEvent ([ordered]@{
+    type = "ralph"
+    completed = $iteration - 1
+    max_minutes = $maxMinutes
+    timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm")
+})

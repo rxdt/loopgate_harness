@@ -16,47 +16,19 @@ set -eu
 # Mark loop commits so the gate (run by the git hooks) applies containment to the worker.
 export RALPH_LOOP=1
 
-MAX_ITERATIONS=2
-MAX_MINUTES=20
-case "${1:-}" in
-    ''|*[!0-9]*) ;;
-    *)
-        MAX_ITERATIONS=$1
-        shift
-        case "${1:-}" in
-            ''|*[!0-9]*) ;;
-            *) MAX_MINUTES=$1; shift ;;
-        esac
-        ;;
-esac
-
-if [ "$#" -lt 1 ]; then
-    echo "defaults: max_iterations=$MAX_ITERATIONS max_minutes_per_iteration=$MAX_MINUTES" >&2
-    exit 2
-fi
-
-if [ "$MAX_ITERATIONS" -lt 1 ] || [ "$MAX_MINUTES" -lt 1 ]; then
-    echo "ralph: max_iterations and max_minutes must be >= 1" >&2
-    exit 2
-fi
-
-if command -v gtimeout > /dev/null 2>&1; then
-    TIMEOUT=gtimeout
-elif command -v timeout > /dev/null 2>&1; then
-    TIMEOUT=timeout
-else
-    echo "ralph: need gtimeout or timeout" >&2
-    exit 2
-fi
+MAX_ITERATIONS=$1
+MAX_MINUTES=$2
+TIMEOUT=$TIMEOUT
+shift 2
 
 i=1
 while [ "$i" -le "$MAX_ITERATIONS" ]; do
-    printf '{"type":"ralph","iteration":%s,"max_iterations":%s,"timestamp":"%s"}\n' \
-    "$i" "$MAX_ITERATIONS" "$(date '+%Y-%m-%dT%H:%M')"
+    printf '{"type":"ralph","iteration":%s,"max_iterations":%s,"max_minutes":%s,"timestamp":"%s"}\n' \
+    "$i" "$MAX_ITERATIONS" "$MAX_MINUTES" "$(date '+%Y-%m-%dT%H:%M')"
 
     printf '%s\n\nRALPH_ITERATION=%s/%s\n' "$RALPH_PROMPT" "$i" "$MAX_ITERATIONS" \
         | "$TIMEOUT" "$((MAX_MINUTES * 60))" "$@"
     i=$((i + 1))
 done
 
-printf '{"type":"ralph","completed":%s, "timestamp":"%s"}\n' "$MAX_ITERATIONS" "$(date '+%Y-%m-%dT%H:%M')"
+printf '{"type":"ralph","completed":%s,"max_minutes":%s,"timestamp":"%s"}\n' "$((i - 1))" "$MAX_MINUTES" "$(date '+%Y-%m-%dT%H:%M')"
