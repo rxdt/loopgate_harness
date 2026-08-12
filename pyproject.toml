@@ -247,7 +247,8 @@ main.ignore = [
     "harness/tests",
     ".worktrees",
     "worktrees",
-    "mutants"
+    "mutants",
+    ".tox"
 ]
 format.max-line-length = 110         # Keep Pylint line accounting aligned with Ruff E501
 format.max-module-lines = 500        # Enable Pylint C0302 because Ruff has no equivalent
