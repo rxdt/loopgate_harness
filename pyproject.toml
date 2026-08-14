@@ -1,7 +1,24 @@
 [project]
 name = "harness"
+requires-python = ">=3.11"
 version = "0.1.0"
-requires-python = ">=3.10,<4"
+description = "Gated, harnessed, autonomy loop with quality checks."
+authors = [{ name = "rxdt" }]
+readme = "README.md"
+license = { text = "MIT" }
+keywords = ["agent", "autonomy", "scaffold", "harness", "llm", "codex", "claude", "loop"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Build Tools",
+]
 dependencies = [
     "mutmut>=3.7.0",
     "packaging",
@@ -10,9 +27,11 @@ dependencies = [
 ]
 [dependency-groups]
 dev = [
+    "black",
     "complexipy",
     "hypothesis",
     "mutmut",
+    "mypy",
     "pip-audit",
     "pylint",
     "pyright",
@@ -20,7 +39,8 @@ dev = [
     "pytest-cov",
     "pytest-xdist",
     "ruff",
-    "semgrep"
+    "semgrep",
+    "ty",
 ]
 [project.scripts]
 harness = "harness.cli:main" # creates the executable

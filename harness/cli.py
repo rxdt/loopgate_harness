@@ -31,9 +31,10 @@ app = typer.Typer(
 )
 console = Console(force_terminal=True, color_system=None if os.environ.get("RALPH_LOOP") else "256")
 REPO_ROOT_STR = str(gates.repo_root)
+IS_WINDOWS = sys.platform == "win32"
 
 
-def setup_git_hooks(env_bin: Path, is_windows: bool) -> Path:
+def setup_git_hooks(env_bin: Path) -> Path:
     """Saves the installed `harness` executable's PATH for Git hooks to run.
 
     `harness install` calls setup_git_hooks after dependencies and git hooks are in. Because we have this in
@@ -43,22 +44,22 @@ def setup_git_hooks(env_bin: Path, is_windows: bool) -> Path:
 
     Arguments:
         env_bin: bin directory of the environment the dependency install just populated
-        is_windows: Operating System platform is Windows "win32"
 
     Returns:
         The path of the file that records the harness command.
     """
     rprint("\n[cyan2]Setting git hooks[/cyan2] `git config core.hooksPath .githooks`")
     subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=REPO_ROOT_STR, check=True)
-    binary = env_bin / ("harness.exe" if is_windows else "harness")
+    binary = env_bin / ("harness.exe" if IS_WINDOWS else "harness")
     recorded = (
         Path(run_git(["rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()) / "harness-path"
     )
     recorded.write_text(f"{binary.as_posix()}\n", encoding="utf-8", newline="\n")
-    if is_windows:
+    if IS_WINDOWS:
         rprint("Windows is experimental. Reoprt issues https://github.com/rxdt/loopgate_harness/issues")
     else:
         subprocess.run(("ls", "-l", ".githooks"), cwd=REPO_ROOT_STR, check=True)
+    rprint(f"\nRecorded in {recorded} is the path to executable {env_bin}")
     return recorded
 
 
@@ -189,6 +190,7 @@ def cleanup(cwd: Path, name: str | None) -> bool:
     """
     if not (cwd / "README.template.md").is_file():
         return False
+    clean_git = len(run_git(["diff", "--numstat"]).splitlines()) == 1
     (cwd / "README.template.md").replace(cwd / "README.md")
     for file_name in (
         ".banner.svg",
@@ -212,25 +214,23 @@ def cleanup(cwd: Path, name: str | None) -> bool:
         "name": canonicalize_name(name) if name and is_normalized_name(name) else "my-app-name",
         "version": "0.0.0",
     })
-    paths = ["src", "preferences", "mutation"]
     tool = document.setdefault("tool", tomlkit.table())
-    tool.setdefault("pyright", tomlkit.table()).update({"include": paths})
-    tool.setdefault("mutmut", tomlkit.table()).update({"source_paths": paths})
+    tool.setdefault("pyright", tomlkit.table()).update({"include": ["src", "preferences"]})
     tool.setdefault("pytest", tomlkit.table()).setdefault("ini_options", tomlkit.table()).update({
         "testpaths": ["tests"],
         "pythonpath": [".", "src"],
     })
     coverage = tool.setdefault("coverage", tomlkit.table())
-    coverage.setdefault("run", tomlkit.table()).update({"source": paths})
-    tool.setdefault("complexipy", tomlkit.table()).update({"paths": paths})
+    coverage.setdefault("run", tomlkit.table()).update({"source": ["src", "preferences"]})
+    tool.setdefault("complexipy", tomlkit.table()).update({"paths": ["src", "preferences"]})
     tool.setdefault("ruff", tomlkit.table()).setdefault("exclude", tomlkit.array()).append("harness")
     tool.setdefault("pylint", tomlkit.table()).setdefault("main", tomlkit.table()).setdefault(
         "ignore", tomlkit.array()
     ).append("harness")
-
     rprint(f"\n[cyan2]project name[/cyan2] '{project['name']}' set in `pyproject.toml`")
     (cwd / "pyproject.toml").write_text(tomlkit.dumps(document), encoding="utf-8")
-    return True
+    files = run_git(["commit", "-am", "--amend", "--no-edit"]) if clean_git else None
+    return bool(files)
 
 
 @app.command(
@@ -246,11 +246,10 @@ def install(name: Annotated[str | None, typer.Argument(help="Set up project for 
         will overwrite existing name in pyproject.toml. When ommitted, project name is left untouched.
     """
     rprint("\n[cyan2]installing dependencies[/cyan2]")
-    is_windows = sys.platform == "win32"
     # Record the env the manager just filled that holds the harness executable
     if (gates.repo_root / "uv.lock").is_file():
         subprocess.run(("uv", "sync"), cwd=REPO_ROOT_STR, check=True)
-        env_bin = gates.repo_root / ".venv" / ("Scripts" if is_windows else "bin")
+        env_bin = gates.repo_root / ".venv" / ("Scripts" if IS_WINDOWS else "bin")
     elif (gates.repo_root / "poetry.lock").is_file():
         subprocess.run(("poetry", "install"), cwd=REPO_ROOT_STR, check=True)
         poetry_env = subprocess.run(
@@ -266,33 +265,29 @@ def install(name: Annotated[str | None, typer.Argument(help="Set up project for 
         )
         env_bin = Path(sys.executable).parent
     cleanup(gates.repo_root, name)
-    recorded = setup_git_hooks(env_bin, is_windows)
-    if not is_windows:
-        check_for_timeout_and_prompt(env_bin)
-    rprint(f"\nRecorded in {recorded} is the path to executable {env_bin}")
-    rprint("\n[red]COMMIT UNSTAGED CHANGES[/red]")
+    setup_git_hooks(env_bin)
+    check_for_timeout_and_prompt()
+    rprint("\n[cyan2]If install left git dirty, commit unstaged changes[/]")
 
 
-def check_for_timeout_and_prompt(env_bin: Path) -> None:
-    """Offer install when macOS lacks a timeout tool. Linux has `timeout`, macOS needs coreutils.gtimeout.
-    Args:
-        env_bin: Path to the harness executable
-    """
-    if not (shutil.which("timeout") or shutil.which("gtimeout")):
-        rprint("\n[yellow]macOS harness needs timeout/gtimeout from coreutils to loop[/yellow]")
+@app.command(hidden=True)
+def check_for_timeout_and_prompt() -> None:
+    """Offer install when macOS lacks a timeout tool. Linux has `timeout`, macOS needs coreutils.gtimeout."""
+    timeout = shutil.which("timeout") or shutil.which("gtimeout")
+    if not (IS_WINDOWS and timeout):
+        rprint("\n[yellow]macOS harness needs timeout/gtimeout from coreutils to run loops[/yellow]")
         if not shutil.which("brew"):
             rprint("Get Homebrew https://brew.sh then run `brew install coreutils` or `sudo port install`")
-        elif typer.confirm("[magenta]Install now `brew install coreutils`?[/magenta]"):
-            subprocess.run(("brew", "install", "coreutils"), check=False)
-        else:
-            rprint("[yellow]skipped[/yellow]: run `brew install coreutils` before `harness run`.")
-    rprint(
-        "\nIf timeout or gtimeout is installed, you can run loops after activating the environment"
-        f"\nActivate env with [turquoise2]`source {env_bin / 'activate'}`[/turquoise2] "
-        "to use the [green]`harness`[/green] commands.\n"
-        "\n[turquoise2]python:[/turquoise2] project supports >=3.11"
-        "\nOptionally pin newer local Python with [turquoise2]`uv python pin 3.13 && uv sync`[/turquoise2]"
-    )
+        elif (
+            typer.confirm("\nInstall `brew install coreutils` now?", abort=True)
+            and subprocess.run(("brew", "install", "coreutils"), check=False).returncode == 0
+        ):
+            rprint(
+                "\nIf timeout or gtimeout is installed, you can run loops with `harness run`\nIf using "
+                "`uv` or `pip` activate env with [turquoise2]`source {env_bin / 'activate'}`[/turquoise2]"
+                " to use [green]`harness`[/green] commands[turquoise2]"
+            )
+    os.environ["RALPH_TIMEOUT"] = shutil.which("timeout") or shutil.which("gtimeout") or ""
 
 
 @app.command(

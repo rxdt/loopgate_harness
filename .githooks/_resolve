@@ -11,7 +11,7 @@
 # Then, git hook does not require `uv` or `pip` or any specific environment layout.
 #
 # if is-agent-in-loop, check harness executable found via harness-path
-[ "${RALPH_LOOP:-0}" = "1" ] || exit 0
+RALPH_LOOP="${RALPH_LOOP:-0}"
 
 recorded="$(git rev-parse --path-format=absolute --git-common-dir)/harness-path"
 HARNESS=""
@@ -23,12 +23,18 @@ fi
 if [ ! -x "$HARNESS" ]; then
     HARNESS="$(command -v harness 2>/dev/null || true)"
     if [ ! -x "$HARNESS" ]; then
-        echo "loopgate: hooks are not installed. Run 'harness install' in this repo." >&2
-        exit 1
+        echo "\nloopgate: hooks are not installed. Run 'harness install' in this repo." >&2
+        if [ "$RALPH_LOOP" = "1" ]; then
+            exit 1
+        fi
     fi
 
-    echo "loopgate: harness installed but record of path '$HARNESS' is gone. Re-adding file 'harness-path'." >&2
+    echo "\nloopgate: harness installed but recorded path of executable $HARNESS is gone.\nRe-adding file '.git/harness-path'.\n" >&2
     printf '%s\n' "$HARNESS" > "$recorded"
 fi
 
 export PATH="$(dirname "$HARNESS")${PATH:+:$PATH}"
+
+if [ "$RALPH_LOOP" = "0" ]; then
+    exit 0
+fi

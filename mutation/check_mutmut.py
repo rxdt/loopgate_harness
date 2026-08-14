@@ -74,6 +74,7 @@ def analyze_mutmut_report(file_path: str = "mutants/mutmut-cicd-stats.json") -> 
         JSONDecodeError: If the report does not contain valid JSON.
         Exit: If the report file does not exist or the mutation score is below the minimum.
     """
+    # pragma: no mutate
     if not Path(file_path).exists():
         rprint(rf"[red]Error: Mutmut JSON report not found at [\]'{file_path}'")
         raise typer.Exit(code=1)

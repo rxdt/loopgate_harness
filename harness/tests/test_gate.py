@@ -125,7 +125,7 @@ def test_pre_commit_hook_dispatches_preflight_and_controls_commit(
     )
     if case[0] == "unavailable":
         assert not recorded.exists()
-        assert result.stderr == "loopgate: hooks are not installed. Run 'harness install' in this repo.\n"
+        assert result.stderr == "\nloopgate: hooks are not installed. Run 'harness install' in this repo.\n"
     else:
         # Git Bash records `command -v` hits as MSYS paths (/c/Users/...); compare tail, not drive
         recorded_path = Path(recorded.read_text(encoding="utf-8").strip())

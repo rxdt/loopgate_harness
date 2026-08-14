@@ -6,7 +6,6 @@
 <p>A loop harness for Claude, Codex, Copilot, or any CLI agent. A loop runner hands each agent a prompt. Agents can edit. Gates decide what lands. You set the plan. Each agent iteration must update specs and commit through quality guardrails.</p>
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
-![Status](https://img.shields.io/badge/github-repo-blue?logo=github)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat)](https://makeapullrequest.com)
 [![first-timers-only](https://img.shields.io/badge/first--timers--only-friendly-blue.svg?style=flat-square)](https://www.firsttimersonly.com/)
 ![GitHub activity](https://img.shields.io/github/commit-activity/m/rxdt/loopgate-harness)
@@ -29,7 +28,7 @@
 1. `gh repo create <your-github-username>/<your-new-app-name> --template rxdt/loopgate_harness --private --clone && cd <your-new-app-name> && uv run harness install <your-new-app-name> && source .venv/bin/activate && git add . && git commit --amend --no-edit`
 2. `harness run codex`
 
-**Requirements**: `pip`, `uv`, or `poetry`. Python 3.11. Linux or MacOS (Windows is experimental.)
+**Requirements**: `pip`, `uv`, or `poetry`. Python 3.10. Linux or MacOS (Windows is experimental.)
 
 ---
 
@@ -170,7 +169,7 @@ src/            your product/source code (add to coverage source)
 
 [`pyproject.toml`](pyproject.toml) is the single source of harness configuration. Humans own it and [`preferences/`](preferences/); both are agent-protected.
 
-If an agent edits a forbidden file, the file will be unstaged (not allowed to commit). A forbidden pattern by an agent (e.g. `# noqa` will also prevent their commit and force them to fix it.)
+If an agent edits a forbidden file, the file will be unstaged (not allowed to commit). A forbidden pattern by an agent (e.g. `# noqa` or `nosemgrep` will also prevent their commit and force them to fix it.)
 
 </details>
 

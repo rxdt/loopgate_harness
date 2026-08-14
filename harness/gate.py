@@ -86,8 +86,6 @@ class Gate:
         """
         colorize("AGENT CHECKs", "running non-human agent checks")
         ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else self.EMPTY_TREE
-        stats = run_git(["diff", ref, "--numstat", "--find-renames"]).splitlines()
-        self._check_diff_size(stats, results)
         staged = run_git([
             "diff",
             "--cached",
@@ -104,8 +102,10 @@ class Gate:
                 if path.casefold() in self.forbidden_files or path.casefold().startswith(self.forbidden_dirs)
             ]
             if forbidden:
-                run_git(["reset", "-q", "HEAD", "--", *forbidden])
+                run_git(["reset", "-q", ref, "--", *forbidden])
                 colorize("EJECTED", f"kept forbidden paths out of the commit: {forbidden}")
+            stats = run_git(["diff", ref, "--numstat", "--find-renames"]).splitlines()
+            self._check_diff_size(stats, results)
             results["fail"].extend(self._check_for_bad_patterns())
             results["fail"].extend(filter(None, self._check_for_preferences()))
 
@@ -122,10 +122,13 @@ class Gate:
         diff_args = ["diff", "--cached", "--unified=0", "--output-indicator-new=a", "--"]
         staged_lines = run_git(diff_args).splitlines()
         problems: list[str] = []
+        current_file = ""
         for line in staged_lines:
-            if line.startswith("a"):
+            if line.startswith("+++ b/"):
+                current_file = line.removeprefix("+++ b/")
+            elif line.startswith("a"):
                 for pattern in self.forbidden_patterns:
-                    pattern_and_bare_line = f"'{pattern}' line: {line[1:].strip()}"
+                    pattern_and_bare_line = f"{current_file}: '{pattern}'"
                     if pattern.casefold() in line.casefold():
                         problems.append(pattern_and_bare_line)
         return problems
@@ -146,18 +149,14 @@ class Gate:
             inserted, deleted, path = line.split("\t", 2)
             if not (inserted == "-" or path.endswith(".lock")):  # binary or lockfile
                 total += int(inserted) + int(deleted)
-        if total < warn_at_75:
-            return
-        msg = (
-            f"{total} lines modified. WARN at 75% {warn_at_75} lines, ERROR at {self.error_diff_lines}."
-            "\nSuggestion: Refactor bloat, inline helpers, reduce mis-direction, re-use fixtures, cut "
-            "duplication, slim down if-elif-else blocks."
-        )
+
+        msg = f"{total} lines modified. WARN at 75% {warn_at_75} lines, ERROR at {self.error_diff_lines}."
+        do_better = "\nRefactor bloat, reduce mis-direction, re-use fixtures, cut duplication, slim down code"
         colorize("DIFF SIZE", msg)
         if total > self.error_diff_lines:
-            results["fail"].append(msg)
+            results["fail"].append(msg + do_better)
         elif total > warn_at_75:
-            results["warn"].append(msg)
+            results["warn"].append(msg + do_better)
 
     def _check_for_preferences(self) -> list[str]:
         """Checks user preferences honored. Currently only a preferences.py file exists. New languages should
