@@ -1,0 +1,25 @@
+#!/bin/sh
+# Install loopgate hooks into a repo's .githooks without clobbering existing hooks.
+set -eu
+
+source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+target_dir=.githooks
+if [ "$source_dir" = "$(CDPATH= cd -- "$target_dir" 2>/dev/null && pwd)" ]; then
+    exit 0
+fi
+cp "$source_dir/_resolve" "$target_dir/_resolve"
+
+for name in pre-commit pre-push prepare-commit-msg; do
+    hook=$target_dir/$name
+    cp "$source_dir/$name" "$target_dir/loopgate-$name"
+    call="\"\$(dirname \"\$0\")/loopgate-$name\" \"\$@\" || exit # loopgate"
+    if [ ! -e "$hook" ]; then
+        printf '#!/bin/sh\n%s\n' "$call" > "$hook"
+    elif ! grep -Fqx "$call" "$hook"; then
+        case $(head -n 1 "$hook") in "#!"*sh*) ;; *) echo "hoist: $hook is not a shell hook" >&2; exit 1 ;; esac
+        tmp=$(mktemp "$target_dir/.hoist.XXXXXX")
+        { IFS= read -r first; printf '%s\n%s\n' "$first" "$call"; cat; } < "$hook" > "$tmp"
+        mv "$tmp" "$hook"
+    fi
+    chmod +x "$hook" "$target_dir/loopgate-$name"
+done

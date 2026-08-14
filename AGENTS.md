@@ -2,9 +2,9 @@
 
 ## Repository boundary
 
-- Work only inside this repository; use `scratchpad/` for temporary files.
+- Work only inside this repository; create and use `scratchpad/` for temporary files.
 - Do not read, write, or search outside the repo unless the user explicitly asks.
-- Do not edit forbidden paths: `AGENTS.md`, `harness/`, `tests/harness/`, `.githooks/`, `.github/`, `pyproject.toml`. The gate enforces this.
+- Do not edit forbidden paths: `AGENTS.md`, `.githooks/`, `harness/`, `preferences/` `.github/`, `pyproject.toml`. The gate enforces this.
 - Do not make assumptions. Check the code before moving forward.
 
 ## Quality

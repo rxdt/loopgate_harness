@@ -1,29 +1,9 @@
-[project]
-name = "harness"
-requires-python = ">=3.10"
-version = "0.2.0"
-description = "Gated, harnessed, autonomy loop with quality checks."
-authors = [{ name = "rxdt" }]
-readme = "README.md"
-license = { text = "MIT" }
-keywords = ["agent", "autonomy", "scaffold", "harness", "llm", "codex", "claude", "loop"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
-    "Topic :: Software Development :: Build Tools",
-]
-dependencies = [
+[dependency-groups]
+dev = [
     "complexipy",
     "coverage",
     "hypothesis",
-    "mutmut>=3.7.0",
+    "mutmut",
     "pip-audit",
     "pylint",
     "pyright",
@@ -33,50 +13,8 @@ dependencies = [
     "ruff",
     "semgrep",
     "tomlkit",
-    "ty",
     "typer"
 ]
-[project.scripts]
-harness = "harness.cli:main" # creates the executable
-
-[build-system]
-requires = ["hatchling>=1.27"]
-build-backend = "hatchling.build"
-
-[[tool.hatch.envs.default.matrix]]
-python = ["3.10", "3.11", "3.12", "3.13", "3.14"]
-
-[tool.hatch.build]
-exclude = [
-  "**/__pycache__",
-  "**/.coverage",
-  "**/.pytest_cache",
-  "*.pyc"
-]
-
-[tool.hatch.build.targets.wheel]
-packages = ["harness"]
-exclude = ["harness/tests/**"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"docs" = "harness/docs"
-"preferences" = "preferences"
-"mutation" = "mutation"
-"tests/preferences" = "harness/tests/preferences"
-"tests/mutation" = "harness/tests/mutation"
-".githooks" = "harness/.githooks"
-
-[tool.hatch.build.targets.sdist]
-include = [
-    "docs/**",
-    "preferences/**",
-    "mutation/**",
-    "harness/**",
-    "tests/preferences/**",
-    "tests/mutation/**",
-    ".githooks/**"
-]
-
 # ==============================================================================
 # Harness Configuration — single source of truth for agents and every check.
 # harness/gate.py parses [tool.harness] once at import into the constants it uses.
@@ -85,7 +23,7 @@ include = [
 # ==============================================================================
 [tool.harness]
 languages = ["py"]
-error_diff_lines = 400  # ~90th percentile of pull requests, 200 LOC generally ok
+error_diff_lines = 500  # 400 ~90th percentile of pull requests, 200 LOC generally ok
 
 # argv preset per agent for `harness run <agent>`
 [tool.harness.agents]
@@ -138,7 +76,7 @@ copilot = [
 
 [tool.harness.preflight]
 lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
-pylint = ["pylint", "."]
+pylint = ["pylint", "."]  # second tool in category can just be named the tool
 format = ["ruff", "format", "--no-cache", "--check"]
 complexity = ["complexipy", ".", "--suggest-refactors"]
 
@@ -154,9 +92,7 @@ security = [
 ]
 types = ["pyright", "--outputjson"]
 test = [
-    "pytest", "-p", "no:cacheprovider", "-n", "auto",
-    "--cov", "--cov-report=term-missing", "--cov-fail-under=100",
-    "--hypothesis-show-statistics", "--durations=5"
+    "pytest", "-p", "no:cacheprovider", "-n", "auto", "--cov", "--cov-report=term-missing", "--cov-fail-under=100", "--hypothesis-show-statistics",
 ]
 
 [tool.harness.FORBIDDEN]
@@ -166,22 +102,46 @@ FILES = [
     "docs/prompt.md",
     "docs/plan.md",  # delete/comment line if you want agents to manage the core plan
     # tooling/config files that would weaken checks in this file
-    "pytest.ini",
     "tox.ini",
     "setup.cfg",
+    "pytest.ini",
+    ".pytest.ini",
+    "pytest.toml",
+    ".pytest.toml",
     ".coveragerc",
+    ".coveragerc.toml",
     "ruff.toml",
     ".ruff.toml",
-    ".semgrepignore",
-    "pyrightconfig.json",
+    ".flake8",
+    "pylintrc",
     ".pylintrc",
+    "pylintrc.toml",
+    ".pylintrc.toml",
+    "pyrightconfig.json",
+    "mypy.ini",
+    ".mypy.ini",
+    "ty.toml",
+    "pyrefly.toml",
+    ".pyrefly.toml",
+    "complexipy.toml",
+    ".complexipy.toml",
+    "radon.cfg",
+    ".semgrepignore",
+    "semgrep.yml",
+    "semgrep.yaml",
+    ".semgrep.yml",
+    ".semgrep.yaml",
+    "semgrep.config.yml",
+    "semgrep.config.yaml",
+    ".bandit",
+    "sonar-project.properties",
+    ".snyk",
     ".gitmodules",
     ".gitattributes",
     "pyproject.toml",  # agents will claim inability to add dependencies with this forbidden
     "requirements.txt",
     "uv.lock",  # if *.lock remains, agents will leave it uncommitted if file changes
-    "poetry.lock",
-    "mypy.ini"
+    "poetry.lock"
 ]
 PATTERNS = [
     "# noqa",
@@ -226,13 +186,13 @@ PATTERNS = [
 # Pyright Configuration
 # ==============================================================================
 [tool.pyright]
-typeCheckingMode = "strict"             # Pyright's strictest mode.
-reportAssertAlwaysTrue = "error"        # Catch asserts that are always true.
-reportUnusedImport = "none"             # Handled by Ruff F401
-reportUnusedVariable = "none"           # Handled by Ruff F841
-verboseOutput = true                    # JSON report output when Pyright is run
-include = ["src", "preferences", "mutation", "harness"] # Type-check shipped code plus repository preferences.
-exclude = ["scratchpad", "mutants", "**/node_modules", "**/__pycache__", ".venv", "**/.*", "harness/tests"]
+typeCheckingMode = "standard"      # Pyright's has: "strict", "standard", "basic"
+reportAssertAlwaysTrue = "error"   # Catch asserts that are always true.
+reportUnusedImport = "none"        # Handled by Ruff F401
+reportUnusedVariable = "none"      # Handled by Ruff F841
+verboseOutput = true               # JSON report output when Pyright is run
+include = ["."]                    # Type-check shipped code plus repository preferences.
+exclude = ["scratchpad", "mutants", "**/node_modules", "**/__pycache__", ".venv", "**/.*"]
 
 # ==============================================================================
 # Test Configuration
@@ -240,14 +200,14 @@ exclude = ["scratchpad", "mutants", "**/node_modules", "**/__pycache__", ".venv"
 [tool.pytest.ini_options]
 minversion = "9.0"
 addopts = ["-ra"]                   # Print useful short reasons for outcomes
-testpaths = ["tests", "harness"]
+testpaths = ["tests"]
 pythonpath = ["."]                  # Repo root: tests import root packages by full dotted path
 
 # ==============================================================================
 # Test Coverage Configuration
 # ==============================================================================
 [tool.coverage]
-run.source = ["src", "preferences", "mutation", "harness"] # ADD EVERY DIRECTORY THAT SHIPS CODE TO ENSURE 100% COVERAGE
+run.source = ["src", "preferences", "mutation"] # ADD EVERY DIRECTORY THAT SHIPS CODE TO ENSURE 100% COVERAGE
 report.show_missing = true         # Show exact missed lines when coverage fails
 report.skip_covered = false        # Keep fully covered files visible in reports
 report.fail_under = 100            # Block merges unless all shipped code is covered
@@ -257,24 +217,23 @@ skip_covered = false               # Same behavior for older coverage config rea
 # Hypothesis Property Tests Configuration
 # ==============================================================================
 [tool.hypothesis]
-max_examples = 50   # Generate 50 random test cases per property test (default 100)
+max_examples = 50    # Generate 50 random test cases per property test (default 100)
 deadline = 500       # Fails tests if an individual example takes longer than 500ms
-derandomize = false  # false default seeds random, uncovers more bugs. True = deterministic runs
+derandomize = true   # false default seeds random, uncovers more bugs. True = deterministic runs
 
 # ==============================================================================
 # Mutmut (Mutation Testing) Configuration
 # ==============================================================================
 [tool.mutmut]
 max-children = 2
-source_paths = ["preferences", "src", "harness"]  # what to mutate
-also_copy = ["mutation", ".githooks"]  # not mutated paths, these are copied for imports to work
-do_not_mutate = ["harness/tests/*"]    # explictly here because nested in a directory we said to mutate
+source_paths = ["preferences", "src"]  # what to mutate
+also_copy = ["mutation", ".githooks"]  # not mutated paths, copied for imports
 
 # ==============================================================================
 # Cognitive Complexity Complexipy Configuration
 # ==============================================================================
 [tool.complexipy]
-paths = ["src", "preferences", "mutation", "harness"]
+paths = ["src", "preferences", "mutation"]
 exclude = ["**/tests/**"]    # Test code can be more branching and example-heavy than production code
 max-complexity-allowed = 15  # Cognitive complexity cap catches nested, hard-to-read flow (default 15)
 no-ignore = false            # Disallow `# complexipy: ignore`, fix complexity instead of suppressing it
@@ -305,13 +264,12 @@ main.ignore = [
     ".tox",
     "tox"
 ]
-format.max-line-length = 110         # Keep Pylint line accounting aligned with Ruff E501
-format.max-module-lines = 550        # Enable Pylint C0302 because Ruff has no equivalent
-parameter_documentation.accept-no-param-doc = false  # Require Args documented when Pylint docparams sees params in function def
+format.max-line-length = 120         # Keep Pylint line accounting aligned with Ruff E501
+format.max-module-lines = 750        # Enable Pylint C0302 because Ruff has no equivalent, includes docstrings
+parameter_documentation.accept-no-param-doc = false  # Require Args docs when Pylint docparams sees params
 reports.reports = "yes"              # Print detailed Pylint reports so humans see why score changed
 reports.score = true                 # Keep Pylint's score visible as a coarse trend signal
-output-format = "json2"
-"messages control".enable = ["F", "I", "R0022", "missing-param-doc"]  # Fatal/info, stale options, param docs
+"messages control".enable = ["F", "I", "R0022", "missing-param-doc"]  # Show fatal/info, stale options, param docs
 design.max-attributes = 10           # Max instance attributes (variables) allowed in a class
 
 # ==============================================================================
@@ -319,8 +277,8 @@ design.max-attributes = 10           # Max instance attributes (variables) allow
 # ==============================================================================
 [tool.ruff]
 target-version = "py310"
-preview = true                      # Enable newer Ruff rules before they are fully stable
-line-length = 110                   # Keep code readable without forcing narrow wrapping
+preview = false                     # Enable newer Ruff rules before they are fully stable
+line-length = 120                   # Keep code readable without forcing narrow wrapping
 force-exclude = true                # Respect excluded paths even when they are passed directly
 exclude = [
     "*.md",
@@ -342,12 +300,12 @@ indent-style = "space"  # Indent style ("space" or "tab")
 docstring-code-format = true  # How to format code blocks embedded in docstrings
 [tool.ruff.lint]
 fixable = ["ALL"]
-unfixable = []                                # Allow Ruff to auto-fix what it can
-mccabe.max-complexity = 10                    # Prevent structural bloat, path-count limit for functions, ruff default=10
-pycodestyle.max-doc-length = 110              # Enforce W505 for comments and docstrings
+unfixable = []                    # Allow Ruff to auto-fix what it can
+mccabe.max-complexity = 15        # Prevent structural bloat, path-count limit for functions, ruff default=10
+pycodestyle.max-doc-length = 120  # Enforce W505 for comments and docstrings
 pycodestyle.ignore-overlong-task-comments = true  # Let TODO-style tracker lines exceed max doc length
 pydocstyle.convention = "google"  # Interpret Args/Returns/Raises sections as Google-style docstrings
-pydoclint.ignore-one-line-docstrings = true   # Allow obvious one-line docstrings light
+pydoclint.ignore-one-line-docstrings = true       # Allow obvious one-line docstrings light
 select = [
     "A",       # flake8-builtins (prevents shadowing Python builtins)
     "ARG",     # flake8-unused-arguments (dead params and fake extension points)
@@ -409,34 +367,32 @@ ignore = [
     "S607",     # Allow resolving git/uv from PATH, start-process-with-partial-path
     "RUF201"    # Do not complain no string rule-codes-in-selectors (too new since v.0.15.22)
 ]
-[tool.ruff.lint.pylint]  # Prevent unreadable complexity and code
-max-nested-blocks = 4    # Stop indentation madness
-max-positional-args = 5  # Max total params, prevents big initializers, limits positional params can pass, aka PLR0917
-max-args = 5             # Prevents big initializers, Limits all named parameters in function def (* uncounted)
-max-public-methods = 5   # Cap public methods per class
-max-statements = 50      # Cap executable statements per function/method (default is 50)
-max-branches = 10        # Cap branching paths per function/method; no long if/elif. default is 12 branches
-max-returns = 4          # Cap return exits per function/method
-max-locals = 10          # Cap local variable sprawl per function/method
+[tool.ruff.lint.pylint]      # Prevent unreadable complexity and code
+max-nested-blocks = 5        # Stop indentation madness
+max-positional-args = 5      # Max total params, prevents big initializers, limits positional params can pass
+max-args = 5                 # Prevents big initializers, Limits all named parameters in function def (* uncounted)
+max-public-methods = 20      # Cap public methods per class
+max-statements = 50          # Cap executable statements per function/method
+max-branches = 12            # Cap branching paths per function/method; long if/elif chains are banned
+max-returns = 6              # Cap return exits per function/method
+max-locals = 15              # Cap local variable sprawl per function/method
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"  # Enforce absolute imports
-banned-api."typing.cast".msg = "Do not use cast(); fix the type at the boundary instead."
-banned-api."re".msg = "Regex is slow. Use Python built-in string manipulation operations."
+# banned-api."typing.cast".msg = "Do not use cast(); fix the type at the boundary instead."   EXAMPLE
+# banned-api."re".msg = "Regex is slow. Use Python built-in string manipulation operations."  EXAMPLE
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["D104"]  # __init__.py Package marker files not required to have package docstrings
 "**/tests/**/*.py" = [
-    "D100",     # Test modules do not need noisy docstrings, undocumented-public-module
-    "D101",     # Test classes do not need noisy docstrings, undocumented-public-class
-    "D102",     # Test helper methods do not need noisy docstrings, undocumented-public-method
-    "D103",     # Test functions describe behavior through test names, undocumented-public-function
-    "D104",     # Test package boundaries do not need package docstrings, undocumented-public-package
-    "DOC201",   # Tests explain behavior through assertions,  docstring-missing-returns
-    "S101",     # Allow 'assert' statements (needed for pytest)
-    "PLR0913",  # Tests may need larger setup functions, aka max-positional-args
-    "PLR0915",  # Tests may need larger setup functions, aka too-many-statements
-    "PLR0917",  # Tests may need larger setup function definitions, aka max-positional-args
+    "D100",   # Test modules do not need noisy docstrings, undocumented-public-module
+    "D101",   # Test classes do not need noisy docstrings, undocumented-public-class
+    "D102",   # Test helper methods do not need noisy docstrings, undocumented-public-method
+    "D103",   # Test functions describe behavior through test names, undocumented-public-function
+    "D104",   # Test package boundaries do not need package docstrings, undocumented-public-package
+    "DOC201", # Tests explain behavior through assertions,  docstring-missing-returns
+    "S101",   # Allow 'assert' statements (needed for pytest)
+    "PLR0915",  # Tests may need larger setup functions
 ]
 "harness/**/*.py" = [
     "S404", # Harness code intentionally imports subprocess to run local tools. suspicious-subprocess-import

@@ -2,18 +2,33 @@
 
 Now that you have the template locally:
 
-1. `uv sync` OR `poetry install` OR ` pip install -r requirements.txt`, then `harness install <your-project-name>
-git add . && git commit`
+1. `uv sync` OR `poetry install` OR `pip install -r requirements.txt`, then `harness install && git add . && git commit`
 2. Write your project goal in [docs/plan.md](docs/plan.md)
 3. `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
 4. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
 
 ---
 
+## Default Tools
+
+- [ruff](https://docs.astral.sh/ruff/) lints and formats Python code, fast
+- [pylint](https://pypi.org/project/pylint/) catches code errors and style problems
+- [pydoclint](https://pypi.org/project/pydoclint/0.9.1/) checks docstrings match function signatures
+- [pyright](https://github.com/microsoft/pyright) enforces types before code ever runs
+- [pytest](https://docs.pytest.org/en/stable/) runs the project's test suite
+- [hypothesis](https://hypothesis.readthedocs.io/) generates test inputs to expose edge cases. **_Tests the code_.** [Real Example](tests/preferences/test_properties.py)
+- [mutmut](https://mutmut.readthedocs.io/) mutates your code to find weak tests. **_Tests the tests_.** Easy to use script at [check_mutmut.py](mutation/check_mutmut.py).
+- [complexipy](https://github.com/rohaquinlop/complexipy) flags functions that are too complex
+- [semgrep](https://docs.semgrep.dev/semgrep-ci/sample-ci-configs) scans code for security flaws
+- [pip-audit](https://github.com/pypa/pip-audit) scans Python environments for package vulnerabilities
+- [preferences.py](preferences/preferences.py) A custom AST-parser to optionally expand. It catches style preferences that tools don't.
+
+---
+
 ## Details
 
 > [!IMPORTANT]
-> Default configurations In [`pyproject.toml`](pyproject.toml) Update tool settings, add agent calls, remove or include checks... or leave as is.
+> Default configuration is in [`pyproject.toml`](pyproject.toml). Update tool settings, add agent commands, change checks, or leave it as is.
 
 > [!TIP]
 > If you don't like _ANYTHING_ in this framework, [update it](#expanding-your-harness).
@@ -23,26 +38,26 @@ git add . && git commit`
 ```sh
 uv sync
 source .venv/bin/activate
-harness install <your-project-name>
+harness install
 git add . && git commit
 harness gate
-harness run <agent>>
+harness run <agent>
 
 poetry install
-poetry run harness install <your-project-name>
+poetry run harness install
 git add . && git commit
 poetry run harness gate
-poetry run harness <agent>
+poetry run harness run <agent>
 
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt -e .
-harness install <your-project-name>  && git add . && git commit
+harness install && git add . && git commit
 harness gate
 harness run <agent>
 ```
 
-1. From the root, run `harness install <your-project-name>` to name the project, install dependencies, set up the three git hooks, delete extraneous files.
+1. From the root, run `harness install` to install dependencies, set up the three git hooks, delete extraneous files.
 2. Write your grand vision into `docs/plan.md`.
    - Specs get rewritten from `docs/plan.md` and state of repo.
    - Agent is told in `docs/PROMPT.md` to update the specs.
@@ -52,8 +67,8 @@ harness run <agent>
 4. Configurations plus strict Ruff rules, type checking, pyright, complexipy, and pytest coverage are set in [`pyproject.toml`](pyproject.toml).
 5. Coding preferences not caught by tooling go in [`preferences/preferences.py`](preferences/preferences.py).
 6. Any agent CLI that reads a prompt from stdin and can edit/commit works if they are set in `AGENTS` in [`pyproject.toml`](pyproject.toml).
-7. The repo is the only memory. Each iteration is a fresh-context agent.
-8. `harness run` launches an autonomous LLM worker with the configured permissions,
+7. The repo is the only memory. Each iteration is a fresh-context agent, driven by our loop runner, [Ralph](#faq).
+8. `harness run` launches an autonomous LLM worker with the configured permissions, e.g. `--permission-mode acceptEdits`.
 9. Run a loop `harness run <agent> [max_iterations] [max_minutes]`:
 
 - agent builds
@@ -64,9 +79,12 @@ harness run <agent>
 - Unspecified iterations/minutes → default to 2 iterations × 20 minutes each
 
 ```sh
-harness install <your-project-name>  # rewrite [project] name, uv sync, set core.hooksPath to .githooks
+harness install  # install dependencies, remove template-only files, and set up git hooks
+harness configure-agents  # configures Claude and Codex with containment rules and environment variables
 harness preflight  # fast checks: preferences, ruff lint + format (plus loop containment)
-harness gate  # full pass: preferences, ruff, format, pyright, pylint, complexipy, semgrep, pytest @ 100% cov, hypothesis
+harness gate  # full pass: preferences, ruff, format, pyright, pylint, complexipy, semgrep, pip-audit, pytest @ 100% cov, hypothesis
+harness info  # show configured agents, checks, and protected paths
+harness status  # count run logs and show the newest log
 RALPH_LOOP=1 harness gate  # to run as if you are the agent in the loop
 harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/copilot, defaults: 2 20 True
 
@@ -77,13 +95,16 @@ harness run agy 3 10
 harness run copilot 2 20
 ```
 
-Tool commands are defined in `[tool.harness.gate.checks]` in [pyproject.toml](pyproject.toml). The gate and CI both derive them from there.
+Every run is saved as a log file in `scratchpad/runs/`. `harness status` shows how many logs you have and the path to the newest one — open that file to read everything the agent did.
+
+Tool commands are defined in `[tool.harness]` in [pyproject.toml](pyproject.toml). The gate and CI both derive them from there.
 
 #### The Gate: Tiered Checks
 
-⚡ `harness preflight` (pre-commit) → Ruff lint + check format for everyone, _plus_ **containment** for the agents. Self-heals by un-staging forbidden files.
+⚡ `harness preflight` (pre-commit) → fast checks.
+Ruff lint + check format for everyone, _plus_ **containment** for the agents. Self-heals by un-staging forbidden files.
 
-✅ `harness gate` Local checks mirror CI → ruff lint + format report-only, pyright, pylint, semgrep, complexipy, hypothesis, pytest @ 100% cov.
+✅ `harness gate` (pre-push, mirrored by CI) → ruff lint + format report-only, pyright, pylint, semgrep, complexipy, hypothesis, pytest @ 100% cov.
 
 🤥 `prepare-commit-msg` ensures an agent is not trying to commit empty -- must do work.
 
@@ -99,9 +120,8 @@ Tool commands are defined in `[tool.harness.gate.checks]` in [pyproject.toml](py
 
 ```
 harness/        the gate, loop runner, CLI                           (🤖 forbidden directory)
-  gate.py         mirror the CI locally + preferences.py honored
+  gate.py         run the full local gate + honor preferences.py
   cli.py          command-line entry point
-  tests/          the harness's own tests
   js-scaffold   javascript example to build upon
 preferences/    user-defined preferences not covered by tools        (🤖 forbidden directory)
 tests/
@@ -119,23 +139,7 @@ src/            your product/source code (add to coverage source)
 
 [`pyproject.toml`](pyproject.toml) is the single source of harness configuration. Humans own it and [`preferences/`](preferences/); both are agent-protected.
 
-If an agent edits a forbidden file, the file will be unstaged (not allowed to commit). A forbidden pattern by an agent (e.g. `# noqa` will also prevent their commit and force them to fix it.)
-
-Review/edit current "[preferences.py](preferences/preferences.py)":
-
-```py
-function_argument_assignment_has_star  # agents use non-specific `def fun(*)`
-function_argument_assignment_underscore_lead  # agents love over-using underscore names `def _fun()`
-hidden_signature_star_args  # Complain when a function uses *args or **kwargs (it hides function signatures)
-dynamic_star_call  # Calls to def fun(*items) breaks when you can't tell how many arguments f is getting
-pointless_class  # ensure classes are added for good reasons (carry state, values, methods)
-lazy_assert  # enforce real assertions, stronger tests
-objects_injected_into_runtime_memory  # finds calls that manipulate global state (dangerous, tricky)
-lambda_found  # abolish lambdas for agents to keep their code simpler
-lazy_any_type_hints  # abolish type `Any` used to bypass strict type-checking
-chaotic_continue_statements  # abolish unecessary nested continue statements, clean code
-complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefer linear code
-```
+If an agent edits a forbidden file, the file will be unstaged (not allowed to commit). A forbidden pattern by an agent (e.g. `# noqa` or `nosemgrep` will also prevent their commit and force them to fix it.)
 
 ## Read this before a first run.
 
@@ -151,9 +155,9 @@ The gate bounds what any **commit** may touch, but the worker itself is **not** 
 
 5. Protect `main` and run the loop on its own branch.
 
-6. **100% coverage does not mean good tests.** That is quantity, not quality. (Upcoming feature: mutation testing)
+6. **100% coverage does not mean good tests.** That is quantity, not quality. Run `uv run mutmut run` to find covered lines that no assertion actually checks.
 
-7. **Note**: `semgrep --config auto` needs network for semgrep registry rules.
+7. **Note**: `semgrep --config auto` needs network for semgrep registry rules. `pip-audit` also needs a network connection to scan dependencies.
 
 </details>
 
@@ -172,7 +176,7 @@ The gate bounds what any **commit** may touch, but the worker itself is **not** 
 
 ```py
 function_argument_assignment_has_star  # agents use non-specific `def fun(*)`
-function_argument_assignment_underscore_lead  # agents love over-using underscore names `def _fun()`
+named_with_underscore_and_not_in_class_or_dunder  # agents love over-using underscore names `def _fun()`
 hidden_signature_star_args  # Complain when a function uses *args or **kwargs (it hides function signatures)
 dynamic_star_call  # Calls to def fun(*items) breaks when you can't tell how many arguments f is getting
 pointless_class  # ensure classes are added for good reasons (carry state, values, methods)
@@ -190,6 +194,14 @@ complex_comprehension  # no needlessly dense list/set/dict comprehensions, prefe
   <summary>
 
 ### FAQ </summary>
+
+- **Who is Ralph?**
+
+Ralph is our name for LoopGate's loop runner — the small program that starts your coding agent, hands it the prompt, and starts a fresh agent when the last one finishes. The name comes from the "Ralph Wiggum" technique: run an agent in a simple loop, over and over, until the work is done. Anything starting with `RALPH_` (like `RALPH_LOOP=1`) is just a setting Ralph gives the agent that says "you are inside the loop, follow the loop rules."
+
+- **`harness run <agent>` exits immediately / can't find the worker?**
+
+LoopGate does not install or log in agent CLIs. Install and authenticate the worker you selected (`claude`, `codex`, `copilot`, or `agy`), confirm it is on your `PATH` (e.g. `which codex`), then retry. If `which` finds the binary but the run still fails, finish that tool's login/auth flow and retry `harness run`.
 
 - **What is the difference between a gate and a sandbox?**
 

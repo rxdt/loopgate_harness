@@ -94,10 +94,10 @@ def test_flags_never_calls_preferences_when_it_is_absent() -> None:
 
 @given(name=IDENTIFIERS)
 def test_underscore_lead_flagged_iff_leading_underscore_not_dunder(name: str) -> None:
-    """An assignment target trips the underscore rule IFF it starts with '_' and does not end with '__'.
-    Covers the whole identifier domain, including dunders and lone '_', in one property.
+    """An assignment target trips the underscore rule IFF it has a prohibited leading underscore.
+    Covers the whole identifier domain, including dunders and the exempt lone '_', in one property.
     """
-    expected = name.startswith("_") and not name.endswith("__")
+    expected = name != "_" and name.startswith("_") and not name.startswith("__") and not name.endswith("__")
     assert flags(f"{name} = 1\n", "starts with underscore") is expected
 
 
@@ -105,7 +105,7 @@ def test_underscore_lead_flagged_iff_leading_underscore_not_dunder(name: str) ->
 def test_underscore_rule_holds_for_function_and_argument_names(name: str) -> None:
     """The same underscore rule applies to function names and argument names, not just assignments."""
     assume(not name.endswith("__"))  # keep dunder methods/args (__init__ etc.) out of this slice
-    expected = name.startswith("_")
+    expected = name != "_" and name.startswith("_") and not name.startswith("__")
     assert flags(f"def {name}():\n    return 1\n", "starts with underscore") is expected
     assert flags(f"def f({name}):\n    return {name}\n", "starts with underscore") is expected
 

@@ -20,6 +20,23 @@ from collections.abc import Callable
 Check = Callable[[ast.AST], "str | None"]
 
 
+def is_in_class(node: ast.AST) -> bool:
+    """Checks if ode is inside a class
+
+    Args:
+        node: The node in question to check, is it in a class?
+
+    Returns:
+        bool True is in class, else False
+    """
+    current = getattr(node, "parent", None)
+    while current:
+        if isinstance(current, ast.ClassDef):
+            return True
+        current = getattr(current, "parent", None)
+    return False
+
+
 def chaotic_continue_statements(node: ast.AST) -> str | None:
     """Catch continue statements that are hard to follow: inside a while loop, or buried two or more
     if/for blocks deep. A single `if` guard directly inside a loop is fine -- that is normal Python.
@@ -95,18 +112,20 @@ def lambda_found(node: ast.AST) -> str | None:
         A complaint if the node is a lambda, else None.
     """
     if isinstance(node, ast.Lambda):
-        return "Lambda found hurting readability and adding complexity."
+        return "Lambda found hurting readability and adding complexity, prefer map() or filter()"
     return None
 
 
-def function_argument_assignment_underscore_lead(node: ast.AST) -> str | None:
-    """A def, arg, or assignment target.
+def named_with_underscore_and_not_in_class_or_dunder(node: ast.AST) -> str | None:
+    """A def, arg, or assignment target starts with '_' and is not in a class object.
+
+    The conventional discard name ``_`` is exempt.
 
     Args:
         node: The AST node under inspection.
 
     Returns:
-        A complaint if the name leads with a lone underscore, else None.
+        A complaint if the name has a prohibited leading underscore, else None.
     """
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
         name = node.name
@@ -116,32 +135,33 @@ def function_argument_assignment_underscore_lead(node: ast.AST) -> str | None:
         name = node.id
     else:
         return None
+    if name.startswith("__") and not name.endswith("__"):
+        return f"Name '{name} starts with a dunder, rename it"
+    if name != "_" and name.startswith("_") and not name.endswith("__") and not is_in_class(node):
+        return f"Name '{name}' starts with underscore and is not in a class"
 
-    if name.startswith("_") and not name.endswith("__"):
-        # Check if def, arg, assigment target name starts with a lone underscore
-        return f"Name '{name}' starts with underscore"
     return None
 
 
 def hidden_signature_star_args(node: ast.AST) -> str | None:
-    """Spell out a function's arguments instead of using *args or **kwargs.
-
-    When the arguments are named, anyone reading the function knows what to pass, and their editor can
-    suggest the arguments for them. We flag this everywhere, even for wrappers and decorators, because
-    the code alone can't tell us whether *args is a real need or just a shortcut.
+    """Reject function definitions that use *args, **kwargs, a bare *, or /.
 
     Example:
-        def send(*args, **kwargs): ...  -> flagged: the caller can't see what to pass
-        def send(to, subject): ...      -> fine: the arguments are spelled out
+        def send(*args, **kwargs): ...  -> flagged
+        def send(a, *, b): ...          -> flagged
+        def send(a, /, b): ...          -> flagged
+        def send(a, b): ...             -> fine
 
     Args:
         node: One piece of the parsed code to look at.
 
     Returns:
-        A short message if the function uses *args or **kwargs, otherwise None.
+        A complaint if the definition uses *args, **kwargs, a bare *, or /, otherwise None.
     """
-    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and (node.args.vararg or node.args.kwarg):
-        return "'*args'/'**kwargs' hide the function signature, use explicit parameters"
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and (
+        node.args.vararg or node.args.kwarg or node.args.kwonlyargs or node.args.posonlyargs
+    ):
+        return "'*args', '**kwargs', '*', and '/' hide the function signature, use explicit parameters"
     return None
 
 
@@ -255,7 +275,7 @@ def complex_comprehension(node: ast.AST) -> str | None:
 
 # To add a style rule: write a dumb one-node function above and register it here under its kind.
 CHECKS: dict[str, Check] = {
-    "function_argument_assignment_underscore_lead": function_argument_assignment_underscore_lead,
+    "named_with_underscore_and_not_in_class_or_dunder": named_with_underscore_and_not_in_class_or_dunder,
     "hidden_signature_star_args": hidden_signature_star_args,
     "dynamic_star_call": dynamic_star_call,
     "pointless_class": pointless_class,
@@ -276,7 +296,7 @@ def preferences_violations(path: str, source: str) -> str:
         source: Python source text to parse and walk.
 
     Returns:
-        Newline-joined violation messages, or "" when the file is clean.
+        Violation messages string
     """
     violations: list[str] = []
     tree = ast.parse(source)
@@ -290,4 +310,4 @@ def preferences_violations(path: str, source: str) -> str:
             if message:
                 violations.append(f"{path}:{lineno}: {message}")
 
-    return "\n".join(violations) if violations else ""
+    return "\n".join(violations)

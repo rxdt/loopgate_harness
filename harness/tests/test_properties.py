@@ -5,8 +5,8 @@ Hypothesis randomly choose which of those inputs to check, including edge cases 
 about." TESTS THE CODE WITH A RANGE OF INPUTS.
 Hypothesis docs: https://hypothesis.readthedocs.io/
 
-Every test here stages real files in a temp repo and calls the real gate functions, which reach git
-through the real gate.run_git. Nothing about git is stubbed.
+Integration tests here stage real files in a temp repo and reach Git through the real gate.run_git.
+The casing property feeds a production-shaped staged diff through the real preflight matcher.
 
 Hypothesis persistence: Do not set database=None by default. Local runs use Hypothesis's example
 database under .hypothesis/examples, so past failures are replayed first and users can debug them
@@ -21,9 +21,10 @@ not use function-scoped fixtures with @given; patch per-example state inside hel
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
-from hypothesis import example, given, settings, strategies
+from hypothesis import given, settings, strategies
 
 from harness import gate
 from harness.gate import gates
@@ -33,13 +34,33 @@ def scan_staged(repo: Path, source: str) -> list[str]:
     """Stage one file, run the real banned-pattern scan over the real index, then clear the index."""
     (repo / "x.py").write_text(source, encoding="utf-8")
     gate.run_git(["add", "x.py"], repo)
-    problems = gates.run_preflight()["fail"]
+    problems = gates().run_preflight()["fail"]
     gate.run_git(["reset", "-q"], repo)
     return problems
 
 
+def scan_synthetic_diff(source: str) -> list[str]:
+    """Run the real preflight over a synthetic staged diff."""
+    staged_diff = "+++ b/x.py\n" + "".join(f"a{line}" for line in source.splitlines(keepends=True))
+    git = Mock(side_effect=["HEAD\n", "x.py\n", staged_diff, "", "1\t0\tx.py\n"])
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("RALPH_LOOP", "1")
+        patch.setattr(gates(), "commit_checks", {})
+        patch.setattr(gate, "run_git", git)
+        return gates().run_preflight()["fail"]
+
+
+def assert_all_patterns_reported(problems: list[str]) -> None:
+    """Assert one finding for every configured forbidden pattern."""
+    reported = set(problems[0].splitlines()[1:])
+    expected = {f"x.py: '{pattern}'" for pattern in gates().forbidden_patterns}
+
+    assert problems[0].splitlines()[0] == "FORBIDDEN FOR AGENT:"
+    assert reported == expected
+
+
 @strategies.composite
-def recased_pattern(draw: strategies.DrawFn) -> tuple[str, str]:
+def recased_patterns(draw: strategies.DrawFn) -> tuple[str, ...]:
     """Draw a forbidden pattern and the same pattern in arbitrary casing.
 
     Args:
@@ -48,26 +69,32 @@ def recased_pattern(draw: strategies.DrawFn) -> tuple[str, str]:
     Returns:
         (pattern, recased) where recased differs from pattern only in the case of its letters.
     """
-    pattern = draw(strategies.sampled_from(gates.forbidden_patterns))
-    # Recase each alphabetic character independently; symbols (e.g. in '--no-verify') pass through.
-    recased = "".join(
-        draw(strategies.sampled_from([char.lower(), char.upper()])) if char.isalpha() else char
-        for char in pattern
+    return tuple(
+        "".join(
+            draw(strategies.sampled_from((char.lower(), char.upper()))) if char.isalpha() else char
+            for char in pattern
+        )
+        for pattern in gates().forbidden_patterns
     )
-    return pattern, recased
 
 
 @settings(max_examples=50, deadline=None)
-@given(case=recased_pattern())
-@example(case=("# noqa", "# noqa"))  # lowercase-alpha pattern
-@example(case=("--no-verify", "--NO-verify"))  # symbol-heavy pattern
-def test_banned_pattern_detected_across_arbitrary_line_casing(case: tuple[str, str], scan_repo: Path) -> None:
+@given(recased=recased_patterns())
+def test_banned_pattern_detected_across_arbitrary_line_casing(recased: tuple[str, ...]) -> None:
     """An agent cannot smuggle an escape hatch past the scan by changing its capitalization. Every
     forbidden pattern is caught on an added line however that line is cased.
     """
-    pattern, recased = case
-    problems = scan_staged(scan_repo, f"value = 1  # {recased}\n")
-    assert any(problem.startswith(f"'{pattern}' line:") for problem in problems)
+    source = "".join(f"value_{index} = 1  # {pattern}\n" for index, pattern in enumerate(recased))
+    source += "lowercase = 1  # noqa\nsymbol_heavy = 1  # --NO-verify\n"
+    assert_all_patterns_reported(scan_synthetic_diff(source))
+
+
+def test_banned_pattern_scan_uses_real_staged_diff(scan_repo: Path) -> None:
+    """The production Git diff path reports every configured forbidden pattern."""
+    source = "".join(
+        f"value_{index} = 1  # {pattern}\n" for index, pattern in enumerate(gates().forbidden_patterns)
+    )
+    assert_all_patterns_reported(scan_staged(scan_repo, source))
 
 
 @pytest.mark.parametrize("pattern_in_toml", ["hookspath", "HooksPath", "HOOKSPATH"])
@@ -79,10 +106,10 @@ def test_mixed_case_forbidden_entry_still_matches(
     pattern as well as the line.
     """
     monkeypatch.setenv("RALPH_LOOP", "1")
-    monkeypatch.setattr(gates, "commit_checks", {})
-    monkeypatch.setattr(gates, "forbidden_patterns", (pattern_in_toml,))
+    monkeypatch.setattr(gates(), "commit_checks", {})
+    monkeypatch.setattr(gates(), "forbidden_patterns", (pattern_in_toml,))
     problems = scan_staged(git_repo, "value = 1  # hookspath\n")
-    assert any(problem.startswith(f"'{pattern_in_toml}' line:") for problem in problems)
+    assert problems == [f"FORBIDDEN FOR AGENT:\nx.py: '{pattern_in_toml}'"]
 
 
 def test_banned_pattern_ignores_the_diff_file_header(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
@@ -90,10 +117,10 @@ def test_banned_pattern_ignores_the_diff_file_header(monkeypatch: pytest.MonkeyP
     header. The header is not code an agent added, so it must not be reported.
     """
     monkeypatch.setenv("RALPH_LOOP", "1")
-    monkeypatch.setattr(gates, "commit_checks", {})
+    monkeypatch.setattr(gates(), "commit_checks", {})
     (git_repo / "noqa_helpers.py").write_text("value = 1\n", encoding="utf-8")
     gate.run_git(["add", "noqa_helpers.py"], git_repo)
-    assert gates.run_preflight() == {"pass": [], "fail": [], "warn": []}
+    assert gates().run_preflight() == {"pass": ["mutmut"], "fail": [], "warn": []}
 
 
 def test_banned_pattern_ignores_a_removed_line(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
@@ -101,7 +128,7 @@ def test_banned_pattern_ignores_a_removed_line(monkeypatch: pytest.MonkeyPatch, 
     is never reported.
     """
     monkeypatch.setenv("RALPH_LOOP", "1")
-    monkeypatch.setattr(gates, "commit_checks", {})
+    monkeypatch.setattr(gates(), "commit_checks", {})
     scan_staged(git_repo, "value = 1  # noqa\n")
     gate.run_git(["add", "x.py"], git_repo)
     gate.run_git(["commit", "-q", "-m", "seed noqa"], git_repo)
@@ -119,8 +146,8 @@ def test_casefold_colliding_forbidden_paths_are_both_ejected(
     blob = gate.run_git(["hash-object", "-w", "README.md"], git_repo).strip()
     for path in colliding:
         gate.run_git(["update-index", "--add", "--cacheinfo", f"100644,{blob},{path}"], git_repo)
-    monkeypatch.setattr(gates, "commit_checks", {})
-    assert (
-        gates.run_preflight(),
-        gate.run_git(["diff", "--cached", "--name-only"]).splitlines(),
-    ) == ({"pass": [], "fail": [], "warn": []}, [])
+    monkeypatch.setattr(gates(), "commit_checks", {})
+    assert (gates().run_preflight(), gate.run_git(["diff", "--cached", "--name-only"]).splitlines()) == (
+        {"pass": ["mutmut"], "fail": [], "warn": []},
+        [],
+    )

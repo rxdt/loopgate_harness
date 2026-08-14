@@ -5,15 +5,17 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from functools import partial
 from pathlib import Path
 from subprocess import PIPE
-from typing import Self
 
 import pytest
+from typing_extensions import Self
 
 from harness import cli, gate
 from harness.gate import gates
+from mutation.check_mutmut import analyze_mutmut_report_passed
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 collect_ignore = ["test_ralph.py"] if sys.platform == "win32" else ["test_ralph_ps1.py"]
@@ -42,7 +44,7 @@ def fake_popen(
 
     Git is never faked. run_git reaches Popen through subprocess.run, so a git command is handed
     straight to the real Popen and the real gate.run_git keeps working against the temp repo the
-    test points gates.repo_root at. Only the checks around it are stand-ins.
+    test points gates().repo_root at. Only the checks around it are stand-ins.
 
     Every faked check reports exit 0 (pass) unless its exact argv is in fails, which reports exit 1.
     Every faked launch is recorded (command, cwd, env) so dispatch tests can assert what run_checks ran.
@@ -55,9 +57,14 @@ def fake_popen(
     real_popen = gate.subprocess.Popen
 
     def spawn(
-        command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None, **piping: object
+        command: list[str],
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        stdout: int | None = None,
+        stderr: int | None = None,
+        text: bool = False,
     ) -> subprocess.Popen[str] | FakePopen:
-        del piping  # run_git's capture settings, rebuilt below rather than forwarded
+        del stdout, stderr, text  # run_git's capture settings, rebuilt below rather than forwarded
         if command[:1] == ["git"]:
             return real_popen(command, env=env, stdout=PIPE, stderr=PIPE, text=True)
         calls.append((command, cwd or REPO_ROOT, env or {}))
@@ -65,6 +72,22 @@ def fake_popen(
 
     monkeypatch.setattr(gate.subprocess, "Popen", spawn)
     return calls
+
+
+def fake_home(home: Path) -> Callable[[], Path]:
+    """A Path.home stand-in so configure_agents writes under a test directory, never the real home.
+
+    Args:
+        home: the directory to report as the user's home.
+
+    Returns:
+        Zero-argument callable that returns home, matching how Path.home is called.
+    """
+
+    def home_path() -> Path:
+        return home
+
+    return home_path
 
 
 @pytest.fixture
@@ -77,10 +100,23 @@ def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "README.md").write_text("seed\n", encoding="utf-8")
     (tmp_path / "README.template.md").write_text("seed\n", encoding="utf-8")
     (tmp_path / ".gitignore").write_text("existing\n", encoding="utf-8")
+    mutants = tmp_path / "mutants"
+    mutants.mkdir()
+    report = mutants / "mutmut-cicd-stats.json"
+    shutil.copy2(
+        REPO_ROOT / "tests" / "mutation" / "mutmut-cicd-stats.json",
+        report,
+    )
     gate.run_git(["add", ".gitignore", "README.md", "README.template.md"], tmp_path)
     gate.run_git(["commit", "-q", "-m", "seed"], tmp_path)
+    monkeypatch.setattr(cli, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(cli, "REPO_ROOT_STR", str(tmp_path))
-    monkeypatch.setattr(gates, "repo_root", tmp_path)
+    monkeypatch.setattr(gates(), "repo_root", tmp_path)
+    monkeypatch.setattr(
+        gate,
+        "analyze_mutmut_report_passed",
+        partial(analyze_mutmut_report_passed, str(report)),
+    )
     return tmp_path
 
 
@@ -117,10 +153,11 @@ if command == "prepare-commit-msg" or command in real_commands:
     from harness import cli
     from harness.gate import gates
     os.chdir(repo)
-    gates.repo_root = repo
+    gates().repo_root = repo
+    cli.REPO_ROOT = repo
     cli.REPO_ROOT_STR = str(repo)
     if command == "preflight":
-        gates.commit_checks = {{}}
+        gates().commit_checks = {{}}
     cli.main(arguments)
 status_file = repo / "harness.exit"
 raise SystemExit(int(status_file.read_text(encoding="utf-8")) if status_file.exists() else 0)
@@ -150,6 +187,6 @@ def scan_repo(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     repo = seed_repo(tmp_path_factory.mktemp("banned-patterns"))
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("RALPH_LOOP", "1")
-        patch.setattr(gates, "repo_root", repo)
-        patch.setattr(gates, "commit_checks", {})
+        patch.setattr(gates(), "repo_root", repo)
+        patch.setattr(gates(), "commit_checks", {})
         yield repo

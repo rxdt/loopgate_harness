@@ -43,6 +43,44 @@ ask if that code is needed. Maybe delete the useless code instead of writing tes
 You do not need to reach zero mutants, e.g. if changing source effects performance negatively, message output
 would change, equivalent code swap e.g. i < 10 => i != 10
 
+Locally you can run `mutmut run` to generate mutants. Your test suite must be green.
+Then `mutmut export-cicd-stats` to get a report.
+Run *this* script to use that report to get a score and badge-capable score for your README.
+```
+> mutmut run
+⠼ Generating mutants
+    done in 2457ms (6 files mutated, 7 ignored, 0 unmodified)
+⠧ Running stats
+    done
+⠼ Running clean tests
+    done
+⠏ Running forced fail test
+    done
+Running mutation testing
+⠼ 1434/1434  🎉 1207 🫥 0  ⏰ 1  🤔 0  🙁 226  🔇 0  🧙 0
+5.28 mutations/second
+> mutmut export-cicd-stats
+Saved CI/CD stats to mutants/mutmut-cicd-stats.json
+> python mutation/check_mutmut.py  # writes `mutation-score.json` in the format Shields expects and prints:
+
+───────────────MUTMUT MUTATION RESULTS ───────────────
+
+            killed                          1207
+            survived                        226
+            total                           1434
+            no_tests                        0
+            skipped                         0
+            suspicious                      0
+            timeout                         1
+            check_was_interrupted_by_user   0
+            segfault                        0
+            Mutation Score:                84.2
+
+Add to README:
+[![mutation](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/OWNER/REPO/BRANCH/
+mutation-score.json)](https://github.com/OWNER/REPO/blob/BRANCH/mutation-score.json)
+
+> git commit && git push
 """
 
 from __future__ import annotations
@@ -51,20 +89,37 @@ import json
 import os
 from pathlib import Path
 
-import typer
 from rich import print as rprint
 from rich.console import Console
 from rich.table import Table
 
-console = Console(force_terminal=True, color_system=None if os.environ.get("RALPH_LOOP") else "256")
+console = Console(force_terminal=True, color_system=None if os.environ.get("RALPH_LOOP") else "auto")
 
-MINIMUM_MUTATION_SCORE = 60.0
+MINIMUM_MUTATION_SCORE = 60.0  # increase over time
 
 
-def analyze_mutmut_report(file_path: str = "mutants/mutmut-cicd-stats.json") -> float:
+def update_mutation_score() -> float:
+    """Read the Mutmut report and write the latest repository mutation score.
+
+    Returns:
+        Latest calculated mutation score.
+    """
+    stats_report_path = Path("mutants/mutmut-cicd-stats.json")
+    badge_score = Path("mutation-score.json")
+    if not stats_report_path.exists():
+        repo_root = Path(__file__).resolve().parents[1]
+        stats_report_path = repo_root / stats_report_path
+        badge_score = repo_root / badge_score
+    mutation_score = analyze_mutmut_report_passed(str(stats_report_path))
+    badge = {"schemaVersion": 1, "label": "mutation", "message": f"{mutation_score:.1f}%", "color": "#177445"}
+    badge_score.write_text(json.dumps(badge, indent=4) + "\n", encoding="utf-8")
+    return mutation_score
+
+
+def analyze_mutmut_report_passed(file_path: str = "mutants/mutmut-cicd-stats.json") -> float:
     """Read the mutmut CI JSON results created each Sunday night.
 
-    Arguments:
+    Args:
         file_path (str): Default filepath to read mutmut run stats from.
 
     Returns:
@@ -72,21 +127,21 @@ def analyze_mutmut_report(file_path: str = "mutants/mutmut-cicd-stats.json") -> 
 
     Raises:
         JSONDecodeError: If the report does not contain valid JSON.
-        Exit: If the report file does not exist or the mutation score is below the minimum.
     """
-    # pragma: no mutate
+    mutation_score: float = 0.0
     if not Path(file_path).exists():
-        rprint(rf"[red]Error: Mutmut JSON report not found at [\]'{file_path}'")
-        raise typer.Exit(code=1)
+        rprint(
+            f"[bold red]Mutmut report not at {file_path}[/]:\nRun `mutmut run && mutmut export-cicd-stats`"
+        )
+        return mutation_score
     data: dict[str, int] = {}
     with Path(file_path).open("r", encoding="utf-8") as fp:
         try:
             data = json.load(fp)
         except json.JSONDecodeError:
-            rprint(rf"[red]JSONDecodeError [\]'{file_path}'")
+            rprint(rf"[red]JSONDecodeError [/]'{file_path}'")
             raise
 
-    mutation_score: float = 0.0
     total_mutants = data.get("total", 0)
     skipped = data.get("skipped", 0)
     tested_mutants = total_mutants - skipped
@@ -95,16 +150,16 @@ def analyze_mutmut_report(file_path: str = "mutants/mutmut-cicd-stats.json") -> 
         timeout = data.get("timeout", 0)
         mutation_score = ((killed + timeout) / tested_mutants) * 100
 
-    table = Table(title="\n[cyan2]MUTMUT MUTATION RESULTS[/]\n", box=None, padding=(0, 2))
+    console.rule("[bold cyan]MUTMUT MUTATION RESULTS[/]", style="blink cyan on grey15")
+    table = Table(box=None)
     for stat, result in data.items():
-        table.add_row(f"[turquoise]  {stat}[/]", f"[blue] {result}[/]")
-    table.add_row(f"[bold italic cyan2]  MUTATION SCORE: [/][bold italic yellow2]{mutation_score}[/]")
+        table.add_row(f"[dim]{stat}[/]", f"[blue] {result}[/]")
+    table.add_row("[cyan]Mutation Score:[/]", f"[dim yellow2]{mutation_score:.1f}[/]")
     console.print(table, justify="center")
-    if mutation_score < MINIMUM_MUTATION_SCORE:
-        raise typer.Exit(code=1)
 
     return mutation_score
 
 
 if __name__ == "__main__":
-    analyze_mutmut_report()
+    if update_mutation_score() < MINIMUM_MUTATION_SCORE:
+        raise SystemExit(1)

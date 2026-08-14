@@ -1,6 +1,8 @@
-The human vision. Agents read this for direction; `docs/specs/` turns it into concrete, prioritized work. Humans start owning this file. Delete or comment out the `docs/plan.md` entry in `[tool.harness.gate] forbidden_files` at [pyproject.toml](../pyproject.toml) if you want agents to take over managing the vision.
+# The human vision
 
-} Code will go in `src/`
+Agents read this for direction; `docs/specs/` turns it into concrete, prioritized work. Humans start owning this file. Delete or comment out the `docs/plan.md` entry in `[tool.harness.gate] forbidden_files` at [pyproject.toml](../pyproject.toml) if you want agents to take over managing the vision.
+
+Code will go in `src/`
 
 ## Objective
 

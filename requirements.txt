@@ -1,7 +1,6 @@
 complexipy
 hypothesis
 mutmut
-packaging
 pip-audit
 pylint
 pyright

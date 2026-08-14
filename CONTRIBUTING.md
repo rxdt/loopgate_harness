@@ -1,12 +1,12 @@
 # Contributing to L∞PGate Harness
 
-Thanks for taking the time to contribute. This project is a Python harness for running agent loops behind local and CI gates. Good contributions scoped, tested, and explicit about the workflow they change.
+Thanks for taking the time to contribute. This project is a Python-based harness for running agent loops behind local or CI gates. Good contributions are scoped, tested, and explicit about the workflow they change.
 
 ## Before You Start
 
-- Use Python 3.11 or newer
-- Read [README.md](README.md) for the harness model, safety notes, and command overview.
-- Checking existing issues and pull recommended before starting larger changes.
+- Use Python 3.10 or newer
+- **Read [README.md](README.md)**
+- Use the loops!
 
 ## Local Setup
 
@@ -21,10 +21,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 source .venv/bin/activate
 
-uv run harness install loopgate  # for first time use. After: `harness install loopgate`
+git config core.hooksPath .githooks  # enable the repo's git hooks
 ```
 
-`harness install <project-name>` is the installation behavior users will experience. It rewrites the template project name and sets up hooks for a downstream project. If you run `harness install loopgate`, it runs `uv sync`, installs/enables git hooks, and sets the project name to `loopgate`.
+`harness install` is the installation behavior downstream template users experience: it installs dependencies, deletes template-only files (including this CONTRIBUTING.md and `harness/tests/`), and enables the git hooks. Do **not** run it in this repo — use the setup above instead.
 
 ## Project Layout
 
@@ -70,13 +70,13 @@ The full suite runs as part of `harness gate` (at 100% coverage). To run only th
 uv run pytest harness/tests
 ```
 
-Fast check while working [`harness/gate.py line 164`](harness/gate.py#L164)
+Fast check while working [`harness/gate.py line 218`](harness/gate.py#L218)
 
 ```sh
 harness preflight
 ```
 
-The full gate before a pull request [`harness/gate.py line 177`](harness/gate.py#L177)
+The full gate before a pull request [`harness/gate.py line 227`](harness/gate.py#L227)
 
 ```sh
 harness gate

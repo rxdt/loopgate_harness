@@ -2,7 +2,7 @@
 # Keep Ralph Dumb: start the worker, give it the prompt, print a line, repeat. Nothing else.
 # Windows has no POSIX `timeout`, so this uses Wait-Process + taskkill /T to bound each iteration.
 #
-# Usage: pwsh -File ralph.ps1 [max_iterations] [max_minutes_per_iteration] <agent command...>
+# Usage: pwsh -File ralph.ps1 <max_iterations> <max_minutes_per_iteration> <agent command...>
 
 $ErrorActionPreference = "Stop"
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -13,33 +13,15 @@ function ConvertTo-WindowsArgument([string]$argument) {
     return '"' + $escaped + [regex]::Match($argument, '(\\*)$').Groups[1].Value + '"'
 }
 
-$maxIterations = 2
-$maxMinutes = [double]20
-$rest = @($args)
-if ($rest.Count -gt 0 -and $rest[0] -match '^\d+$') {
-    $maxIterations = [int]$rest[0]
-    $rest = @($rest | Select-Object -Skip 1)
-}
-if ($rest.Count -gt 0 -and $rest[0] -match '^\d+(?:\.\d+)?$') {
-    $maxMinutes = [double]$rest[0]
-    $rest = @($rest | Select-Object -Skip 1)
-}
-
-if ($rest.Count -lt 1) {
-    [Console]::Error.WriteLine("defaults: max_iterations=$maxIterations max_minutes_per_iteration=$maxMinutes")
-    exit 2
-}
-if ($maxIterations -lt 1 -or $maxMinutes -le 0) {
-    [Console]::Error.WriteLine("ralph: max_iterations must be >= 1 and max_minutes must be > 0")
-    exit 2
-}
+$maxIterations = [int]$args[0]
+$maxMinutes = [double]$args[1]
+$rest = @($args | Select-Object -Skip 2)
 
 for ($i = 1; $i -le $maxIterations; $i++) {
-    [Console]::Error.WriteLine("ralph: iteration $i/$maxIterations")
     # Receipt line, same stdout contract as ralph.sh: `harness run` saves stdout as the run's .jsonl.
     # The worker inherits this handle, so flush before starting it or the records interleave.
     $timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm")
-    [Console]::Out.WriteLine("{""type"":""ralph"",""iteration"":$i,""max_iterations"":$maxIterations,""timestamp"":""$timestamp""}")
+    [Console]::Out.WriteLine("{""type"":""ralph"",""iteration"":$i,""max_iterations"":$maxIterations,""max_minutes"":$maxMinutes,""timestamp"":""$timestamp""}")
     [Console]::Out.Flush()
     $stdin = "$($env:RALPH_PROMPT)`n`nRALPH_ITERATION=$i/$maxIterations`n"
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -66,6 +48,5 @@ for ($i = 1; $i -le $maxIterations; $i++) {
 }
 
 $timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm")
-[Console]::Out.WriteLine("{""type"":""ralph"",""completed"":$maxIterations, ""timestamp"":""$timestamp""}")
+[Console]::Out.WriteLine("{""type"":""ralph"",""completed"":$maxIterations,""max_minutes"":$maxMinutes,""timestamp"":""$timestamp""}")
 [Console]::Out.Flush()
-[Console]::Error.WriteLine("ralph: completed $maxIterations iteration(s)")

@@ -13,7 +13,11 @@
 # if is-agent-in-loop, check harness executable found via harness-path
 RALPH_LOOP="${RALPH_LOOP:-0}"
 
-recorded="$(git rev-parse --path-format=absolute --git-common-dir)/harness-path"
+if [ "$RALPH_LOOP" = "0" ]; then
+    exit 0
+fi
+
+recorded="$(git rev-parse --git-common-dir)/harness-path"
 HARNESS=""
 
 if [ -r "$recorded" ]; then
@@ -21,20 +25,23 @@ if [ -r "$recorded" ]; then
 fi
 
 if [ ! -x "$HARNESS" ]; then
+    missing_harness="$HARNESS"
     HARNESS="$(command -v harness 2>/dev/null || true)"
     if [ ! -x "$HARNESS" ]; then
-        echo "\nloopgate: hooks are not installed. Run 'harness install' in this repo." >&2
-        if [ "$RALPH_LOOP" = "1" ]; then
-            exit 1
-        fi
+        printf "\nloopgate: hooks are not installed. Run 'harness install' in this repo.\n" >&2
+        exit 1
     fi
 
-    echo "\nloopgate: harness installed but recorded path of executable $HARNESS is gone.\nRe-adding file '.git/harness-path'.\n" >&2
+    if [ -n "$missing_harness" ]; then
+        printf \
+            "\nloopgate: recorded harness executable %s is unavailable.\nRecording fallback %s in '.git/harness-path'.\n\n" \
+            "$missing_harness" "$HARNESS" >&2
+    else
+        printf \
+            "\nloopgate: no recorded harness executable was found.\nRecording fallback %s in '.git/harness-path'.\n\n" \
+            "$HARNESS" >&2
+    fi
     printf '%s\n' "$HARNESS" > "$recorded"
 fi
 
 export PATH="$(dirname "$HARNESS")${PATH:+:$PATH}"
-
-if [ "$RALPH_LOOP" = "0" ]; then
-    exit 0
-fi
