@@ -64,30 +64,28 @@ def run_worker(command: list[str], cwd: Path, log: Path, verbose: bool) -> int:
             return process.wait()
 
 
-def check(name: str, command: Callable[[], dict[str, list[str]]]) -> dict[str, list[str]]:
+def check(name: str, command: Callable[[], dict[str, list[str]]], json_output: bool = False) -> None:
     """Run a named phase (preflight or gate), render its summary, and exit by its verdict.
 
     Args:
         name: Phase label shown in the summary (e.g. "preflight" or "gate").
         command: Callable that runs the phase for a repo. Returns pass/fail buckets.
+        json_output: When True, output results as a JSON structure instead of a Rich table.
 
     Raises:
         typer.Exit: always — code 1 if anything failed, else code 0.
     """
     results = command()
-    if os.environ.get("RALPH_LOOP"):
-        typer.secho(
-            json.dumps(
-                {
-                    "Harness Summary": {
-                        "PASSED": results["pass"],
-                        "FAILED": results["fail"],
-                        "result": "rejected by harness" if results["fail"] else f"ok: {name} pass",
-                    }
-                },
-                indent=0,
-            )
-        )
+
+    if json_output or os.environ.get("RALPH_LOOP"):
+        output = {
+            "phase": name,
+            "ok": len(results["fail"]) == 0,
+            "pass": results["pass"],
+            "fail": results["fail"],
+            "warn": results.get("warn", []),
+        }
+        typer.echo(json.dumps(output))
     else:
         table = Table(title="\nHarness Summary\n", title_style="bold grey74", box=None, padding=(0, 5))
         table.add_column("PASSED", style="bold dim white")
@@ -110,9 +108,11 @@ def preflight() -> None:
 
 
 @app.command(help="Pre-push checks match the CI gate exactly (lint, types, security, etc.)")
-def gate() -> None:
+def gate(
+    json: Annotated[bool, typer.Option("--json", help="Output results as JSON")] = False,
+) -> None:
     """Dumb pass-through to the full pre-push gate; exit nonzero if anything fails."""
-    check("gate", gate_module.run_gate)
+    check("gate", gate_module.run_gate, json_output=json)
 
 
 @app.command(help="Show harness configuration and capabilitie in pyproject.toml")
