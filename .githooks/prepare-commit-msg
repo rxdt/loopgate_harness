@@ -1,4 +1,7 @@
 #!/bin/sh
+# Agent containment on the proposed commit message. Runs even under --no-verify.
+# Bypassing this hook is forbidden by AGENTS.md.
 set -eu
 
-.venv/bin/python -c 'import sys; from harness.gate import prepare_commit_msg; raise SystemExit(prepare_commit_msg(sys.argv))' "$@"
+. "$(dirname "$0")/_resolve"
+exec "$HARNESS" prepare-commit-msg "$@"

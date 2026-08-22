@@ -8,18 +8,14 @@ live here now lives in the `ralph` CLI and is tested in test_cli.py / test_integ
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
-import pytest
+from harness.tests.conftest import REPO_ROOT
 
-# ralph.sh is the POSIX loop runner; Windows uses ralph.ps1 (see test_ralph_ps1.py).
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX ralph.sh; Windows uses ralph.ps1")
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 RALPH = REPO_ROOT / "harness" / "ralph.sh"
 
 
@@ -83,7 +79,8 @@ def test_loop_passes_prompt_and_completes(tmp_path: Path) -> None:
     assert (tmp_path / "received-prompt.txt").read_text(encoding="utf-8") == (
         "do the most important thing\n\nRALPH_ITERATION=1/1\n"
     )
-    assert "completed 1 iteration(s)" in result.stderr
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert (events[0]["iteration"], events[-1]["completed"]) == (1, 1)
 
 
 def test_default_iterations_are_two_when_omitted(tmp_path: Path) -> None:
@@ -92,9 +89,9 @@ def test_default_iterations_are_two_when_omitted(tmp_path: Path) -> None:
     write_executable(worker, "#!/bin/sh\nexit 0\n")
     result = run_ralph(tmp_path, worker, [])
     assert result.returncode == 0
-    assert "iteration 1/2" in result.stderr
-    assert "iteration 2/2" in result.stderr
-    assert "completed 2 iteration(s)" in result.stderr
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert [event.get("iteration") for event in events] == [1, 2, None]
+    assert events[-1]["completed"] == 2
     # The fake timeout recorded its duration arg, so we can prove the 20-min default without waiting.
     assert (tmp_path / "timeout-secs").read_text(encoding="utf-8") == "1200\n1200\n"
 
@@ -105,9 +102,9 @@ def test_nonzero_worker_exit_propagates_and_stops(tmp_path: Path) -> None:
     write_executable(worker, "#!/bin/sh\nexit 7\n")
     result = run_ralph(tmp_path, worker, ["2", "1"])
     assert result.returncode == 7
-    assert "iteration 1/2" in result.stderr
-    assert "iteration 2/2" not in result.stderr
-    assert "completed" not in result.stderr
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert [event["iteration"] for event in events] == [1]
+    assert all("completed" not in event for event in events)
 
 
 def test_timeout_propagates_and_stops(tmp_path: Path) -> None:

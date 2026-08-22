@@ -5,7 +5,6 @@ __pycache__/
 .ruff_cache/
 .hypothesis/
 .coverage
-dist/
 .DS_Store
 .claude
 .codex
@@ -13,8 +12,6 @@ dist/
 docs/launch.md
 test-results/
 **/node_modules/
-.python-version
-uv.lock
 
 .env
 .env.*
@@ -28,3 +25,9 @@ scratchpad/*
 !scratchpad/runs/
 scratchpad/runs/*
 !scratchpad/runs/.gitkeep
+
+# mutmut's mutated copies of the source. Ignoring them is also what keeps ruff and semgrep out.
+mutants/
+
+# kept at the last line for easy deletion (real projects need lockfile)
+uv.lock
