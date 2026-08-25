@@ -17,7 +17,6 @@ from pathlib import Path
 from harness.tests.conftest import REPO_ROOT
 
 RALPH = REPO_ROOT / "harness" / "ralph.sh"
-SYSTEM_TIMEOUT = shutil.which("gtimeout") or shutil.which("timeout")
 
 
 def write_executable(path: Path, text: str) -> None:
@@ -26,17 +25,31 @@ def write_executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
+def write_passthrough_timeout(tmp_path: Path) -> Path:
+    """Create a hermetic timeout stand-in that runs the command after its duration argument.
+
+    Args:
+        tmp_path: Directory where the executable is created.
+
+    Returns:
+        The executable timeout path.
+    """
+    timeout = tmp_path / "timeout"
+    write_executable(timeout, '#!/bin/sh\nshift\nexec "$@"\n')
+    return timeout
+
+
 def run_ralph(
     tmp_path: Path,
     worker: Path,
     ralph_args: list[str] | None = None,
     timeout_executable: str | Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run Ralph with the selected timeout executable, defaulting to the platform tool."""
-    timeout = str(timeout_executable) if timeout_executable is not None else SYSTEM_TIMEOUT
-    assert timeout is not None
+    """Run Ralph with the selected timeout executable, defaulting to a hermetic test stand-in."""
+    timeout = Path(timeout_executable) if timeout_executable is not None else None
+    timeout = timeout or write_passthrough_timeout(tmp_path)
     env = os.environ.copy()
-    env["TIMEOUT"] = timeout
+    env["TIMEOUT"] = str(timeout)
     env["RALPH_PROMPT"] = "do the most important thing"  # harness passes the prompt string (hermetic)
     command = [str(RALPH), *(ralph_args or []), str(worker)]
     return subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, check=False, env=env)
@@ -109,8 +122,7 @@ def test_worker_args_pass_through_without_substitution(tmp_path: Path) -> None:
     write_executable(worker, '#!/bin/sh\nprintf "%s\\n" "$@" > args.txt\ncat > stdin.txt\n')
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
-    assert SYSTEM_TIMEOUT is not None
-    env["TIMEOUT"] = SYSTEM_TIMEOUT
+    env["TIMEOUT"] = str(write_passthrough_timeout(tmp_path))
     env["RALPH_PROMPT"] = "do the most important thing"
     result = subprocess.run(
         [str(RALPH), "1", "1", str(worker), "-i", "{{PROMPT}}"],
@@ -152,8 +164,7 @@ def test_worker_keeps_its_own_args(tmp_path: Path) -> None:
     write_executable(worker, '#!/bin/sh\nprintf "%s\\n" "$@" > args.txt\n')
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
-    assert SYSTEM_TIMEOUT is not None
-    env["TIMEOUT"] = SYSTEM_TIMEOUT
+    env["TIMEOUT"] = str(write_passthrough_timeout(tmp_path))
     env["RALPH_PROMPT"] = "p"
     subprocess.run(
         [str(RALPH), "1", "1", str(worker), "--flag", "a b"],
