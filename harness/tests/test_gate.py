@@ -21,7 +21,7 @@ from harness.gate import Gate, gates
 from harness.tests.conftest import REPO_ROOT, fake_popen
 from mutation import check_mutmut
 
-WARNING_THRESHOLD = round(gates().error_diff_lines * 0.75)
+WARNING_THRESHOLD = round(gates().settings["error_diff_lines"] * 0.75)
 
 
 def stage(repo: Path, name: str, content: str) -> None:
@@ -158,10 +158,12 @@ def test_pre_commit_hook_dispatches_preflight_and_controls_commit(
         pytest.param((WARNING_THRESHOLD, WARNING_THRESHOLD, True, None), id="at-warning-threshold"),
         pytest.param((WARNING_THRESHOLD + 1, WARNING_THRESHOLD + 1, True, "WARNED"), id="warn"),
         pytest.param(
-            (gates().error_diff_lines, gates().error_diff_lines, True, "WARNED"), id="at-error-threshold"
+            (gates().settings["error_diff_lines"], gates().settings["error_diff_lines"], True, "WARNED"),
+            id="at-error-threshold",
         ),
         pytest.param(
-            (gates().error_diff_lines + 1, WARNING_THRESHOLD, True, None), id="unstaged-lines-ignored"
+            (gates().settings["error_diff_lines"] + 1, WARNING_THRESHOLD, True, None),
+            id="unstaged-lines-ignored",
         ),
     ],
 )
@@ -487,19 +489,18 @@ def test_gate_runs_exactly_what_pyproject_configures(
 ) -> None:
     """A root owns its complete configuration, Git target, command dispatch, and containment results."""
     monkeypatch.setenv("RALPH_LOOP", "1")
-    raw_toml = tomllib.loads((REPO_ROOT / "pyproject.toml").read_bytes().decode())["tool"]["harness"]
+    raw_harness_toml = tomllib.loads((REPO_ROOT / "pyproject.toml").read_bytes().decode())["tool"]["harness"]
     configured = Gate(REPO_ROOT)
     assert vars(configured) == {
         "repo_root": REPO_ROOT,
-        "forbidden": raw_toml["FORBIDDEN"],
-        "languages": raw_toml["languages"],
-        "agents": raw_toml["agents"],
-        "commit_checks": raw_toml["preflight"],
-        "gate_checks": raw_toml["gate"] | raw_toml["preflight"],
-        "forbidden_files": tuple(raw_toml["FORBIDDEN"]["FILES"]),
-        "forbidden_dirs": tuple(raw_toml["FORBIDDEN"]["DIRS"]),
-        "forbidden_patterns": tuple(raw_toml["FORBIDDEN"]["PATTERNS"]),
-        "error_diff_lines": raw_toml["error_diff_lines"],
+        "settings": raw_harness_toml["settings"],
+        "forbidden": raw_harness_toml["FORBIDDEN"],
+        "agents": raw_harness_toml["agents"],
+        "commit_checks": raw_harness_toml["preflight"],
+        "gate_checks": raw_harness_toml["gate"] | raw_harness_toml["preflight"],
+        "forbidden_files": tuple(raw_harness_toml["FORBIDDEN"]["FILES"]),
+        "forbidden_dirs": tuple(raw_harness_toml["FORBIDDEN"]["DIRS"]),
+        "forbidden_patterns": tuple(raw_harness_toml["FORBIDDEN"]["PATTERNS"]),
     }
     assert vars(gates()) == {**vars(configured), "repo_root": git_repo}
     (git_repo / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
@@ -507,6 +508,7 @@ def test_gate_runs_exactly_what_pyproject_configures(
         "tool"
     ]["harness"]
     assert Gate(git_repo).gate_checks == fallback["preflight"] | fallback["gate"]
+    assert Gate(git_repo).settings == fallback["settings"]
     expected_repo_root = Path(
         subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=REPO_ROOT, text=True).strip()
     )
@@ -627,6 +629,18 @@ def test_gate_runs_exactly_what_pyproject_configures(
     assert "Run this inside a git repository" in capfd.readouterr().out
     gates.cache_clear()
 
+    monkeypatch.chdir(git_repo)
+    gates.cache_clear()
+    gate.run_git(["reset", "-q"], git_repo)
+    monkeypatch.setitem(gates().settings, "behavior", "warn")
+    live = gates().run_checks({
+        "ruff lint": [sys.executable, "-c", "print('hello from the check')"],
+        "pyright types": [sys.executable, "-c", "raise SystemExit(7)"],
+        "ruff format": [sys.executable, "-c", "raise SystemExit(1)"],
+    })
+    assert live == {"pass": ["ruff lint", "mutmut"], "fail": [], "warn": ["pyright types", "ruff format"]}
+    gates.cache_clear()
+
 
 @pytest.mark.parametrize(
     ("score", "loop", "bucket"),
@@ -689,8 +703,8 @@ def test_diff_size_counts_only_relevant_changed_lines(
     [
         pytest.param(WARNING_THRESHOLD, "quiet", id="at-warn"),
         pytest.param(WARNING_THRESHOLD + 1, "advised", id="over-warn"),
-        pytest.param(gates().error_diff_lines, "advised", id="at-cap"),
-        pytest.param(gates().error_diff_lines + 1, "blocked", id="over-cap"),
+        pytest.param(gates().settings["error_diff_lines"], "advised", id="at-cap"),
+        pytest.param(gates().settings["error_diff_lines"] + 1, "blocked", id="over-cap"),
     ],
 )
 def test_diff_size_warns_then_blocks_as_the_change_grows(
@@ -710,7 +724,7 @@ def test_diff_size_warns_then_blocks_as_the_change_grows(
 
     message = (
         f"{lines} lines of code modified (insertions + deletions in staged files). "
-        f"Agents get WARN at 75% {WARNING_THRESHOLD}, ERROR at {gates().error_diff_lines}."
+        f"Agents get WARN at 75% {WARNING_THRESHOLD}, ERROR at {gates().settings['error_diff_lines']}."
     )
     advisory = message + (
         "\nRefactor bloat, reduce mis-direction, re-use fixtures, cut duplication, slim down code. "
@@ -751,7 +765,7 @@ def test_diff_size_ignores_changes_with_nothing_staged(
     stage(git_repo, filepaths[0], "value = 1\n")
     gate.run_git(["commit", "-q", "-m", "seed the file"], git_repo)
     (git_repo / "src" / filepaths[1]).write_text(
-        "value = 1\n" * (gates().error_diff_lines + 2), encoding="utf-8"
+        "value = 1\n" * (gates().settings["error_diff_lines"] + 2), encoding="utf-8"
     )
 
     monkeypatch.setattr(gates(), "commit_checks", {})
@@ -930,12 +944,12 @@ def test_preferences_only_ever_read_python(
     assert gates().run_preflight() == {"pass": ["mutmut"], "fail": [], "warn": []}
     recorder.assert_not_called()
 
-    monkeypatch.setattr(gates(), "languages", ("rb",))
+    monkeypatch.setitem(gates().settings, "languages", ("rb",))
     stage(git_repo, "app.rb", "def foo; end\n")
     assert gates().run_preflight() == {"pass": ["mutmut"], "fail": [], "warn": []}
     recorder.assert_not_called()
 
-    monkeypatch.setattr(gates(), "languages", ("py",))
+    monkeypatch.setitem(gates().settings, "languages", ("py",))
     stage(git_repo, "src/gone.py", "value = 1\n")
     gate.run_git(["commit", "-q", "-m", "add gone"], git_repo)
     gate.run_git(["rm", "-q", "src/gone.py"], git_repo)

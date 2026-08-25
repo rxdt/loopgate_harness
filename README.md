@@ -73,7 +73,8 @@ Each run starts fresh, has clear limits, saves its logs, protects key files, and
 
 ---
 
-## Default Tools
+## Default Tool Dependencies
+_Edit at will_
 - [ruff](https://docs.astral.sh/ruff/) lints and formats Python code, fast
 - [pylint](https://pypi.org/project/pylint/) catches code errors and style problems
 - [pydoclint](https://pypi.org/project/pydoclint/0.9.1/) checks docstrings match function signatures
@@ -89,14 +90,20 @@ Each run starts fresh, has clear limits, saves its logs, protects key files, and
 - [preferences.py](preferences/preferences.py) A custom AST-parser to optionally expand. It catches e.g. a [style preference](https://google.github.io/styleguide/pyguide) that tools don't.
 - Forbidden paths set in [[tool.harness]](pyproject.toml)
 - Update `[tool.harness.gate]` or `[tool.harness.gate]` in [pyproject](pyproject.toml) to change what is checked before a commit or push.
+- Failing checks block by default. If a fresh drop-in fails across the board, set [`behavior = "warn"`](pyproject.toml#L87) to report without blocking, then flip back to `"fail"`.
 
-#### The Gate: Tiered Checks
+### The Gate: Tiered Checks
 
-⚡ `harness preflight` _(pre-commit)_ are the fast checks to run often. Lint + check format for everyone, _plus_ **containment** for the agents.
 > [!NOTE]
-> **Self-heals by un-staging forbidden files.**
+> **A pre-commit or gate phase self-heals by un-staging forbidden files.**
 
-✅ `harness gate` _(pre-push)_ = _(pre-commit)_ checks **+** type-checks, security audit, dependency audit, complexity analysis, full test coverage, prompt to run mutmut
+⚡ `harness preflight` _(pre-commit)_
+
+are the fast checks to run often. Lint + check format for everyone, _plus_ **containment** for the agents.
+
+✅ `harness gate` _(pre-push)_  =  _(pre-commit)_ checks **+**
+
+adds type-checks, security audit, dependency audit, AST-scan, complexity analysis, full test coverage, prompt to run mutmut
 
 Only humans can bypass triggered gates and commit, always. Only humans can use flag `--no-verify`.
 
@@ -110,12 +117,12 @@ Note that `semgrep --config auto` needs network for semgrep registry rules.
 
 ## Details
 
-[docs/plan.md](docs/plan.md) is where you define what you want the end product to be. You must be _very_ clear on what the finished product should and should **not** contain. Do **not** let agents guess.
+[plan.md](docs/plan.md) is where you define what you want the end product to be. You must be _VERY_ clear on what the finished product should and should **not** contain. Do **not** let agents guess. Tell agents *exactly* what the finished "product" should be.
 
-`docs/PROMPT.md` tells each agent to pick a `spec` and build. `docs/specs/` say _what_ to build. The agent decides _what next_. You keep `docs/plan.md` current, and specs get rewritten from it (agent is told in `docs/PROMPT.md` to update the specs). Each iteration the agent updates its spec and `PROJECT_STATUS`.
+[`PROMPT`](docs/PROMPT.md) tells each agent to pick a spec.md and build. [`specs/`](docs/specs) say _what_ to build. The agent decides _what next_. You keep [`plan.md`](docs/plan.md) current, and specs get rewritten from it. The agent is told in `docs/PROMPT.md` to update the specs. Each iteration the agent updates its spec and [`PROJECT_STATUS`](docs/PROJECT_STATUS.md).
 
-> [!IMPORTANT]
-> Default configuration is in [`pyproject.toml`](pyproject.toml). Update tool settings, add agent commands, change checks, or leave it as is.
+### In summary, your job, the bare minimum:
+<mark>write something into the plan</mark>
 
 ## Start a project
 ## Start a project
@@ -134,6 +141,9 @@ Note that `semgrep --config auto` needs network for semgrep registry rules.
 9.  Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
 10. Configurations for Ruff linting, type-checking Pyright, Complexipy, Pytest coverage, etcetera are set in [`pyproject.toml`](pyproject.toml).
 11. Your coding quirks go in [`preferences/preferences.py`](preferences/preferences.py). Delete functions that don't serve you. Add your own.
+
+> [!IMPORTANT]
+> Default configuration is in [`pyproject.toml`](pyproject.toml). Update tool settings, add agent commands, change checks, or leave it as is.
 
 ### Works with `uv`, `poetry`, or `pip`
 
@@ -202,15 +212,11 @@ harness run codex 2 20
 harness run agy 3 10
 harness run copilot 2 20
 ```
-#### To run LoopGate with Claude (or Codex) the worker must be installed and authenticated separately.
+#### To run LoopGate with any agent, the worker must be installed and authenticated separately.
 
 ```sh
 harness run claude 2 20
 ```
-
-### Run logs
-
-Every run is saved as a log file in `scratchpad/runs/`. `harness status` shows how many logs you have and the path to the newest one. Open that file to read what the agent thought and did. _(Metrics and audited logs coming soon.)_
 
 ### Add a mutation score badge
 
@@ -240,14 +246,20 @@ harness/        the gate, loop runner, CLI                           (🤖 forbi
   cli.py          command-line entry point
   js-scaffold   javascript example to build upon
 preferences/    user-defined preferences not covered by tools        (🤖 forbidden directory)
+mutation/       get your mutation score and learn how to run mutmut  (🤖 forbidden directory)
+  check_mutant.py
 tests/
   preferences/  (🤖 tests/preferences is forbidden directory)
 .githooks/      pre-commit / pre-push gate hooks                     (🤖 forbidden directory)
-pyproject.toml  project + tooling config                             (🤖 forbidden)
+pyproject.toml  project + tooling config                             (🤖 forbidden file)
 docs/           PROMPT, specs/, your plan                            (agent and human maintained)
 scratchpad/     scratch dir agents can use for temp files            (For the 🤖 to play)
 src/            your product/source code (add to coverage source)
 ```
+
+### Run logs
+
+Every run is saved as a log file in `scratchpad/runs/`. `harness status` shows how many logs you have and the path to the newest one. Open that file to read what the agent thought and did. _(Metrics and audited logs coming soon.)_
 
 [`pyproject.toml`](pyproject.toml) is the single source of harness configuration. Humans own it and [`preferences/`](preferences/); both are agent-protected.
 
@@ -306,9 +318,17 @@ LoopGate does not install or log in agent CLIs. Install and authenticate the wor
 
 A **gate** is a workflow checkpoint that evaluates code and decides whether it is allowed to land in your commits. A **sandbox** is an isolated OS-level environment designed to prevent code from modifying your underlying machine. LoopGate uses gates to control your git history, but it does _not_ provide a secure OS sandbox.
 
+- **What if I don't want to use those agents?**
+
+Remove or add commands to enable using different agents. Let's say you're going _exclusive_ with Mistral and will _only_ use Mistral 3. Set this and only this in [`[tool.harness.agents]`](pyproject.toml#L91-L123)
+```
+vibe = ["vibe", "--auto-approve", "--output", "streaming"]
+```
+Then run it with `harness run vibe <loop-count> <max-minutes-per-loop`
+
 - **What if I don't want to build an app in Python?**
 
-You don’t have to. The loop runner, Ralph, and the CLI take a prompt, launch agents pointed at markdown files. LoopGate is language-agnostic at the agent-loop level, but the template is configured to be Python-specific at [pyproject.toml](pyproject.toml). Add your language and commands for your checks to run there.
+You don’t have to. The loop runner, Ralph, and the CLI take a prompt, launch agents pointed at markdown files. LoopGate is language-agnostic at the agent-loop level, only this template repo is configured to be Python-specific at [pyproject.toml](pyproject.toml). You can add _your_ language and your _tool commands_ for your checks to run there.
 
 - **Javascript?**
 
@@ -321,7 +341,20 @@ npm run --prefix harness/js-scaffold preflight
 
 - **Why not just a shell loop?**
 
-A shell loop only reruns an agent. LoopGate ensures fresh context, durable repo state, time and iteration limits, protected paths, and quality gates that stop bad changes _before_ they land.
+A shell loop only reruns an agent. LoopGate ensures fresh context, durable repo state, time and iteration limits, protected paths, and quality gates that stop bad changes _before_ they land. Also, we like to keep our shell loops dumb round these parts. And Let the configs do the lifting.
+
+#### LoopGate Glossary
+
+Short definitions of common LoopGate terms.
+
+- harness: the LoopGate tool that runs agents, manages loops, and checks changes.
+- loop: one cycle of work where the worker reads instructions, works on a spec, makes changes, runs checks, and records progress.
+- worker: the coding agent that does the work, such as Claude, Codex, or Copilot.
+- gate: the checks that decide whether changes can be accepted. LoopGate runs these checks locally and in CI. aka pre-push, what happens right before a diff is pushed to origin.
+- preflight: the quick checks that run before the full gate to catch common problems early. aka 'pre-commit', what happens right before files are git committed.
+- prompt: the instructions in `docs/PROMPT.md` that tell the worker what to do in each loop.
+- spec: a file in `docs/specs/` that describes what needs to be built.
+- Ralph: LoopGate's loop runner. It starts the worker, gives it the prompt, and runs the workflow for each iteration.
 
 </details>
 

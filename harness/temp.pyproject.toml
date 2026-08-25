@@ -22,6 +22,8 @@ dev = [
 # Humans own this file (it is agent-forbidden below).
 # ==============================================================================
 [tool.harness]
+[tool.harness.settings]
+behavior = "fail"  # "fail" or "warn": change to "warn" if your project has too many blocking failures to start
 languages = ["py"]
 error_diff_lines = 500  # 400 ~90th percentile of pull requests, 200 LOC generally ok
 
@@ -96,12 +98,12 @@ test = [
 ]
 
 [tool.harness.FORBIDDEN]
-DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/"]
+DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/", "mutation", "tests/mutation/"]
 FILES = [
     "agents.md",
     "docs/prompt.md",
     "docs/plan.md",  # delete/comment line if you want agents to manage the core plan
-    # tooling/config files that would weaken checks in this file
+    # tooling/config files that would weaken checks:
     "tox.ini",
     "setup.cfg",
     "pytest.ini",

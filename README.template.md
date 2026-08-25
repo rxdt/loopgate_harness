@@ -98,6 +98,7 @@ harness run copilot 2 20
 Every run is saved as a log file in `scratchpad/runs/`. `harness status` shows how many logs you have and the path to the newest one — open that file to read everything the agent did.
 
 Tool commands are defined in `[tool.harness]` in [pyproject.toml](pyproject.toml). The gate and CI both derive them from there.
+Failing checks block by default. If your project fails across the board at first, set [`behavior = "warn"`](pyproject.toml#L87) to report without blocking, then flip back to `"fail"`.
 
 #### The Gate: Tiered Checks
 

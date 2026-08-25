@@ -84,6 +84,8 @@ include = [
 # Humans own this file (it is agent-forbidden below).
 # ==============================================================================
 [tool.harness]
+[tool.harness.settings]
+behavior = "fail"  # "fail" or "warn": change to "warn" if your project has too many blocking failures to start
 languages = ["py"]
 error_diff_lines = 500  # 400 is ~90th percentile of pull requests, 200 LOC generally ok
 
@@ -160,28 +162,52 @@ test = [
 ]
 
 [tool.harness.FORBIDDEN]
-DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/"]
+DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/", "mutation", "tests/mutation/"]
 FILES = [
     "agents.md",
     "docs/prompt.md",
     "docs/plan.md",  # delete/comment line if you want agents to manage the core plan
-    # tooling/config files that would weaken checks in this file
-    "pytest.ini",
+    # tooling/config files that would weaken checks:
     "tox.ini",
     "setup.cfg",
+    "pytest.ini",
+    ".pytest.ini",
+    "pytest.toml",
+    ".pytest.toml",
     ".coveragerc",
+    ".coveragerc.toml",
     "ruff.toml",
     ".ruff.toml",
-    ".semgrepignore",
-    "pyrightconfig.json",
+    ".flake8",
+    "pylintrc",
     ".pylintrc",
+    "pylintrc.toml",
+    ".pylintrc.toml",
+    "pyrightconfig.json",
+    "mypy.ini",
+    ".mypy.ini",
+    "ty.toml",
+    "pyrefly.toml",
+    ".pyrefly.toml",
+    "complexipy.toml",
+    ".complexipy.toml",
+    "radon.cfg",
+    ".semgrepignore",
+    "semgrep.yml",
+    "semgrep.yaml",
+    ".semgrep.yml",
+    ".semgrep.yaml",
+    "semgrep.config.yml",
+    "semgrep.config.yaml",
+    ".bandit",
+    "sonar-project.properties",
+    ".snyk",
     ".gitmodules",
     ".gitattributes",
     "pyproject.toml",  # agents will claim inability to add dependencies with this forbidden
     "requirements.txt",
     "uv.lock",  # if *.lock remains, agents will leave it uncommitted if file changes
-    "poetry.lock",
-    "mypy.ini"
+    "poetry.lock"
 ]
 PATTERNS = [
     "# noqa",

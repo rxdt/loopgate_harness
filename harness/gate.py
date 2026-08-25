@@ -45,15 +45,16 @@ class Gate:
                 Path(__file__).with_name("temp.pyproject.toml").read_text(encoding="utf-8")
             )
             harness = defaults["tool"]["harness"]
+        self.settings = harness.get(
+            "settings", {"behavior": "fail", "error_diff_lines": 500, "languages": ["py"]}
+        )
         self.forbidden: dict[str, list[str]] = harness.get("FORBIDDEN", {})
-        self.languages: tuple[str, ...] = harness.get("languages", {})
         self.agents: dict[str, list[str]] = harness.get("agents", {})
         self.commit_checks: dict[str, list[str]] = harness.get("preflight", {})
         self.gate_checks: dict[str, list[str]] = harness.get("gate", {}) | self.commit_checks
         self.forbidden_files: tuple[str, ...] = tuple(self.forbidden.get("FILES", []))
         self.forbidden_dirs: tuple[str, ...] = tuple(self.forbidden.get("DIRS", []))
         self.forbidden_patterns: tuple[str, ...] = tuple(self.forbidden.get("PATTERNS", []))
-        self.error_diff_lines: int = harness.get("error_diff_lines")
 
     def run_checks(self, checks: dict[str, list[str]]) -> dict[str, list[str]]:
         """Run each named command, streaming its output live under a phase header.
@@ -80,7 +81,7 @@ class Gate:
             elif "format" in name:
                 results["warn"].append(name)
             else:
-                results["fail"].append(name)
+                results[self.settings["behavior"]].append(name)
         key = "fail" if os.environ.get("RALPH_LOOP") else "warn"
         colorize("AGENT CHECKs", "running non-human agent checks")
         self._run_non_human_checks(results, key)
@@ -173,16 +174,16 @@ class Gate:
             inserted, deleted, path = line.split("\t", 2)
             if not (inserted == "-" or path.lower().endswith(".lock")):  # binary or lockfile
                 total += int(inserted) + int(deleted)
-        warn_at_75: int = round(self.error_diff_lines * 0.75)
+        warn_at_75: int = round(self.settings["error_diff_lines"] * 0.75)
         msg = (
             f"{total} lines of code modified (insertions + deletions in staged files). Agents get WARN at "
-            f"75% {warn_at_75}, ERROR at {self.error_diff_lines}."
+            f"75% {warn_at_75}, ERROR at {self.settings['error_diff_lines']}."
         )
         do_better = (
             "\nRefactor bloat, reduce mis-direction, re-use fixtures, cut duplication, slim down "
             "code. More code does not mean good code."
         )
-        if total > self.error_diff_lines:
+        if total > self.settings["error_diff_lines"]:
             results[key].append(msg + do_better)
         elif total > warn_at_75:
             results["warn"].append(msg + do_better)
@@ -196,7 +197,7 @@ class Gate:
             The preferences violations and filepath found in staged files.
         """
         problems: list[str] = []
-        if "py" in self.languages:
+        if "py" in self.settings["languages"]:
             staged = run_git([
                 "diff",
                 "--cached",

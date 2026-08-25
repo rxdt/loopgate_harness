@@ -1032,11 +1032,11 @@ def test_install_picks_the_package_manager_from_project_signals(
 @pytest.mark.parametrize(
     ("on_path", "answer", "installs_coreutils", "offers_coreutils", "shows_homebrew_hint"),
     [
-        pytest.param(("timeout",), None, False, False, False, id="timeout-present"),
-        pytest.param(("gtimeout",), None, False, False, False, id="gtimeout-present"),
-        pytest.param((), None, False, True, True, id="no-timeout-no-homebrew"),
-        pytest.param(("brew",), True, True, True, False, id="confirmed"),
-        pytest.param(("brew",), False, False, True, False, id="declined"),
+        pytest.param(("timeout", "brew"), None, (False, ""), id="timeout-present"),
+        pytest.param(("gtimeout", "brew"), None, (False, ""), id="gtimeout-present"),
+        pytest.param((), None, (False, "brew.sh"), id="no-timeout-no-homebrew"),
+        pytest.param(("brew",), True, (True, ""), id="confirmed"),
+        pytest.param(("brew",), False, (False, ""), id="declined"),
     ],
 )
 def test_install_offers_coreutils_only_when_no_timeout_tool_exists(
