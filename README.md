@@ -194,17 +194,13 @@ harness status  # shows run log link, the newest json / latest run of N loops, 1
 RALPH_LOOP=1 harness gate  # explicitly run as if you are the agent in the loop
 harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/copilot, defaults: 2 20 True
 
-# AGENT CALLS
+# AGENT CALLS, examples
 harness run claude 10 20
 harness run codex 2 20
 harness run agy 3 10
 harness run copilot 2 20
 ```
-#### To run LoopGate with Claude (or Codex) the worker must be installed and authenticated separately.
-
-```sh
-harness run claude 2 20
-```
+#### To run LoopGate with any agent, the worker must be installed and authenticated separately.
 
 ### Run logs
 
