@@ -93,29 +93,39 @@ def run_worker(command: list[str], log: Path, verbose: bool) -> int:
             return process.wait()
 
 
-def check(name: str, command: Callable[[], dict[str, list[str]]]) -> dict[str, list[str]]:
+def check(name: str, command: Callable[[], dict[str, list[str]]], json_output: bool = False) -> None:
     """Run a named phase (preflight or gate), render its summary, and exit by its verdict.
 
     Args:
         name: Phase label shown in the summary (e.g. "preflight" or "gate").
         command: Callable that runs the phase for a repo. Returns pass/fail buckets.
+        json_output: When True, output results as a JSON structure instead of a Rich table.
 
     Raises:
         typer.Exit: always — code 1 if anything failed, else code 0.
     """
     results = command()
-    table = Table(title="\nHarness Summary\n", title_style="bold grey74", box=None, padding=(0, 5))
-    table.add_column("RESULT")
-    table.add_column("CHECK", style="bold dim white")
-    for passed in results["pass"]:
-        table.add_row("[green]PASSED[/]", passed)
-    for fail in results["fail"]:
-        table.add_row("[bold red]FAILED[/]", fail)
-    for warn in results["warn"]:
-        table.add_row("[yellow]WARNED[/]", warn)
-    console.print(table, justify="center")
-    final = "\n[bold red]rejected by harness[/]" if results["fail"] else f"[green]ok: {name} pass[/]"
-    console.print(final, justify="center")
+
+    if json_output or os.environ.get("RALPH_LOOP"):
+        output = {
+            "phase": name,
+            "ok": len(results["fail"]) == 0,
+            "pass": results["pass"],
+            "fail": results["fail"],
+            "warn": results.get("warn", []),
+        }
+        typer.echo(json.dumps(output))
+    else:
+        table = Table(title="\nHarness Summary\n", title_style="bold grey74", box=None, padding=(0, 5))
+        table.add_column("PASSED", style="bold dim white")
+        table.add_column("FAILED")
+        for passed in results["pass"]:
+            table.add_row(passed, "[green]✔ PASSED[/]")
+        for fail in results["fail"]:
+            table.add_row(fail, "[bold red]✖ FAILED[/]")
+        console.print(table, justify="center")
+        final = "\n[bold red]rejected by harness[/]" if results["fail"] else f"[green]ok: {name} pass[/]"
+        console.print(final, justify="center")
 
     raise typer.Exit(code=1 if results["fail"] else 0)
 
@@ -127,24 +137,11 @@ def preflight() -> None:
 
 
 @app.command(help="Pre-push checks match the CI gate exactly (lint, types, security, etc.)")
-def gate() -> None:
-    """Dumb pass-through to the full pre-push gate; exit nonzero if anything fails."""
-    check("gate", gates.run_gate)
-
-
-@app.command(hidden=True, help="Git prepare-commit-msg hook. Called by .githooks, not by people.")
-def prepare_commit_msg(
-    args: Annotated[list[str] | None, typer.Argument(help="What git passes the hook")] = None,
+def gate(
+    json: Annotated[bool, typer.Option("--json", help="Output results as JSON")] = False,
 ) -> None:
-    """Dumb pass-through to prepare_commit_msg hook logic. Hidden git-only usage, not a human command.
-
-    Args:
-        args: The hook's own arguments: message file, then optionally the source and its commit.
-
-    Raises:
-        typer.Exit: the hook's status; git aborts the commit on 1.
-    """
-    raise typer.Exit(code=gates.prepare_commit_msg(["prepare-commit-msg", *(args or [])]))
+    """Dumb pass-through to the full pre-push gate; exit nonzero if anything fails."""
+    check("gate", gate_module.run_gate, json_output=json)
 
 
 @app.command(help="Show harness configuration and capabilitie in pyproject.toml")
