@@ -20,6 +20,7 @@
 [![mutation](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frxdt%2Floopgate_harness%2Fmain%2Fmutation-score.json)](https://github.com/rxdt/loopgate_harness/actions/workflows/mutation.yml)
 
 
+
 </div>
 
 ---
@@ -116,6 +117,7 @@ Note that `semgrep --config auto` needs network for semgrep registry rules.
 > [!IMPORTANT]
 > Default configuration is in [`pyproject.toml`](pyproject.toml). Update tool settings, add agent commands, change checks, or leave it as is.
 
+## Start a project
 ## Start a project
 
 1. `gh repo create <your-github-username>/<your-new-app-name> --template rxdt/loopgate_harness --private --clone` **or**
@@ -269,7 +271,7 @@ If an agent edits a forbidden file, the file will be unstaged (not allowed to co
 ```yaml
 - run: uv sync && uv run harness gate
 ```
-- Add or remove coding preferences [preferences.py](preferences/preferences.py) that only agents in loops **must** respect. Current preferences:
+- Add or remove coding preferences [preferences.py](preferences/preferences.py) that only agents **must** respect. Current "preferences":
 
 ```py
 function_argument_assignment_has_star  # agents use non-specific `def fun(*)`
@@ -375,6 +377,7 @@ A shell loop only reruns an agent. LoopGate ensures fresh context, durable repo 
 <details>
   <summary>
 
+## Read before Infinity Loops </summary>
 ## Read before Infinity Loops </summary>
 
 1. **This harness does not sandbox agents.** It tries to harness bad code in loops via gates. Sandboxing agents will, e.g. prevent them from maintaining git, running Playwright, being seen as trustworthy by semgrep leading to cyclical failures, etc.

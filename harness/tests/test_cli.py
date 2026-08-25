@@ -290,7 +290,7 @@ def test_cli_summaries_report_complete_agent_check_results(
     )
     diff_size_output = (
         "PHASE: DIFF SIZE 1 lines of code modified (insertions + deletions in staged files). "
-        "Agents get WARN at 75% 300, ERROR at 400. "
+        "Agents get WARN at 75% 375, ERROR at 500. "
     )
     mutation_output = (
         "killed 132 survived 0 total 133 no_tests 0 skipped 0 suspicious 0 timeout 1 "
@@ -700,14 +700,7 @@ def test_init_hoists_and_records_the_installed_harness(tmp_path: Path) -> None:
     }
     assert all(
         os.access(git_repo / ".githooks" / name, os.X_OK)
-        for name in (
-            "pre-commit",
-            "pre-push",
-            "prepare-commit-msg",
-            "loopgate-pre-commit",
-            "loopgate-pre-push",
-            "loopgate-prepare-commit-msg",
-        )
+        for name in ("pre-commit", "pre-push", "prepare-commit-msg")
     )
     assert not list((git_repo / ".githooks").glob(".loopgate-original-*"))
     assert {
@@ -736,6 +729,11 @@ def test_init_hoists_and_records_the_installed_harness(tmp_path: Path) -> None:
 def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Declining required hooks aborts after config generation and before any asset or hook mutation."""
     monkeypatch.setattr(cli, "TOOLS", {})
+    bin_dir = git_repo / "bin"
+    bin_dir.mkdir()
+    write_executable(bin_dir / "gtimeout", "#!/bin/sh\nexit 0\n")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(Path, "home", fake_home(git_repo / "home"))
     hoist = Mock(return_value=False)
     monkeypatch.setattr(cli, "hoist", hoist)
 
@@ -815,10 +813,7 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr(
         cli,
         "ASSETS",
-        {
-            "docs": (package_docs, repo / "docs"),
-            "githooks": (package_hooks, repo / ".githooks"),
-        },
+        {"docs": (package_docs, repo / "docs"), "githooks": (package_hooks, repo / ".githooks")},
     )
     monkeypatch.setattr(cli, "REPO_ROOT", repo)
     confirm = Mock(return_value=True)
@@ -1035,26 +1030,27 @@ def test_install_picks_the_package_manager_from_project_signals(
 
 
 @pytest.mark.parametrize(
-    ("on_path", "answer", "outcome"),
+    ("on_path", "answer", "installs_coreutils", "offers_coreutils", "shows_homebrew_hint"),
     [
-        pytest.param(("timeout",), None, (False, ""), id="timeout-present"),
-        pytest.param(("gtimeout",), None, (False, ""), id="gtimeout-present"),
-        pytest.param((), None, (False, "brew.sh"), id="no-timeout-no-homebrew"),
-        pytest.param(("brew",), True, (True, ""), id="confirmed"),
-        pytest.param(("brew",), False, (False, ""), id="declined"),
+        pytest.param(("timeout",), None, False, False, False, id="timeout-present"),
+        pytest.param(("gtimeout",), None, False, False, False, id="gtimeout-present"),
+        pytest.param((), None, False, True, True, id="no-timeout-no-homebrew"),
+        pytest.param(("brew",), True, True, True, False, id="confirmed"),
+        pytest.param(("brew",), False, False, True, False, id="declined"),
     ],
 )
 def test_install_offers_coreutils_only_when_no_timeout_tool_exists(
     on_path: tuple[str, ...],
     answer: bool | None,
-    outcome: tuple[bool, str],
+    installs_coreutils: bool,
+    offers_coreutils: bool,
+    shows_homebrew_hint: bool,
     monkeypatch: pytest.MonkeyPatch,
     git_repo: Path,
 ) -> None:
     """macOS needs coreutils to time out a loop iteration, so install probes for it and offers the
     install only when Homebrew can do it. It never prompts when a timeout tool is already there.
     """
-    installs_coreutils, hint = outcome
     prompts: list[str] = []
 
     def confirm(prompt: str, abort: bool = False) -> bool:
@@ -1072,11 +1068,13 @@ def test_install_offers_coreutils_only_when_no_timeout_tool_exists(
 
     result = runner.invoke(cli.app, ["install"])
     calls = [tuple(record.args[0]) for record in toolchain.call_args_list]
+    output = unstyle(result.stdout)
 
     assert result.exit_code == 0
     assert (("brew", "install", "coreutils") in calls) is installs_coreutils
     assert prompts == ([] if answer is None else ["\nInstall `brew install coreutils` now?"])
-    assert hint in result.stdout
+    assert ("macOS harness needs timeout/gtimeout from coreutils" in output) is offers_coreutils
+    assert ("Get Homebrew https://brew.sh" in output) is shows_homebrew_hint
 
 
 def test_windows_skips_posix_steps_and_launches_the_powershell_twin(

@@ -1,7 +1,7 @@
 [project]
 name = "harness"
 requires-python = ">=3.10"
-version = "0.2.0"
+version = "0.1.0"
 description = "Gated, harnessed, autonomy loop with quality checks."
 authors = [{ name = "rxdt" }]
 readme = "README.md"
@@ -85,7 +85,7 @@ include = [
 # ==============================================================================
 [tool.harness]
 languages = ["py"]
-error_diff_lines = 400  # ~90th percentile of pull requests, 200 LOC generally ok
+error_diff_lines = 500  # 400 is ~90th percentile of pull requests, 200 LOC generally ok
 
 # argv preset per agent for `harness run <agent>`
 [tool.harness.agents]

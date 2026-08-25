@@ -253,7 +253,7 @@ def check_for_timeout_and_prompt() -> str | None:
     """
     if IS_WINDOWS:
         return None
-    if not which("gtimeout") or not which("timeout"):
+    if not (which("gtimeout") or which("timeout")):
         rprint("\n[yellow]macOS harness needs timeout/gtimeout from coreutils to run loops[/yellow]")
         if not which("brew"):
             rprint("Get Homebrew https://brew.sh then run `brew install coreutils` or `sudo port install`")

@@ -611,7 +611,7 @@ def test_gate_runs_exactly_what_pyproject_configures(
     diff_size_output = (
         "\nPHASE: DIFF SIZE"
         "\n28 lines of code modified (insertions + deletions in staged files). "
-        "Agents get WARN at 75% 300, ERROR at 400.\n"
+        "Agents get WARN at 75% 375, ERROR at 500.\n"
     )
     assert printed.startswith(phase_output)
     assert diff_size_output in printed

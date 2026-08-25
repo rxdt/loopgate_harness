@@ -72,7 +72,7 @@ def test_two_iterations_pass_prompt_marker_and_environment(tmp_path: Path) -> No
 
 
 def test_explicit_one_iteration_completes(tmp_path: Path) -> None:
-    """An explicit one-iteration loop runs the worker once."""
+    """Direct completion receipts report the exact number of workers run."""
     worker = write_worker(tmp_path, "import sys\nsys.stdin.read()\n")
 
     result = run_ralph(tmp_path, ["1", "1", sys.executable, str(worker)])
@@ -81,6 +81,20 @@ def test_explicit_one_iteration_completes(tmp_path: Path) -> None:
     events = [json.loads(line) for line in result.stdout.splitlines()]
     assert (events[0]["iteration"], events[-1]["completed"]) == (1, 1)
     assert all(event["max_minutes"] == 1 for event in events)
+
+    no_iterations = run_ralph(tmp_path, ["0", "1", sys.executable, str(worker)])
+    no_iteration_events = [json.loads(line) for line in no_iterations.stdout.splitlines()]
+    assert no_iterations.returncode == 0
+    assert len(no_iteration_events) == 1
+    assert (
+        no_iteration_events[0]["type"],
+        no_iteration_events[0]["completed"],
+        no_iteration_events[0]["max_minutes"],
+    ) == (
+        "ralph",
+        0,
+        1,
+    )
 
 
 def test_worker_arguments_are_preserved_exactly(tmp_path: Path) -> None:
@@ -102,10 +116,14 @@ def test_worker_arguments_are_preserved_exactly(tmp_path: Path) -> None:
 
 
 def test_command_without_additional_arguments_runs(tmp_path: Path) -> None:
-    """A worker executable with no argv tail does not trigger an invalid PowerShell array slice."""
+    """The worker is required, while a worker without its own arguments runs unchanged."""
     result = run_ralph(tmp_path, ["1", "1", "sort.exe"])
 
     assert result.returncode == 0
+
+    missing_worker = run_ralph(tmp_path, ["1", "1"])
+    assert missing_worker.returncode == 2
+    assert "<agent command...>" in missing_worker.stderr
 
 
 def test_nonzero_worker_exit_propagates_and_stops(tmp_path: Path) -> None:
