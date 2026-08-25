@@ -833,7 +833,7 @@ def test_preflight_flags_preferences_break_under_loop(
     } == {
         "preferences": [call("src/mod.py", source)],
         "result": {
-            "pass": ["pylint", "format", "complexity", "mutmut"],
+            "pass": ["format", "complexity", "pylint", "mutmut"],
             "fail": [
                 "lint",
                 (

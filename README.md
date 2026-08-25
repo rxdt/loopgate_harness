@@ -206,17 +206,13 @@ harness status  # shows run log link, the newest json / latest run of N loops, 1
 RALPH_LOOP=1 harness gate  # explicitly run as if you are the agent in the loop
 harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/copilot, defaults: 2 20 True
 
-# AGENT CALLS
+# AGENT CALLS, examples
 harness run claude 10 20
 harness run codex 2 20
 harness run agy 3 10
 harness run copilot 2 20
 ```
 #### To run LoopGate with any agent, the worker must be installed and authenticated separately.
-
-```sh
-harness run claude 2 20
-```
 
 ### Add a mutation score badge
 
@@ -352,6 +348,19 @@ Short definitions of common LoopGate terms.
 - worker: the coding agent that does the work, such as Claude, Codex, or Copilot.
 - gate: the checks that decide whether changes can be accepted. LoopGate runs these checks locally and in CI. aka pre-push, what happens right before a diff is pushed to origin.
 - preflight: the quick checks that run before the full gate to catch common problems early. aka 'pre-commit', what happens right before files are git committed.
+- prompt: the instructions in `docs/PROMPT.md` that tell the worker what to do in each loop.
+- spec: a file in `docs/specs/` that describes what needs to be built.
+- Ralph: LoopGate's loop runner. It starts the worker, gives it the prompt, and runs the workflow for each iteration.
+
+#### LoopGate Glossary
+
+Short definitions of common LoopGate terms.
+
+- harness: the LoopGate tool that runs agents, manages loops, and checks changes.
+- loop: one cycle of work where the worker reads instructions, works on a spec, makes changes, runs checks, and records progress.
+- worker: the coding agent that does the work, such as Claude, Codex, or Copilot.
+- gate: the checks that decide whether changes can be accepted. LoopGate runs these checks locally and in CI.
+- preflight: the quick checks that run before the full gate to catch common problems early.
 - prompt: the instructions in `docs/PROMPT.md` that tell the worker what to do in each loop.
 - spec: a file in `docs/specs/` that describes what needs to be built.
 - Ralph: LoopGate's loop runner. It starts the worker, gives it the prompt, and runs the workflow for each iteration.

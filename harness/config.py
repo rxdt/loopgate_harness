@@ -12,6 +12,15 @@ site_packages = Path(str(distribution("harness").locate_file("")))
 package_root = site_packages / "harness"
 repo_root = gates().repo_root
 
+CATEGORIES: dict[str, dict[str, list[str]]] = {
+    "audit": {},
+    "complexity": {},
+    "format": {},
+    "lint": {},
+    "security": {},
+    "test": {},
+    "types": {},
+}
 
 PHASES = (
     ("agents", gates().agents),

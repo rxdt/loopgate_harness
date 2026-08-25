@@ -33,8 +33,7 @@ dependencies = [
     "ruff",
     "semgrep",
     "tomlkit",
-    "ty",
-    "typer"
+    "typer",
 ]
 [project.scripts]
 harness = "harness.cli:main" # creates the executable
@@ -140,12 +139,12 @@ copilot = [
 
 [tool.harness.preflight]
 lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
-pylint = ["pylint", "."]
 format = ["ruff", "format", "--no-cache", "--check"]
 complexity = ["complexipy", ".", "--suggest-refactors"]
+pylint = ["pylint", "."]
 
 [tool.harness.gate]
-audit = ["pip-audit", "--strict"]
+audit = ["pip-audit", ".", "--strict"]
 security = [
     "semgrep", "scan",
     "--error",  # exit nonzero on findings so the gate blocks the commit, not just reports
@@ -155,11 +154,7 @@ security = [
     ".",
 ]
 types = ["pyright", "--outputjson"]
-test = [
-    "pytest", "-p", "no:cacheprovider", "-n", "auto",
-    "--cov", "--cov-report=term-missing", "--cov-fail-under=100",
-    "--hypothesis-show-statistics", "--durations=5"
-]
+test = ["pytest", "-p", "no:cacheprovider", "-n", "auto", "--cov", "--cov-report=term-missing", "--cov-fail-under=100", "--hypothesis-show-statistics", "--durations=5"]
 
 [tool.harness.FORBIDDEN]
 DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/", "mutation", "tests/mutation/"]
@@ -251,6 +246,7 @@ PATTERNS = [
 # ==============================================================================
 # Pyright Configuration
 # ==============================================================================
+
 [tool.pyright]
 typeCheckingMode = "strict"             # Pyright's strictest mode.
 reportAssertAlwaysTrue = "error"        # Catch asserts that are always true.
@@ -263,6 +259,7 @@ exclude = ["scratchpad", "mutants", "**/node_modules", "**/__pycache__", ".venv"
 # ==============================================================================
 # Test Configuration
 # ==============================================================================
+
 [tool.pytest.ini_options]
 minversion = "9.0"
 addopts = ["-ra"]                   # Print useful short reasons for outcomes
@@ -272,6 +269,7 @@ pythonpath = ["."]                  # Repo root: tests import root packages by f
 # ==============================================================================
 # Test Coverage Configuration
 # ==============================================================================
+
 [tool.coverage]
 run.source = ["src", "preferences", "mutation", "harness"] # ADD EVERY DIRECTORY THAT SHIPS CODE TO ENSURE 100% COVERAGE
 report.show_missing = true         # Show exact missed lines when coverage fails
@@ -282,6 +280,7 @@ skip_covered = false               # Same behavior for older coverage config rea
 # ==============================================================================
 # Hypothesis Property Tests Configuration
 # ==============================================================================
+
 [tool.hypothesis]
 max_examples = 50   # Generate 50 random test cases per property test (default 100)
 deadline = 500       # Fails tests if an individual example takes longer than 500ms
@@ -290,6 +289,7 @@ derandomize = false  # false default seeds random, uncovers more bugs. True = de
 # ==============================================================================
 # Mutmut (Mutation Testing) Configuration
 # ==============================================================================
+
 [tool.mutmut]
 max-children = 2
 source_paths = ["preferences", "src", "harness"]  # what to mutate
@@ -299,6 +299,7 @@ do_not_mutate = ["harness/tests/*"]    # explictly here because nested in a dire
 # ==============================================================================
 # Cognitive Complexity Complexipy Configuration
 # ==============================================================================
+
 [tool.complexipy]
 paths = ["src", "preferences", "mutation", "harness"]
 exclude = ["**/tests/**"]    # Test code can be more branching and example-heavy than production code
@@ -313,6 +314,7 @@ ignore-complexity = false    # Don't exit with error on max-complexity-allowed t
 # ==============================================================================
 # Pylint Configuration
 # ==============================================================================
+
 [tool.pylint]
 main.load-plugins = ["pylint.extensions.docparams"]
 main.ignore = [
@@ -343,6 +345,7 @@ design.max-attributes = 10           # Max instance attributes (variables) allow
 # ==============================================================================
 # Unified Ruff Configuration
 # ==============================================================================
+
 [tool.ruff]
 target-version = "py310"
 preview = true                      # Enable newer Ruff rules before they are fully stable

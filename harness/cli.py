@@ -21,7 +21,7 @@ from rich.table import Table, box
 from tomlkit import TOMLDocument, document, dumps, parse, table
 from typer import Argument, Exit, Option, Typer, colors, confirm, echo, secho, style
 
-from harness.config import ASSETS, CLAUDE_RULES, CODEX_RULES, PHASES, TOOLS
+from harness.config import ASSETS, CATEGORIES, CLAUDE_RULES, CODEX_RULES, PHASES, TOOLS
 from harness.gate import console, gates, run_git
 
 app = Typer(
@@ -350,22 +350,29 @@ def raise_issues(agent: str, num_iterations: int, max_minutes: int):
 def init() -> None:
     """Add harness assets, merge tool config, write the CI gate, and enable hooks"""
     init_confirm = confirm(
-        style("Confirm loopgate can read configs and write configs to wire checks:", fg=10), abort=False
+        style("\n1. Confirm loopgate can read configs and write configs to wire checks:", fg=10), default=True
     )
     if not init_confirm:
-        secho("Run `harness init` if you do want to configure loopgate", fg=colors.MAGENTA, bold=True)
+        secho("Run `harness init` to configure loopgate", fg=colors.MAGENTA, bold=True)
         raise Exit(code=0)
-    write_harness_config()
-    if confirm(style("Can we wire harness into githooks so quality checks run?", fg=10), abort=True):
-        if hoist() and setup_git_hooks(Path(sys.executable).parent):
-            check_for_timeout_and_prompt()
-            configure_agents()
-            rprint("\n[cyan2]Success. Try running loops with `harness run <agent>`[/]")
-    else:
-        rprint(["\n[186]Part or all of the harness failed to install "])
+    if write_harness_config():
+        init_confirm = confirm(
+            style("\n2. Can we wire githooks so quality checks run?", fg=10), default=True, abort=True
+        )
+    if init_confirm:
+        hoisted = hoist()
+        hooks = setup_git_hooks(Path(sys.executable).parent)
+        timeout = check_for_timeout_and_prompt() or IS_WINDOWS
+        agents = configure_agents()
+        rprint(
+            f"\n[bold cyan2]RESULT:[/]\nfiles added: {hoisted}\ngit hooks available via path: {hooks}"
+            f"\ntimeout-ready: {timeout}\nagents configured: {agents}"
+            f"\n[bold cyan2]Can likely run loops: [/]{bool(hoisted and hooks and timeout)}\n"
+            "\n[italic]Ensure your environemnt is activated to use the `harness run` command[/]\n"
+        )
 
 
-def write_harness_config() -> None:
+def write_harness_config() -> bool:
     """Takes user's configs and creates a pyproject.toml or appends to an existing pyproject.toml."""
     pyproject_path = REPO_ROOT / "pyproject.toml"
     user_pyproject: TOMLDocument = document()
@@ -376,7 +383,7 @@ def write_harness_config() -> None:
         user_harness = user_pyproject_tools.get("harness", {})
         checks = user_harness.get("gate", {})
         if checks and checks.get("test"):
-            confirm(style("Seems loopgate may be wired already. Continue?", fg=10))
+            confirm(style("Seems loopgate may be wired already. Continue?", fg=10), default=True, abort=True)
     template: Path = Path(__file__).resolve().with_name("temp.pyproject.toml")
     template_contents: TOMLDocument = parse(template.read_text(encoding="utf-8"))
     for t in template_contents["tool"]:
@@ -385,18 +392,9 @@ def write_harness_config() -> None:
     contents = ConfigParser(interpolation=None)
     contents.read([(REPO_ROOT / "tox.ini"), (REPO_ROOT / "setup.cfg")], encoding="utf-8")
     section_names = contents.sections()
-    categories: dict[str, dict[str, list[str]]] = {
-        "audit": {},
-        "complexity": {},
-        "format": {},
-        "lint": {},
-        "security": {},
-        "test": {},
-        "types": {},
-    }
-    inspect_configs(section_names, user_pyproject_tools, categories, template_contents["tool"])
+    inspect_configs(section_names, user_pyproject_tools, deepcopy(CATEGORIES), template_contents["tool"])
     user_pyproject.setdefault("tool", {}).update(template_contents["tool"])
-    pyproject_path.write_text(dumps(user_pyproject), encoding="utf-8")
+    return bool(pyproject_path.write_text(dumps(user_pyproject), encoding="utf-8"))
 
 
 # ruff: ignore[complex-structure,too-many-branches,too-many-locals] # complexipy: ignore
@@ -465,19 +463,26 @@ def hoist() -> bool:
     if not (ASSETS["docs"][0].is_dir() and ASSETS["githooks"][0].is_dir()):
         rprint("Harness is missing required assets: `docs/` and `githooks/`")
         return False
+    rprint(
+        "\n[bold yellow]We will need to add these files[/]\n* Git hooks are what ensure quality checks run"
+        "\n* Mutation tests promote good tests.\n* `preferences` allow for checks beyond what tooling catches"
+        "and demonstrate Hypothesis property tests\n* `docs` contain the instructions and memory for loops "
+        "\n*`scratchpad/` allows local agent use and contains a `runs/` directory for logs."
+    )
     confirm(
-        "Can loopgate add add needed files? If you have pre-existing files they will remain.\nWHY ADD:"
-        "\nMutation tests promote good tests.\n`preferences` allow for checks beyond what tooling catches and"
-        " demonstrate Hypothesis property tests\n`docs` contain the instructions and memory for loops\nGit "
-        "hooks ensure agents follow quality standards!\n`.github` workflows configure CI\n`scratchpad/` "
-        "allows local agent use and contains a `runs/` directory for logs. "
-        "",
+        style(
+            "3. Confirm, loopgate can add those files? Pre-existing files in the expected paths will remain "
+            "and loopgate will skip adding them.",
+            fg=10,
+        ),
+        default=True,
         abort=True,
     )
     repo_root = REPO_ROOT
     ASSETS["githooks"][1].mkdir(parents=True, exist_ok=True)
-    hoist_script = (ASSETS["githooks"][0] / "hoist").as_posix()
+    hoist_script: str = (ASSETS["githooks"][0] / "hoist").as_posix()
     run_git(["-c", 'alias.loopgate-hoist=!f() { sh "$1"; }; f', "loopgate-hoist", hoist_script], REPO_ROOT)
+    console.print(f"[green]\n4. Ran {hoist_script}[/]\n")
     for key, paths in ASSETS.items():
         source, destination = paths
         for source_path in source.rglob("*"):
@@ -487,10 +492,10 @@ def hoist() -> bool:
             elif not destination_path.exists():
                 destination_path.parent.mkdir(parents=True, exist_ok=True)
                 copy2(source_path, destination_path)
-        rprint(f"{key} add attempt at {destination}")
+        rprint(f"`{key}/` exists {destination.exists()}")
     (repo_root / "scratchpad" / "runs").mkdir(parents=True, exist_ok=True)
     (repo_root / "scratchpad" / "runs" / ".gitkeep").touch()
-    rprint(f"scratchpad/ and runs/ added at {repo_root}")
+    rprint(f"`scratchpad/` and `runs/` also added at {repo_root}")
     return True
 
 
@@ -499,7 +504,7 @@ def hoist() -> bool:
     "cannot edit that variable. This ensures interactive agents (e.g. in IDEs) are held to the same standards"
     " as headless agents. It makes gates un-bypassable. You can always return to rerun this later too."
 )
-def configure_agents() -> None:
+def configure_agents() -> bool:
     """Configure Claude and Codex for contained loops."""
     home = Path.home()
     claude_path, codex_path, bak = (
@@ -509,23 +514,28 @@ def configure_agents() -> None:
     )
     claude = json.loads(claude_path.read_text("utf-8") if claude_path.is_file() else "{}")
     codex = parse(codex_path.read_text("utf-8") if codex_path.is_file() else "")
-    cl_confirm = confirm(style("Can we update CLAUDE rules and settings?", fg=10), abort=True)
+    cl_confirm = confirm(
+        style("\n5.1. Can we update CLAUDE rules and settings?", fg=10), default=True, abort=True
+    )
     if cl_confirm and claude_path.is_file():
         rprint(f"settings.json edited. Original copy at {copy2(claude_path, f'{claude_path}.bak')}")
     claude.setdefault("env", {})["RALPH_LOOP"] = "1"
     permissions: dict[str, Any] = claude.setdefault("permissions", {})
     permissions["deny"] = list(set(permissions.get("deny", [])) | CLAUDE_RULES)
-    cx_confirm = confirm(style("Can we update CODEX rules and settings?", fg=10), abort=True)
+    cx_confirm = confirm(
+        style("5.2. Can we update CODEX rules and settings?", fg=10), default=True, abort=True
+    )
     if cx_confirm and codex_path.is_file():
-        rprint(f"config.toml edited. Original backup at {copy2(codex_path, bak)}")
+        rprint(f"config.toml edited. Original backup at {copy2(codex_path, bak)}\n")
     codex.setdefault("shell_environment_policy", {}).setdefault("set", {})["RALPH_LOOP"] = "1"
-    for path, contents in {
-        claude_path: f"{json.dumps(claude, indent=2)}\n",
-        codex_path: dumps(codex),
-        home / ".codex" / "rules" / "loopgate.rules": CODEX_RULES,
-    }.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(contents, encoding="utf-8")
+    claude_path.parent.mkdir(parents=True, exist_ok=True)
+    claude_path.write_text(f"{json.dumps(claude, indent=2)}\n", encoding="utf-8")
+    codex_path.parent.mkdir(parents=True, exist_ok=True)
+    codex_path.write_text(dumps(codex), encoding="utf-8")
+    codex_rules_path = home / ".codex" / "rules" / "loopgate.rules"
+    codex_rules_path.parent.mkdir(parents=True, exist_ok=True)
+    codex_rules_path.write_text(CODEX_RULES, encoding="utf-8")
+    return True
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -19,6 +19,7 @@ from unittest.mock import DEFAULT, Mock, call
 import pytest
 import tomlkit as tomllib
 from click import unstyle
+from typer import Abort
 from typer.testing import CliRunner
 
 from harness import cli, gate
@@ -447,6 +448,35 @@ def test_configure_agents_creates_missing_configs_without_backups(
     assert not codex_path.with_name("config.toml.bak").exists()
 
 
+@pytest.mark.parametrize("answers", ["n\n", "y\nn\n"])
+def test_configure_agents_aborts_without_writing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answers: str
+) -> None:
+    """Declining either required agent configuration leaves the home directory untouched."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(cli.Path, "home", fake_home(home))
+
+    with runner.isolation(input=answers), pytest.raises(Abort):
+        cli.configure_agents()
+
+    assert not home.exists()
+
+
+def test_write_harness_config_aborts_when_existing_wiring_is_declined(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Declining an already-wired configuration leaves pyproject.toml unchanged."""
+    pyproject = git_repo / "pyproject.toml"
+    original = '[tool.harness.gate]\ntest = ["pytest"]\n'
+    pyproject.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(cli, "TOOLS", {})
+
+    with runner.isolation(input="n\n"), pytest.raises(Abort):
+        cli.write_harness_config()
+
+    assert pyproject.read_text(encoding="utf-8") == original
+
+
 def test_write_harness_config_selects_installed_user_tools(
     monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
@@ -637,17 +667,33 @@ def test_init_hoists_and_records_the_installed_harness(tmp_path: Path) -> None:
     assert executable.is_file()
     assert git_path is not None
     home = git_repo / "home"
+    bin_path = git_repo / "bin"
+    bin_path.mkdir()
+    (bin_path / "timeout").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (bin_path / "timeout").chmod(0o755)
     environment = {key: value for key, value in os.environ.items() if not key.startswith("UV_")} | {
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
         "HOME": str(home),
-        "PATH": os.pathsep.join((str(executable.parent), str(Path(git_path).parent), os.defpath)),
+        "PATH": os.pathsep.join((
+            str(bin_path),
+            str(executable.parent),
+            str(Path(git_path).parent),
+            os.defpath,
+        )),
         "USERPROFILE": str(home),
         "VIRTUAL_ENV": str(executable.parent.parent),
         "XDG_CONFIG_HOME": str(home / ".config"),
     }
     environment.pop("PYTHONPATH", None)
     installed_assets = assert_installed_config_paths(environment, git_repo)
+    packaged_pre_push = (installed_assets["githooks"][0] / "pre-push").read_bytes()
+    (git_repo / ".githooks" / "pre-push").write_bytes(
+        packaged_pre_push.partition(b"\n")[0]
+        + b'\n"$(dirname "$0")/loopgate-pre-push" "$@" || exit # loopgate\n'
+        + packaged_pre_push.partition(b"\n")[2]
+    )
+    (git_repo / ".githooks" / "loopgate-pre-push").write_bytes(packaged_pre_push)
 
     result = subprocess.run(
         [str(executable), "init"],
@@ -659,10 +705,26 @@ def test_init_hoists_and_records_the_installed_harness(tmp_path: Path) -> None:
         check=False,
     )
 
-    assert (result.returncode, result.stderr, unstyle(result.stdout).splitlines()[-1]) == (
-        0,
-        "",
-        "Success. Try running loops with `harness run <agent>`",
+    assert (result.returncode, result.stderr) == (0, "")
+    assert "RESULT:" in unstyle(result.stdout)
+    assert "Can likely run loops: True" in unstyle(result.stdout)
+    assert "Ensure your environemnt is activated" in unstyle(result.stdout)
+    assert (
+        subprocess.run(
+            [
+                git_path,
+                "-c",
+                'alias.loopgate-hoist=!f() { sh "$1"; }; f',
+                "loopgate-hoist",
+                (installed_assets["githooks"][0] / "hoist").as_posix(),
+            ],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+            env=environment,
+            check=False,
+        ).returncode
+        == 0
     )
     written_pyproject = (git_repo / "pyproject.toml").read_text(encoding="utf-8")
     assert tomllib.loads(written_pyproject)["project"] == {"name": "existing"}
@@ -672,25 +734,27 @@ def test_init_hoists_and_records_the_installed_harness(tmp_path: Path) -> None:
     ) == normalized_path(executable)
     assert gate.run_git(["config", "--get", "core.hooksPath"], git_repo).strip() == ".githooks"
     assert (git_repo / "scratchpad" / "runs" / ".gitkeep").is_file()
-    assert (git_repo / ".githooks" / "pre-commit").read_text(encoding="utf-8") == (
-        "#!/bin/sh\n(\n"
-        '    . "$(dirname "$0")/_resolve"\n'
-        '    exec "$HARNESS" preflight\n'
-        ") || exit # loopgate\n"
-        "printf '%s\\n' existing-pre-commit\n"
+    assert (git_repo / ".githooks" / "pre-commit").read_bytes() == (
+        b"#!/bin/sh\n(\n"
+        b'    . "$(dirname "$0")/_resolve"\n'
+        b'    exec "$HARNESS" preflight\n'
+        b") || exit # loopgate\n"
+        b"printf '%s\\n' existing-pre-commit\n"
     )
-    assert (git_repo / ".githooks" / "pre-push").read_text(encoding="utf-8") == (
-        installed_assets["githooks"][0] / "pre-push"
-    ).read_text(encoding="utf-8")
-    assert (git_repo / ".githooks" / "prepare-commit-msg").read_text(encoding="utf-8") == (
-        installed_assets["githooks"][0] / "prepare-commit-msg"
-    ).read_text(encoding="utf-8")
-    assert (git_repo / ".githooks" / "_resolve").read_text(encoding="utf-8") == (
+    for name in ("pre-push", "prepare-commit-msg"):
+        assert (git_repo / ".githooks" / name).read_bytes() == (
+            installed_assets["githooks"][0] / name
+        ).read_bytes()
+    assert (git_repo / ".githooks" / "_resolve").read_bytes() == (
         installed_assets["githooks"][0] / "_resolve"
-    ).read_text(encoding="utf-8")
+    ).read_bytes()
     assert all(
         os.access(git_repo / ".githooks" / name, os.X_OK)
-        for name in ("pre-commit", "pre-push", "prepare-commit-msg")
+        for name in (
+            "pre-commit",
+            "pre-push",
+            "prepare-commit-msg",
+        )
     )
     assert not list((git_repo / ".githooks").glob("loopgate-*"))
     assert not list((git_repo / ".githooks").glob(".loopgate-original-*"))
@@ -736,7 +800,7 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     assert "harness" in tomllib.loads((git_repo / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
     hoist.assert_not_called()
 
-    retry = runner.invoke(cli.app, ["init"], input="y\ny\ny\n")
+    retry = runner.invoke(cli.app, ["init"], input="y\n" * 5)
 
     assert retry.exit_code == 0, retry.output
     assert "Can we wire harness into githooks so quality checks run?" in retry.output
@@ -749,6 +813,7 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     hoist.assert_called_once_with()
 
     hoist.return_value = True
+    (git_repo / ".git" / "harness-path").write_text("harness\n", encoding="utf-8")
     setup_hooks = Mock(return_value=git_repo / ".git" / "harness-path")
     configure = Mock()
     monkeypatch.setattr(cli, "setup_git_hooks", setup_hooks)
@@ -757,25 +822,28 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     success = runner.invoke(cli.app, ["init"], input="y\n" * 3)
 
     assert success.exit_code == 0, success.output
-    assert "Success. Try running loops with `harness run <agent>`" in unstyle(success.output)
+    assert "Can likely run loops: True" in unstyle(success.output)
     setup_hooks.assert_called_once_with(Path(sys.executable).parent)
     configure.assert_called_once_with()
 
 
-def test_init_reports_failed_hook_consent(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """Init reports partial installation if its confirmation provider returns false for hook setup."""
+def test_init_aborts_when_required_hooks_are_declined(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Init stops when its required hook confirmation aborts."""
     (git_repo / "pyproject.toml").write_text("", encoding="utf-8")
-    confirm = Mock(side_effect=[True, False])
+    confirm = Mock(side_effect=[True, Abort()])
     write_config = Mock()
     message = Mock()
     monkeypatch.setattr(cli, "confirm", confirm)
     monkeypatch.setattr(cli, "write_harness_config", write_config)
     monkeypatch.setattr(cli, "rprint", message)
 
-    cli.init()
+    with pytest.raises(Abort):
+        cli.init()
 
     write_config.assert_called_once()
-    message.assert_called_once_with(["\n[186]Part or all of the harness failed to install "])
+    message.assert_not_called()
 
 
 def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -820,6 +888,7 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     assert (repo / "docs" / "existing.txt").read_text(encoding="utf-8") == "existing\n"
     assert (repo / "scratchpad" / "runs" / ".gitkeep").is_file()
     confirm.assert_called_once()
+    assert confirm.call_args.kwargs == {"default": True, "abort": True}
     run_git.assert_called_once_with(
         [
             "-c",
@@ -829,6 +898,28 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
         ],
         repo,
     )
+
+
+def test_hoist_aborts_before_writing_when_declined(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Declining file hoisting creates none of the destination paths."""
+    package_docs = tmp_path / "package" / "docs"
+    package_hooks = tmp_path / "package" / ".githooks"
+    package_docs.mkdir(parents=True)
+    package_hooks.mkdir(parents=True)
+    repo = tmp_path / "repo"
+    monkeypatch.setattr(
+        cli,
+        "ASSETS",
+        {
+            "docs": (package_docs, repo / "docs"),
+            "githooks": (package_hooks, repo / ".githooks"),
+        },
+    )
+
+    with runner.isolation(input="n\n"), pytest.raises(Abort):
+        cli.hoist()
+
+    assert not repo.exists()
 
 
 def test_installing_the_template_cleans_the_repo_and_sets_hooks(
