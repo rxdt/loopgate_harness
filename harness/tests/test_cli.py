@@ -14,7 +14,7 @@ from pathlib import Path
 from shutil import which
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from unittest.mock import DEFAULT, Mock, call
+from unittest.mock import DEFAULT, Mock, call, create_autospec
 
 import pytest
 import tomlkit as tomllib
@@ -276,6 +276,7 @@ def test_cli_summaries_report_complete_agent_check_results(
     exit_code, summary = expected
     monkeypatch.setenv("RALPH_LOOP", "1")
     monkeypatch.setattr(gates(), "commit_checks" if command == "preflight" else "gate_checks", {})
+    monkeypatch.setattr(cli.console, "print", Mock(wraps=cli.console.print))
     source_path = git_repo / "src" / "mod.py"
     source_path.parent.mkdir()
     source_path.write_text(source, encoding="utf-8")
@@ -302,6 +303,16 @@ def test_cli_summaries_report_complete_agent_check_results(
     assert diff_size_output in output
     assert mutation_output in output
     assert output.endswith(unstyle(summary))
+    assert (
+        cli.console.print.call_args_list[-2].args[0].title_style,
+        cli.console.print.call_args_list[-2].args[0].box,
+        cli.console.print.call_args_list[-2].args[0].padding,
+        [(column.header, column.style) for column in cli.console.print.call_args_list[-2].args[0].columns],
+    ) == ("bold grey82", None, (0, 5, 0, 5), [("RESULT", ""), ("CHECK", "bold dim white")])
+    assert [printed.kwargs for printed in cli.console.print.call_args_list[-2:]] == [
+        {"justify": "center"},
+        {"justify": "center"},
+    ]
 
 
 def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path) -> None:
@@ -338,10 +349,15 @@ def test_setup_git_hooks_records_exact_posix_commands(
     monkeypatch.setattr(cli.subprocess, "run", run)
     monkeypatch.setattr(cli, "rprint", print_message)
 
+    write_text = create_autospec(Path.write_text, wraps=Path.write_text)
+    monkeypatch.setattr(Path, "write_text", write_text)
     recorded = cli.setup_git_hooks(env_bin)
 
     assert recorded == git_dir / "harness-path"
     assert recorded.read_text(encoding="utf-8") == f"{(env_bin / 'harness').as_posix()}\n"
+    write_text.assert_called_once_with(
+        recorded, f"{(env_bin / 'harness').as_posix()}\n", encoding="utf-8", newline="\n"
+    )
     run_git.assert_called_once_with(["rev-parse", "--git-common-dir"])
     assert run.call_args_list == [
         call(["git", "config", "core.hooksPath", ".githooks"], cwd=str(tmp_path), check=True),
@@ -750,11 +766,7 @@ def test_init_hoists_and_records_the_installed_harness(tmp_path: Path) -> None:
     ).read_bytes()
     assert all(
         os.access(git_repo / ".githooks" / name, os.X_OK)
-        for name in (
-            "pre-commit",
-            "pre-push",
-            "prepare-commit-msg",
-        )
+        for name in ("pre-commit", "pre-push", "prepare-commit-msg")
     )
     assert not list((git_repo / ".githooks").glob("loopgate-*"))
     assert not list((git_repo / ".githooks").glob(".loopgate-original-*"))
@@ -803,9 +815,9 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     retry = runner.invoke(cli.app, ["init"], input="y\n" * 5)
 
     assert retry.exit_code == 0, retry.output
-    assert "Can we wire harness into githooks so quality checks run?" in retry.output
-    assert "quality checks run?" in retry.output
+    assert "2. Can we wire githooks so quality checks run?" in retry.output
     retry_output = unstyle(retry.output)
+    assert "Can likely run loops: False" in retry_output
     assert "Success. Try running loops with `harness run <agent>`" not in retry_output
     assert "macOS harness needs timeout/gtimeout from coreutils" not in retry_output
     assert "Install `brew install coreutils` now?" not in retry_output
@@ -910,10 +922,7 @@ def test_hoist_aborts_before_writing_when_declined(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         cli,
         "ASSETS",
-        {
-            "docs": (package_docs, repo / "docs"),
-            "githooks": (package_hooks, repo / ".githooks"),
-        },
+        {"docs": (package_docs, repo / "docs"), "githooks": (package_hooks, repo / ".githooks")},
     )
 
     with runner.isolation(input="n\n"), pytest.raises(Abort):
@@ -973,6 +982,10 @@ def test_installing_the_template_cleans_the_repo_and_sets_hooks(
     toolchain = stub_toolchain(git_repo / ".git")
     monkeypatch.setattr(subprocess, "run", toolchain)
 
+    monkeypatch.setattr(Path, "is_file", create_autospec(Path.is_file, wraps=Path.is_file))
+    monkeypatch.setattr(Path, "replace", create_autospec(Path.replace, wraps=Path.replace))
+    monkeypatch.setattr(Path, "unlink", create_autospec(Path.unlink, wraps=Path.unlink))
+    monkeypatch.setattr(cli, "rmtree", Mock(wraps=cli.rmtree))
     result = runner.invoke(cli.app, ["install"])
 
     assert result.exit_code == 0
@@ -987,6 +1000,15 @@ def test_installing_the_template_cleans_the_repo_and_sets_hooks(
     assert not (git_repo / "harness" / "tests").exists()
     assert (git_repo / "preferences").is_dir()
     assert (git_repo / "tests" / "preferences").is_dir()
+    Path.is_file.assert_any_call(git_repo / "README.template.md")
+    Path.is_file.assert_any_call(git_repo / "temp.pyproject.toml")
+    Path.replace.assert_any_call(git_repo / "README.template.md", git_repo / "README.md")
+    Path.replace.assert_any_call(git_repo / "temp.pyproject.toml", git_repo / "pyproject.toml")
+    Path.unlink.assert_any_call(git_repo / ".github" / "workflows" / "publish.yml", missing_ok=True)
+    Path.unlink.assert_any_call(git_repo / "CONTRIBUTING.md", missing_ok=True)
+    cli.rmtree.assert_any_call(git_repo / "dist")
+    cli.rmtree.assert_any_call(git_repo / "harness" / "tests")
+    cli.rmtree.assert_any_call(git_repo / ".assets")
     toolchain.assert_any_call(("uv", "sync"), cwd=str(git_repo), check=True)
     recorded_harness = (git_repo / ".git" / "harness-path").read_text(encoding="utf-8").strip()
     env_bin = git_repo / ".venv" / ("Scripts" if sys.platform == "win32" else "bin")
@@ -1423,10 +1445,18 @@ def test_run_worker_logs_every_line_and_streams_only_when_verbose(
     streaming_worker = [sys.executable, "-c", 'print(\'{ "type" : "result" }\'); print("not json")']
     real_popen = subprocess.Popen
     popen = Mock(wraps=real_popen)
+    monkeypatch.setattr(Path, "open", create_autospec(Path.open, wraps=Path.open))
     monkeypatch.setattr(cli.subprocess, "Popen", popen)
+    monkeypatch.setattr(cli, "JSON", Mock(wraps=cli.JSON))
+    monkeypatch.setattr(cli.console, "print", Mock(wraps=cli.console.print))
 
     assert cli.run_worker(streaming_worker, log, verbose=True) == 0
     popen.assert_called_once_with(streaming_worker, cwd=str(tmp_path), stdout=subprocess.PIPE, text=True)
+    assert cli.JSON.call_args_list == [
+        call('{ "type" : "result" }\n', indent=None),
+        call("not json\n", indent=None),
+    ]
+    assert [printed.kwargs for printed in cli.console.print.call_args_list] == [{"end": "\n"}, {"end": "\n"}]
 
     streamed = capsys.readouterr().out
     assert '"type"' in streamed
@@ -1447,6 +1477,7 @@ def test_run_worker_logs_every_line_and_streams_only_when_verbose(
 
     assert not capsys.readouterr().out
     assert log.read_text(encoding="utf-8") == "worker output\n"
+    assert Path.open.call_args_list[::2] == [call(log, "w", encoding="utf-8")] * 2
 
 
 def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
