@@ -672,36 +672,27 @@ def test_init_hoists_and_records_the_installed_harness(tmp_path: Path) -> None:
     ) == normalized_path(executable)
     assert gate.run_git(["config", "--get", "core.hooksPath"], git_repo).strip() == ".githooks"
     assert (git_repo / "scratchpad" / "runs" / ".gitkeep").is_file()
-    assert {
-        "pre-commit": (git_repo / ".githooks" / "pre-commit").read_bytes(),
-        "pre-push": (git_repo / ".githooks" / "pre-push").read_bytes(),
-        "prepare-commit-msg": (git_repo / ".githooks" / "prepare-commit-msg").read_bytes(),
-    } == {
-        "pre-commit": (
-            b'#!/bin/sh\n"$(dirname "$0")/loopgate-pre-commit" "$@" || exit # loopgate\n'
-            b"printf '%s\\n' existing-pre-commit\n"
-        ),
-        "pre-push": b'#!/bin/sh\n"$(dirname "$0")/loopgate-pre-push" "$@" || exit # loopgate\n',
-        "prepare-commit-msg": (
-            b'#!/bin/sh\n"$(dirname "$0")/loopgate-prepare-commit-msg" "$@" || exit # loopgate\n'
-        ),
-    }
-    assert {
-        name: (git_repo / ".githooks" / destination).read_bytes()
-        for name, destination in {
-            "_resolve": "_resolve",
-            "pre-commit": "loopgate-pre-commit",
-            "pre-push": "loopgate-pre-push",
-            "prepare-commit-msg": "loopgate-prepare-commit-msg",
-        }.items()
-    } == {
-        name: (installed_assets["githooks"][0] / name).read_bytes()
-        for name in ("_resolve", "pre-commit", "pre-push", "prepare-commit-msg")
-    }
+    assert (git_repo / ".githooks" / "pre-commit").read_text(encoding="utf-8") == (
+        "#!/bin/sh\n(\n"
+        '    . "$(dirname "$0")/_resolve"\n'
+        '    exec "$HARNESS" preflight\n'
+        ") || exit # loopgate\n"
+        "printf '%s\\n' existing-pre-commit\n"
+    )
+    assert (git_repo / ".githooks" / "pre-push").read_text(encoding="utf-8") == (
+        installed_assets["githooks"][0] / "pre-push"
+    ).read_text(encoding="utf-8")
+    assert (git_repo / ".githooks" / "prepare-commit-msg").read_text(encoding="utf-8") == (
+        installed_assets["githooks"][0] / "prepare-commit-msg"
+    ).read_text(encoding="utf-8")
+    assert (git_repo / ".githooks" / "_resolve").read_text(encoding="utf-8") == (
+        installed_assets["githooks"][0] / "_resolve"
+    ).read_text(encoding="utf-8")
     assert all(
         os.access(git_repo / ".githooks" / name, os.X_OK)
         for name in ("pre-commit", "pre-push", "prepare-commit-msg")
     )
+    assert not list((git_repo / ".githooks").glob("loopgate-*"))
     assert not list((git_repo / ".githooks").glob(".loopgate-original-*"))
     assert {
         "docs/PROMPT.md": (git_repo / "docs" / "PROMPT.md").read_bytes(),
@@ -750,9 +741,10 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     assert retry.exit_code == 0, retry.output
     assert "Can we wire harness into githooks so quality checks run?" in retry.output
     assert "quality checks run?" in retry.output
-    assert "Can likely run loops: False" in unstyle(retry.output)
-    assert "macOS harness needs timeout/gtimeout from coreutils" not in unstyle(retry.output)
-    assert "Install `brew install coreutils` now?" not in unstyle(retry.output)
+    retry_output = unstyle(retry.output)
+    assert "Success. Try running loops with `harness run <agent>`" not in retry_output
+    assert "macOS harness needs timeout/gtimeout from coreutils" not in retry_output
+    assert "Install `brew install coreutils` now?" not in retry_output
 
     hoist.assert_called_once_with()
 
