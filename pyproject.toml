@@ -144,7 +144,7 @@ complexity = ["complexipy", ".", "--suggest-refactors"]
 pylint = ["pylint", "."]
 
 [tool.harness.gate]
-audit = ["pip-audit", ".", "--strict"]
+audit = ["pip-audit", "--strict"]
 security = [
     "semgrep", "scan",
     "--error",  # exit nonzero on findings so the gate blocks the commit, not just reports
