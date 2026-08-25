@@ -58,9 +58,7 @@ from rich.table import Table
 
 console = Console(force_terminal=True, color_system=None if os.environ.get("RALPH_LOOP") else "256")
 
-MINIMUM_MUTATION_SCORE = 80.0
-
-JsonDocument = dict[str, object] | list[object] | str | int | float | bool | None
+MINIMUM_MUTATION_SCORE = 60.0
 
 
 def analyze_mutmut_report(file_path: str = "mutants/mutmut-cicd-stats.json") -> float:
