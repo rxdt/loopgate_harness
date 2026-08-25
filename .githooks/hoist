@@ -10,16 +10,36 @@ fi
 cp "$source_dir/_resolve" "$target_dir/_resolve"
 
 for name in pre-commit pre-push prepare-commit-msg; do
+    source=$source_dir/$name
     hook=$target_dir/$name
-    cp "$source_dir/$name" "$target_dir/loopgate-$name"
-    call="\"\$(dirname \"\$0\")/loopgate-$name\" \"\$@\" || exit # loopgate"
+    legacy_hook=$target_dir/loopgate-$name
+    legacy_call="\"\$(dirname \"\$0\")/loopgate-$name\" \"\$@\" || exit # loopgate"
+    case $name in
+        pre-commit) command='exec "$HARNESS" preflight' ;;
+        pre-push) command='exec "$HARNESS" gate' ;;
+        prepare-commit-msg) command='exec "$HARNESS" prepare-commit-msg "$@"' ;;
+    esac
+    if [ -e "$hook" ] && grep -Fqx "$legacy_call" "$hook"; then
+        tmp=$(mktemp "$target_dir/.hoist.XXXXXX")
+        grep -Fvx "$legacy_call" "$hook" > "$tmp"
+        mv "$tmp" "$hook"
+        if [ "$(wc -l < "$hook")" -eq 1 ] && [ "$(head -n 1 "$hook")" = '#!/bin/sh' ]; then
+            cp "$source" "$hook"
+        fi
+    fi
+    rm -f "$legacy_hook"
     if [ ! -e "$hook" ]; then
-        printf '#!/bin/sh\n%s\n' "$call" > "$hook"
-    elif ! grep -Fqx "$call" "$hook"; then
+        cp "$source" "$hook"
+    elif ! cmp -s "$source" "$hook" && ! grep -Fqx ') || exit # loopgate' "$hook"; then
         case $(head -n 1 "$hook") in "#!"*sh*) ;; *) echo "hoist: $hook is not a shell hook" >&2; exit 1 ;; esac
         tmp=$(mktemp "$target_dir/.hoist.XXXXXX")
-        { IFS= read -r first; printf '%s\n%s\n' "$first" "$call"; cat; } < "$hook" > "$tmp"
+        {
+            IFS= read -r first
+            printf '%s\n%s\n%s\n%s\n%s\n' \
+                "$first" '(' '    . "$(dirname "$0")/_resolve"' "    $command" ') || exit # loopgate'
+            cat
+        } < "$hook" > "$tmp"
         mv "$tmp" "$hook"
     fi
-    chmod +x "$hook" "$target_dir/loopgate-$name"
+    chmod +x "$hook"
 done

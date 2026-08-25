@@ -216,6 +216,9 @@ def test_init_writes_detected_configuration(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(cli, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(cli, "REPO_ROOT_STR", str(tmp_path))
     monkeypatch.setattr(cli, "hoist", Mock(return_value=False))
+    monkeypatch.setattr(cli, "setup_git_hooks", Mock(return_value=tmp_path / "harness-path"))
+    monkeypatch.setattr(cli, "check_for_timeout_and_prompt", Mock(return_value="timeout"))
+    monkeypatch.setattr(cli, "configure_agents", Mock(return_value=True))
     monkeypatch.setattr(cli.util, "find_spec", cli.TOOLS.get)
     monkeypatch.setattr(cli, "which", Mock(return_value=None))
 
