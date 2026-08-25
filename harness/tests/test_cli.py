@@ -731,7 +731,8 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(cli, "TOOLS", {})
     bin_dir = git_repo / "bin"
     bin_dir.mkdir()
-    write_executable(bin_dir / "gtimeout", "#!/bin/sh\nexit 0\n")
+    timeout = bin_dir / "gtimeout"
+    write_executable(timeout, "#!/bin/sh\nexit 0\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(Path, "home", fake_home(git_repo / "home"))
     hoist = Mock(return_value=False)
@@ -748,15 +749,17 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
 
     assert retry.exit_code == 0, retry.output
     assert "Can we wire harness into githooks so quality checks run?" in retry.output
+    assert "quality checks run?" in retry.output
+    assert "Can likely run loops: False" in unstyle(retry.output)
+    assert "macOS harness needs timeout/gtimeout from coreutils" not in unstyle(retry.output)
+    assert "Install `brew install coreutils` now?" not in unstyle(retry.output)
 
     hoist.assert_called_once_with()
 
     hoist.return_value = True
     setup_hooks = Mock(return_value=git_repo / ".git" / "harness-path")
-    timeout = Mock()
     configure = Mock()
     monkeypatch.setattr(cli, "setup_git_hooks", setup_hooks)
-    monkeypatch.setattr(cli, "check_for_timeout_and_prompt", timeout)
     monkeypatch.setattr(cli, "configure_agents", configure)
 
     success = runner.invoke(cli.app, ["init"], input="y\n" * 3)
@@ -764,7 +767,6 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     assert success.exit_code == 0, success.output
     assert "Success. Try running loops with `harness run <agent>`" in unstyle(success.output)
     setup_hooks.assert_called_once_with(Path(sys.executable).parent)
-    timeout.assert_called_once_with()
     configure.assert_called_once_with()
 
 
@@ -1032,11 +1034,11 @@ def test_install_picks_the_package_manager_from_project_signals(
 @pytest.mark.parametrize(
     ("on_path", "answer", "installs_coreutils", "offers_coreutils", "shows_homebrew_hint"),
     [
-        pytest.param(("timeout", "brew"), None, (False, ""), id="timeout-present"),
-        pytest.param(("gtimeout", "brew"), None, (False, ""), id="gtimeout-present"),
-        pytest.param((), None, (False, "brew.sh"), id="no-timeout-no-homebrew"),
-        pytest.param(("brew",), True, (True, ""), id="confirmed"),
-        pytest.param(("brew",), False, (False, ""), id="declined"),
+        pytest.param(("timeout",), None, False, False, False, id="timeout-present"),
+        pytest.param(("gtimeout",), None, False, False, False, id="gtimeout-present"),
+        pytest.param((), None, False, True, True, id="no-timeout-no-homebrew"),
+        pytest.param(("brew",), True, True, True, False, id="confirmed"),
+        pytest.param(("brew",), False, False, True, False, id="declined"),
     ],
 )
 def test_install_offers_coreutils_only_when_no_timeout_tool_exists(
