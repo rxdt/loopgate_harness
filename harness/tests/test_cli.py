@@ -11,7 +11,6 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from shutil import which
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import DEFAULT, Mock, call, create_autospec
@@ -486,10 +485,18 @@ def test_write_harness_config_aborts_when_existing_wiring_is_declined(
     original = '[tool.harness.gate]\ntest = ["pytest"]\n'
     pyproject.write_text(original, encoding="utf-8")
     monkeypatch.setattr(cli, "TOOLS", {})
+    monkeypatch.setattr(Path, "is_file", create_autospec(Path.is_file, wraps=Path.is_file))
+    monkeypatch.setattr(Path, "read_text", create_autospec(Path.read_text, wraps=Path.read_text))
+    monkeypatch.setattr(cli, "confirm", Mock(side_effect=Abort()))
 
-    with runner.isolation(input="n\n"), pytest.raises(Abort):
+    with pytest.raises(Abort):
         cli.write_harness_config()
 
+    Path.is_file.assert_called_once_with(pyproject)
+    Path.read_text.assert_called_once_with(pyproject, encoding="utf-8")
+    cli.confirm.assert_called_once_with(
+        cli.style("Seems loopgate may be wired already. Continue?", fg=10), default=True, abort=True
+    )
     assert pyproject.read_text(encoding="utf-8") == original
 
 
@@ -501,7 +508,22 @@ def test_write_harness_config_selects_installed_user_tools(
     monkeypatch.setattr(cli.util, "find_spec", Mock(side_effect=installed.get))
     monkeypatch.setattr(cli, "which", Mock(return_value=None))
     (git_repo / "pyproject.toml").write_text("[tool.ruff]\nline-length = 99\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "with_name", create_autospec(Path.with_name, wraps=Path.with_name))
+    monkeypatch.setattr(Path, "read_text", create_autospec(Path.read_text, wraps=Path.read_text))
+    monkeypatch.setattr(Path, "write_text", create_autospec(Path.write_text, wraps=Path.write_text))
+    monkeypatch.setattr(
+        cli.ConfigParser, "read", create_autospec(cli.ConfigParser.read, wraps=cli.ConfigParser.read)
+    )
     cli.write_harness_config()
+    Path.with_name.assert_called_once_with(Path(cli.__file__).resolve(), "temp.pyproject.toml")
+    assert Path.read_text.call_args_list == [
+        call(git_repo / "pyproject.toml", encoding="utf-8"),
+        call(Path(cli.__file__).resolve().parent / "temp.pyproject.toml", encoding="utf-8"),
+    ]
+    assert Path.write_text.call_args.args[0] == git_repo / "pyproject.toml"
+    assert Path.write_text.call_args.kwargs == {"encoding": "utf-8"}
+    assert cli.ConfigParser.read.call_args.args[1:] == ([git_repo / "tox.ini", git_repo / "setup.cfg"],)
+    assert cli.ConfigParser.read.call_args.kwargs == {"encoding": "utf-8"}
     ruff_lint_no_format = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
     assert ruff_lint_no_format["tool"]["harness"]["preflight"] == {
         "complexity": ["complexipy", ".", "--suggest-refactors"],
@@ -667,134 +689,10 @@ def test_init_declines_without_mutating_repo(git_repo: Path) -> None:
     assert "Run `harness init`" in fresh.stdout
 
 
-def test_init_hoists_and_records_the_installed_harness(tmp_path: Path) -> None:
-    """The installed console command initializes a disposable repo and home from packaged assets."""
-    git_repo = tmp_path
-    gate.run_git(["init", "-q"], git_repo)
-    (git_repo / ".githooks").mkdir()
-    (git_repo / "uv.lock").touch()
-    (git_repo / "pyproject.toml").write_text(
-        f"{INIT_PROJECT_COMMENT}\n[project]\nname = 'existing'\n{INIT_PROJECT_COMMENT}", encoding="utf-8"
-    )
-    (git_repo / ".githooks" / "pre-commit").write_bytes(b"#!/bin/sh\nprintf '%s\\n' existing-pre-commit\n")
-    (git_repo / ".githooks" / "pre-commit").chmod(0o755)
-    executable = Path(sys.executable).with_name("harness.exe" if sys.platform == "win32" else "harness")
-    git_path = which("git")
-    assert executable.is_file()
-    assert git_path is not None
-    home = git_repo / "home"
-    bin_path = git_repo / "bin"
-    bin_path.mkdir()
-    (bin_path / "timeout").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    (bin_path / "timeout").chmod(0o755)
-    environment = {key: value for key, value in os.environ.items() if not key.startswith("UV_")} | {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "HOME": str(home),
-        "PATH": os.pathsep.join((
-            str(bin_path),
-            str(executable.parent),
-            str(Path(git_path).parent),
-            os.defpath,
-        )),
-        "USERPROFILE": str(home),
-        "VIRTUAL_ENV": str(executable.parent.parent),
-        "XDG_CONFIG_HOME": str(home / ".config"),
-    }
-    environment.pop("PYTHONPATH", None)
-    installed_assets = assert_installed_config_paths(environment, git_repo)
-    packaged_pre_push = (installed_assets["githooks"][0] / "pre-push").read_bytes()
-    (git_repo / ".githooks" / "pre-push").write_bytes(
-        packaged_pre_push.partition(b"\n")[0]
-        + b'\n"$(dirname "$0")/loopgate-pre-push" "$@" || exit # loopgate\n'
-        + packaged_pre_push.partition(b"\n")[2]
-    )
-    (git_repo / ".githooks" / "loopgate-pre-push").write_bytes(packaged_pre_push)
-
-    result = subprocess.run(
-        [str(executable), "init"],
-        cwd=git_repo,
-        input="y\n" * 5,
-        capture_output=True,
-        text=True,
-        env=environment,
-        check=False,
-    )
-
-    assert (result.returncode, result.stderr) == (0, "")
-    assert "RESULT:" in unstyle(result.stdout)
-    assert "Can likely run loops: True" in unstyle(result.stdout)
-    assert "Ensure your environemnt is activated" in unstyle(result.stdout)
-    assert (
-        subprocess.run(
-            [
-                git_path,
-                "-c",
-                'alias.loopgate-hoist=!f() { sh "$1"; }; f',
-                "loopgate-hoist",
-                (installed_assets["githooks"][0] / "hoist").as_posix(),
-            ],
-            cwd=git_repo,
-            capture_output=True,
-            text=True,
-            env=environment,
-            check=False,
-        ).returncode
-        == 0
-    )
-    written_pyproject = (git_repo / "pyproject.toml").read_text(encoding="utf-8")
-    assert tomllib.loads(written_pyproject)["project"] == {"name": "existing"}
-    assert written_pyproject.count(INIT_PROJECT_COMMENT) == 2
-    assert normalized_path(
-        (git_repo / ".git" / "harness-path").read_text(encoding="utf-8").strip()
-    ) == normalized_path(executable)
-    assert gate.run_git(["config", "--get", "core.hooksPath"], git_repo).strip() == ".githooks"
-    assert (git_repo / "scratchpad" / "runs" / ".gitkeep").is_file()
-    assert (git_repo / ".githooks" / "pre-commit").read_bytes() == (
-        b"#!/bin/sh\n(\n"
-        b'    . "$(dirname "$0")/_resolve"\n'
-        b'    exec "$HARNESS" preflight\n'
-        b") || exit # loopgate\n"
-        b"printf '%s\\n' existing-pre-commit\n"
-    )
-    for name in ("pre-push", "prepare-commit-msg"):
-        assert (git_repo / ".githooks" / name).read_bytes() == (
-            installed_assets["githooks"][0] / name
-        ).read_bytes()
-    assert (git_repo / ".githooks" / "_resolve").read_bytes() == (
-        installed_assets["githooks"][0] / "_resolve"
-    ).read_bytes()
-    assert all(
-        os.access(git_repo / ".githooks" / name, os.X_OK)
-        for name in ("pre-commit", "pre-push", "prepare-commit-msg")
-    )
-    assert not list((git_repo / ".githooks").glob("loopgate-*"))
-    assert not list((git_repo / ".githooks").glob(".loopgate-original-*"))
-    assert {
-        "docs/PROMPT.md": (git_repo / "docs" / "PROMPT.md").read_bytes(),
-        "mutation/check_mutmut.py": (git_repo / "mutation" / "check_mutmut.py").read_bytes(),
-        "preferences/preferences.py": (git_repo / "preferences" / "preferences.py").read_bytes(),
-        "tests/mutation/test_check_mutmut.py": (
-            git_repo / "tests" / "mutation" / "test_check_mutmut.py"
-        ).read_bytes(),
-        "tests/preferences/test_preferences.py": (
-            git_repo / "tests" / "preferences" / "test_preferences.py"
-        ).read_bytes(),
-    } == {
-        "docs/PROMPT.md": (installed_assets["docs"][0] / "PROMPT.md").read_bytes(),
-        "mutation/check_mutmut.py": (installed_assets["mutation"][0] / "check_mutmut.py").read_bytes(),
-        "preferences/preferences.py": (installed_assets["preferences"][0] / "preferences.py").read_bytes(),
-        "tests/mutation/test_check_mutmut.py": (
-            installed_assets["mutation_tests"][0] / "test_check_mutmut.py"
-        ).read_bytes(),
-        "tests/preferences/test_preferences.py": (
-            installed_assets["pref_tests"][0] / "test_preferences.py"
-        ).read_bytes(),
-    }
-
-
-def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """Declining required hooks aborts after config generation and before any asset or hook mutation."""
+def test_init_hoists_and_records_the_installed_harness(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Init handles hook consent, hoisting, and recording the installed harness."""
     monkeypatch.setattr(cli, "TOOLS", {})
     bin_dir = git_repo / "bin"
     bin_dir.mkdir()
@@ -802,6 +700,10 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     write_executable(timeout, "#!/bin/sh\nexit 0\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(Path, "home", fake_home(git_repo / "home"))
+    installed_environment = dict(os.environ)
+    installed_environment.pop("PYTHONPATH", None)
+    installed_assets = assert_installed_config_paths(installed_environment, git_repo)
+    assert (installed_assets["githooks"][0] / "hoist").is_file()
     hoist = Mock(return_value=False)
     monkeypatch.setattr(cli, "hoist", hoist)
 
@@ -823,10 +725,12 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     assert "Install `brew install coreutils` now?" not in retry_output
 
     hoist.assert_called_once_with()
+    recorded = git_repo / ".git" / "harness-path"
+    installed_harness = Path(sys.executable).parent / ("harness.exe" if cli.IS_WINDOWS else "harness")
+    assert recorded.read_text(encoding="utf-8") == f"{installed_harness.as_posix()}\n"
 
     hoist.return_value = True
-    (git_repo / ".git" / "harness-path").write_text("harness\n", encoding="utf-8")
-    setup_hooks = Mock(return_value=git_repo / ".git" / "harness-path")
+    setup_hooks = Mock(return_value=recorded)
     configure = Mock()
     monkeypatch.setattr(cli, "setup_git_hooks", setup_hooks)
     monkeypatch.setattr(cli, "configure_agents", configure)
@@ -834,7 +738,10 @@ def test_init_writes_config_before_hook_consent(monkeypatch: pytest.MonkeyPatch,
     success = runner.invoke(cli.app, ["init"], input="y\n" * 3)
 
     assert success.exit_code == 0, success.output
-    assert "Can likely run loops: True" in unstyle(success.output)
+    success_output = unstyle(success.output)
+    assert "files added: True" in success_output
+    assert "Can likely run loops: True" in success_output
+    assert hoist.call_args_list == [call(), call()]
     setup_hooks.assert_called_once_with(Path(sys.executable).parent)
     configure.assert_called_once_with()
 
@@ -873,6 +780,9 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
 
     assert cli.hoist() is False
     message.assert_called_once_with("Harness is missing required assets: `docs/` and `githooks/`")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "missing-hooks").mkdir()
+    assert cli.hoist() is False
 
     repo = tmp_path / "repo"
     package_docs = tmp_path / "package" / "docs"
@@ -892,15 +802,42 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr(cli, "REPO_ROOT", repo)
     confirm = Mock(return_value=True)
     run_git = Mock()
+    message.reset_mock()
     monkeypatch.setattr(cli, "confirm", confirm)
     monkeypatch.setattr(cli, "run_git", run_git)
+    monkeypatch.setattr(Path, "mkdir", create_autospec(Path.mkdir, wraps=Path.mkdir))
+    monkeypatch.setattr(Path, "touch", create_autospec(Path.touch, wraps=Path.touch))
+    monkeypatch.setattr(cli.console, "print", Mock(wraps=cli.console.print))
 
     assert cli.hoist() is True
     assert (repo / "docs" / "nested" / "new.txt").read_text(encoding="utf-8") == "new\n"
     assert (repo / "docs" / "existing.txt").read_text(encoding="utf-8") == "existing\n"
     assert (repo / "scratchpad" / "runs" / ".gitkeep").is_file()
-    confirm.assert_called_once()
-    assert confirm.call_args.kwargs == {"default": True, "abort": True}
+    confirm.assert_called_once_with(
+        cli.style(
+            "3. Confirm, loopgate can add those files? Pre-existing files in the expected paths will remain "
+            "and loopgate will skip adding them.",
+            fg=10,
+        ),
+        default=True,
+        abort=True,
+    )
+    Path.mkdir.assert_any_call(repo / ".githooks", parents=True, exist_ok=True)
+    assert Path.mkdir.call_args_list.count(call(repo / "docs" / "nested", parents=True, exist_ok=True)) == 2
+    Path.mkdir.assert_any_call(repo / "scratchpad" / "runs", parents=True, exist_ok=True)
+    Path.touch.assert_called_once_with(repo / "scratchpad" / "runs" / ".gitkeep")
+    cli.console.print.assert_called_once_with(f"[green]\n4. Ran {(package_hooks / 'hoist').as_posix()}[/]\n")
+    assert message.call_args_list[0] == call(
+        "\n[bold yellow]We will need to add these files[/]\n* Git hooks are what ensure quality checks run"
+        "\n* Mutation tests promote good tests.\n* `preferences` allow for checks beyond what tooling catches"
+        "and demonstrate Hypothesis property tests\n* `docs` contain the instructions and memory for loops "
+        "\n*`scratchpad/` allows local agent use and contains a `runs/` directory for logs."
+    )
+    assert message.call_args_list[1:3] == [
+        call(f"`docs/` exists {(repo / 'docs').exists()}"),
+        call(f"`githooks/` exists {(repo / '.githooks').exists()}"),
+    ]
+    assert message.call_args_list[-1] == call(f"`scratchpad/` and `runs/` also added at {repo}")
     run_git.assert_called_once_with(
         [
             "-c",
@@ -1102,15 +1039,20 @@ def test_install_picks_the_package_manager_from_project_signals(
     """
     scripts = "Scripts" if sys.platform == "win32" else "bin"
     python_name = "python.exe" if sys.platform == "win32" else "python"
-    interpreter = git_repo / ".pyenv" / scripts
+    interpreter = git_repo / (virtual_env or ".pyenv") / scripts
     poetry_bin = git_repo / ".poetry" / "virtualenvs" / "project" / scripts
     monkeypatch.setenv("UV_TESTING", "1")
     for name in tuple(os.environ):
         if name.startswith("UV_"):
             monkeypatch.delenv(name)
-    monkeypatch.setenv("VIRTUAL_ENV", str(git_repo / virtual_env) if virtual_env else "")
+    assert not any(name.startswith("UV_") for name in os.environ)
+    if virtual_env == "uv-managed":
+        monkeypatch.setenv("UV_TESTING", "1")
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    monkeypatch.setattr(cli.os.environ, "get", Mock(wraps=cli.os.environ.get))
+    monkeypatch.setattr(Path, "is_file", create_autospec(Path.is_file, wraps=Path.is_file))
     monkeypatch.setattr(cli.sys, "executable", str(interpreter / python_name))
-    monkeypatch.setattr(cli, "which", which_finds(("timeout",)))
+    monkeypatch.setattr(cli, "which", Mock(wraps=which_finds(("timeout",))))
     monkeypatch.setattr(cli, "REPO_ROOT_STR", str(git_repo))
     (git_repo / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
     if lockfile:
@@ -1134,6 +1076,12 @@ def test_install_picks_the_package_manager_from_project_signals(
     assert [call for call in calls if call in managers.values()] == [managers[manager]]
     installed = (git_repo / ".git" / "harness-path").read_text(encoding="utf-8").strip()
     assert normalized_path(installed) == normalized_path(recorded[manager])
+    cli.os.environ.get.assert_any_call("VIRTUAL_ENV", "")
+    Path.is_file.assert_any_call(git_repo / "uv.lock")
+    if lockfile != "uv.lock":
+        Path.is_file.assert_any_call(git_repo / "poetry.lock")
+    if not lockfile and virtual_env != "uv-managed":
+        cli.which.assert_any_call("uv")
 
 
 @pytest.mark.parametrize(
