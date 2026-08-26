@@ -463,8 +463,7 @@ banned-api."re".msg = "Regex is slow. Use Python built-in string manipulation op
     "D104",     # Test package boundaries do not need package docstrings, undocumented-public-package
     "DOC201",   # Tests explain behavior through assertions,  docstring-missing-returns
     "S101",     # Allow 'assert' statements (needed for pytest)
-    "PLR0913",  # Tests may need larger setup functions, aka max-positional-args
-    "PLR0914",  # Tests may need larger setup functions, aka too-many-locals
+    "PLR0913",  # Tests may need larger setup functions, aka too-many-arguments
     "PLR0915",  # Tests may need larger setup functions, aka too-many-statements
     "PLR0917",  # Tests may need larger setup function definitions, aka max-positional-args
 ]

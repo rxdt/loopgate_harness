@@ -696,13 +696,12 @@ def test_init_hoists_and_records_the_installed_harness(
     monkeypatch.setattr(cli, "TOOLS", {})
     bin_dir = git_repo / "bin"
     bin_dir.mkdir()
-    timeout = bin_dir / "gtimeout"
-    write_executable(timeout, "#!/bin/sh\nexit 0\n")
+    write_executable(bin_dir / "gtimeout", "#!/bin/sh\nexit 0\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(Path, "home", fake_home(git_repo / "home"))
-    installed_environment = dict(os.environ)
-    installed_environment.pop("PYTHONPATH", None)
-    installed_assets = assert_installed_config_paths(installed_environment, git_repo)
+    installed_assets = assert_installed_config_paths(
+        {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}, git_repo
+    )
     assert (installed_assets["githooks"][0] / "hoist").is_file()
     hoist = Mock(return_value=False)
     monkeypatch.setattr(cli, "hoist", hoist)
@@ -714,11 +713,11 @@ def test_init_hoists_and_records_the_installed_harness(
     assert "harness" in tomllib.loads((git_repo / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
     hoist.assert_not_called()
 
-    retry = runner.invoke(cli.app, ["init"], input="y\n" * 5)
+    result = runner.invoke(cli.app, ["init"], input="y\n" * 5)
 
-    assert retry.exit_code == 0, retry.output
-    assert "2. Can we wire githooks so quality checks run?" in retry.output
-    retry_output = unstyle(retry.output)
+    assert result.exit_code == 0, result.output
+    assert "2. Can we wire githooks so quality checks run?" in result.output
+    retry_output = unstyle(result.output)
     assert "Can likely run loops: False" in retry_output
     assert "Success. Try running loops with `harness run <agent>`" not in retry_output
     assert "macOS harness needs timeout/gtimeout from coreutils" not in retry_output
@@ -726,8 +725,10 @@ def test_init_hoists_and_records_the_installed_harness(
 
     hoist.assert_called_once_with()
     recorded = git_repo / ".git" / "harness-path"
-    installed_harness = Path(sys.executable).parent / ("harness.exe" if cli.IS_WINDOWS else "harness")
-    assert recorded.read_text(encoding="utf-8") == f"{installed_harness.as_posix()}\n"
+    assert (
+        recorded.read_text(encoding="utf-8")
+        == (Path(sys.executable).parent / ("harness.exe" if cli.IS_WINDOWS else "harness")).as_posix() + "\n"
+    )
 
     hoist.return_value = True
     setup_hooks = Mock(return_value=recorded)
@@ -735,10 +736,10 @@ def test_init_hoists_and_records_the_installed_harness(
     monkeypatch.setattr(cli, "setup_git_hooks", setup_hooks)
     monkeypatch.setattr(cli, "configure_agents", configure)
 
-    success = runner.invoke(cli.app, ["init"], input="y\n" * 3)
+    result = runner.invoke(cli.app, ["init"], input="y\n" * 3)
 
-    assert success.exit_code == 0, success.output
-    success_output = unstyle(success.output)
+    assert result.exit_code == 0, result.output
+    success_output = unstyle(result.output)
     assert "files added: True" in success_output
     assert "Can likely run loops: True" in success_output
     assert hoist.call_args_list == [call(), call()]

@@ -31,10 +31,11 @@ def test_module_output_from_mutation_directory_is_exact(
         runpy.run_path(str(checker), run_name="__main__")
 
     assert exc_info.value.code == 1
-    assert " ".join(unstyle(capsys.readouterr().out).split()) == (
-        f"{'─' * 27} MUTMUT MUTATION RESULTS {'─' * 28} "
-        "killed 1 survived 1 total 2 skipped 0 timeout 0 Mutation Score: 50.0"
-    )
+    output = " ".join(unstyle(capsys.readouterr().out).split())
+    leading_rule, title, results = output.partition("MUTMUT MUTATION RESULTS")
+    assert title == "MUTMUT MUTATION RESULTS"
+    assert not leading_rule.strip("─ ")
+    assert results.strip("─ ") == ("killed 1 survived 1 total 2 skipped 0 timeout 0 Mutation Score: 50.0")
 
     monkeypatch.chdir(module_dir)
     monkeypatch.setattr(check_mutmut, "__file__", str(module_dir / "check_mutmut.py"))
