@@ -107,9 +107,7 @@ def test_additional_complexity_tool_gets_named_check(tmp_path: Path, monkeypatch
     assert written["harness"]["preflight"]["xenon"] == cli.TOOLS["xenon"]["args"]
 
 
-def test_primary_pylint_does_not_leave_duplicate_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_primary_pylint_does_not_leave_duplicate_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, root_files=(".pylintrc",))
     assert written["harness"]["preflight"]["lint"] == cli.TOOLS["pylint"]["args"]
     assert "pylint" not in written["harness"]["preflight"], (
@@ -149,23 +147,17 @@ def test_tox_ini_pytest_section_selects_pytest(tmp_path: Path, monkeypatch: pyte
     assert written["harness"]["gate"]["test"] == cli.TOOLS["pytest"]["args"]
 
 
-def test_setup_cfg_pytest_section_drops_packaged_pytest_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_cfg_pytest_section_drops_packaged_pytest_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, setup_cfg="[tool:pytest]\n")
     assert "pytest" not in written, "setup.cfg [tool:pytest] is authoritative but [tool.pytest] was written"
 
 
 def test_testenv_with_tox_available_selects_tox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    written = configure_repo(
-        tmp_path, monkeypatch, tox_ini="[tox]\n[testenv]\n", executables=frozenset({"tox"})
-    )
+    written = configure_repo(tmp_path, monkeypatch, tox_ini="[tox]\n[testenv]\n", executables=frozenset({"tox"}))
     assert written["harness"]["gate"]["test"] == ["tox"]
 
 
-def test_testenv_without_tox_keeps_the_template_pytest_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_testenv_without_tox_keeps_the_template_pytest_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, tox_ini="[tox]\n[testenv]\n")
     assert written["harness"]["gate"]["test"] == TEMPLATE["harness"]["gate"]["test"]
 
@@ -188,9 +180,7 @@ def test_unavailable_tool_loses_check_and_table(tmp_path: Path, monkeypatch: pyt
     assert "pylint" not in written, "pylint cannot run but [tool.pylint] was still written"
 
 
-def test_available_audit_module_keeps_the_audit_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_available_audit_module_keeps_the_audit_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch)  # pip-audit is not on PATH; the module name resolves
     assert written["harness"]["gate"]["audit"] == TEMPLATE["harness"]["gate"]["audit"]
 

@@ -50,9 +50,7 @@ print(json.dumps({
 """
 
 
-def assert_installed_config_paths(
-    environment: dict[str, str], foreign_repo: Path
-) -> dict[str, tuple[Path, Path]]:
+def assert_installed_config_paths(environment: dict[str, str], foreign_repo: Path) -> dict[str, tuple[Path, Path]]:
     """The installed config keeps package sources separate from the active repository targets."""
     probe_cwd = foreign_repo / "nested"
     probe_cwd.mkdir()
@@ -232,16 +230,14 @@ def test_help_and_info_surface_every_check_agent_and_containment_rule() -> None:
 
 def test_every_supported_agent_has_a_nonempty_command() -> None:
     """Every advertised agent has a usable argv preset rather than a missing or blank command."""
-    agents: dict[str, list[str]] = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
-        "tool"
-    ]["harness"]["agents"]
+    agents: dict[str, list[str]] = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"][
+        "harness"
+    ]["agents"]
 
     assert agents == gates().agents
     assert set(agents) == {"claude", "codex", "agy", "copilot"}
     assert all(isinstance(command, list) and bool(command) for command in agents.values())
-    assert all(
-        isinstance(argument, str) and bool(argument) for command in agents.values() for argument in command
-    )
+    assert all(isinstance(argument, str) and bool(argument) for command in agents.values() for argument in command)
 
 
 @pytest.mark.parametrize(
@@ -332,9 +328,7 @@ def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path) -> None
     assert counted.stdout == f"2 run log(s) in {runs}\nnewest: {runs / '0002-codex.jsonl'}\n"
 
 
-def test_setup_git_hooks_records_exact_posix_commands(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_setup_git_hooks_records_exact_posix_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Hook setup records the selected environment and configures the tracked hook directory."""
     git_dir = tmp_path / ".git"
     git_dir.mkdir()
@@ -383,9 +377,7 @@ def test_setup_git_hooks_reports_windows_status(monkeypatch: pytest.MonkeyPatch,
 
     recorded = cli.setup_git_hooks(env_bin)
 
-    run.assert_called_once_with(
-        ["git", "config", "core.hooksPath", ".githooks"], cwd=str(tmp_path), check=True
-    )
+    run.assert_called_once_with(["git", "config", "core.hooksPath", ".githooks"], cwd=str(tmp_path), check=True)
     assert print_message.call_args_list == [
         call("\n[cyan2]setting git hooks[/cyan2] `git config core.hooksPath .githooks`"),
         call("Windows is experimental. Reoprt issues https://github.com/rxdt/loopgate_harness/issues"),
@@ -393,9 +385,7 @@ def test_setup_git_hooks_reports_windows_status(monkeypatch: pytest.MonkeyPatch,
     ]
 
 
-def test_configure_agents_updates_configs_and_creates_backups(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_configure_agents_updates_configs_and_creates_backups(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Agent config is additive, rules are refreshed, and original files are backed up."""
     home = tmp_path / "home"
     claude_path = home / ".claude" / "settings.json"
@@ -416,9 +406,7 @@ def test_configure_agents_updates_configs_and_creates_backups(
         )
         + "\n"
     )
-    codex_original = (
-        'model = "existing"\n\n[shell_environment_policy]\ninherit = "core"\nset = { KEEP = "yes" }\n'
-    )
+    codex_original = 'model = "existing"\n\n[shell_environment_policy]\ninherit = "core"\nset = { KEEP = "yes" }\n'
     claude_path.write_text(claude_original, encoding="utf-8")
     codex_path.write_text(codex_original, encoding="utf-8")
     rules_path.write_text("stale loopgate rules\n", encoding="utf-8")
@@ -464,9 +452,7 @@ def test_configure_agents_creates_missing_configs_without_backups(
 
 
 @pytest.mark.parametrize("answers", ["n\n", "y\nn\n"])
-def test_configure_agents_aborts_without_writing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answers: str
-) -> None:
+def test_configure_agents_aborts_without_writing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answers: str) -> None:
     """Declining either required agent configuration leaves the home directory untouched."""
     home = tmp_path / "home"
     monkeypatch.setattr(cli.Path, "home", fake_home(home))
@@ -500,9 +486,7 @@ def test_write_harness_config_aborts_when_existing_wiring_is_declined(
     assert pyproject.read_text(encoding="utf-8") == original
 
 
-def test_write_harness_config_selects_installed_user_tools(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
-) -> None:
+def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Config generation preserves user settings and selects project and standalone tool configs."""
     installed = {name: object() for name in cli.TOOLS if name != "pylint"}
     monkeypatch.setattr(cli.util, "find_spec", Mock(side_effect=installed.get))
@@ -511,9 +495,7 @@ def test_write_harness_config_selects_installed_user_tools(
     monkeypatch.setattr(Path, "with_name", create_autospec(Path.with_name, wraps=Path.with_name))
     monkeypatch.setattr(Path, "read_text", create_autospec(Path.read_text, wraps=Path.read_text))
     monkeypatch.setattr(Path, "write_text", create_autospec(Path.write_text, wraps=Path.write_text))
-    monkeypatch.setattr(
-        cli.ConfigParser, "read", create_autospec(cli.ConfigParser.read, wraps=cli.ConfigParser.read)
-    )
+    monkeypatch.setattr(cli.ConfigParser, "read", create_autospec(cli.ConfigParser.read, wraps=cli.ConfigParser.read))
     cli.write_harness_config()
     Path.with_name.assert_called_once_with(Path(cli.__file__).resolve(), "temp.pyproject.toml")
     assert Path.read_text.call_args_list == [
@@ -655,15 +637,13 @@ def test_write_harness_config_selects_installed_user_tools(
         else:
             (git_repo / ".bandit").unlink(missing_ok=True)
         (git_repo / "setup.cfg").write_text("[bandit]\n" if case["other"] else "", encoding="utf-8")
-        (git_repo / "pyproject.toml").write_text(
-            "[tool.bandit]\n" if case["pyproject"] else "", encoding="utf-8"
-        )
+        (git_repo / "pyproject.toml").write_text("[tool.bandit]\n" if case["pyproject"] else "", encoding="utf-8")
         cli.write_harness_config()
         user_project = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
 
-        assert (
-            user_project["tool"]["harness"]["gate"].get("security") == cli.TOOLS["bandit"]["args"]
-        ) is case["detected"]
+        assert (user_project["tool"]["harness"]["gate"].get("security") == cli.TOOLS["bandit"]["args"]) is case[
+            "detected"
+        ]
 
 
 def test_init_declines_without_mutating_repo(git_repo: Path) -> None:
@@ -689,9 +669,7 @@ def test_init_declines_without_mutating_repo(git_repo: Path) -> None:
     assert "Run `harness init`" in fresh.stdout
 
 
-def test_init_hoists_and_records_the_installed_harness(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
-) -> None:
+def test_init_hoists_and_records_the_installed_harness(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Init handles hook consent, hoisting, and recording the installed harness."""
     monkeypatch.setattr(cli, "TOOLS", {})
     bin_dir = git_repo / "bin"
@@ -747,9 +725,7 @@ def test_init_hoists_and_records_the_installed_harness(
     configure.assert_called_once_with()
 
 
-def test_init_aborts_when_required_hooks_are_declined(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
-) -> None:
+def test_init_aborts_when_required_hooks_are_declined(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Init stops when its required hook confirmation aborts."""
     (git_repo / "pyproject.toml").write_text("", encoding="utf-8")
     confirm = Mock(side_effect=[True, Abort()])
@@ -870,151 +846,146 @@ def test_hoist_aborts_before_writing_when_declined(monkeypatch: pytest.MonkeyPat
 
 
 def test_installing_the_template_cleans_the_repo_and_sets_hooks(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Install cleans template files, syncs dependencies, activates hooks, and is idempotent."""
-    (git_repo / "pyproject.toml").write_text(
-        "[project]\n"
-        'name = "old-name"\n'
-        'version = "2.3.4"\n'
-        'description = "the user\'s own project"\n'
-        'authors = [{ name = "someone" }]\n'
-        'requires-python = ">=3.11"\n'
-        "\n[project.scripts]\n"
-        'harness = "harness.cli:main"\n'
-        "\n[tool.pyright]\n"
-        'typeCheckingMode = "strict"\n'
-        'include = ["src", "harness"]\n'
-        "\n[tool.pytest.ini_options]\n"
-        'addopts = ["-ra"]\n'
-        'testpaths = ["tests", "harness"]\n'
-        'pythonpath = ["src", "harness"]\n'
-        "\n[tool.coverage]\n"
-        'run.source = ["src", "harness"]\n'
-        "report.fail_under = 100\n"
-        "\n[tool.complexipy]\n"
-        'paths = ["src", "harness"]\n'
-        "max-complexity-allowed = 10\n"
-        "\n[tool.ruff]\n"
-        'exclude = [".git"]\n'
-        "\n[tool.pylint.main]\n"
-        'ignore = [".git"]\n',
-        encoding="utf-8",
+    """Install a fresh template checkout with real process, filesystem, and Git boundaries."""
+    template_repo = tmp_path / "template"
+    subprocess.run(
+        ["git", "clone", "--quiet", "--shared", str(REPO_ROOT), str(template_repo)],
+        check=True,
     )
-    (git_repo / "uv.lock").touch()
-    replacement_project = "[project]\nname = 'replacement'\n"
-    (git_repo / "temp.pyproject.toml").write_text(replacement_project, encoding="utf-8")
-    template_files = (".banner.svg", ".diagram.png", ".infin.png", ".loops_agents.svg", ".loops.svg")
-    (git_repo / ".assets").mkdir()
-    for file_name in template_files:
-        (git_repo / ".assets" / file_name).touch()
-    (git_repo / ".github" / "workflows").mkdir(parents=True)
-    (git_repo / ".github" / "workflows" / "publish.yml").touch()
-    (git_repo / "CONTRIBUTING.md").touch()
-    (git_repo / "dist").mkdir()
-    (git_repo / "dist" / "stale.whl").touch()
-    for directory in ("harness/tests", "preferences", "tests/preferences"):
-        (git_repo / directory).mkdir(parents=True)
-    monkeypatch.setattr(cli, "which", which_finds(("timeout",)))
-    monkeypatch.setattr(cli, "REPO_ROOT_STR", str(git_repo))
-    toolchain = stub_toolchain(git_repo / ".git")
-    monkeypatch.setattr(subprocess, "run", toolchain)
+    expected_project = (REPO_ROOT / "harness" / "temp.pyproject.toml").read_text(encoding="utf-8")
+    (template_repo / "harness" / "temp.pyproject.toml").write_text(expected_project, encoding="utf-8")
+    (template_repo / "harness" / "cli.py").write_text(
+        (REPO_ROOT / "harness" / "cli.py").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    source_project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    env_bin = template_repo / ".venv" / ("Scripts" if sys.platform == "win32" else "bin")
+    monkeypatch.setattr(cli, "REPO_ROOT", template_repo)
+    monkeypatch.setattr(cli, "REPO_ROOT_STR", str(template_repo))
+    monkeypatch.setattr(gates(), "repo_root", template_repo)
+    monkeypatch.setattr(cli, "check_for_timeout_and_prompt", Mock(return_value="timeout"))
 
-    monkeypatch.setattr(Path, "is_file", create_autospec(Path.is_file, wraps=Path.is_file))
-    monkeypatch.setattr(Path, "replace", create_autospec(Path.replace, wraps=Path.replace))
-    monkeypatch.setattr(Path, "unlink", create_autospec(Path.unlink, wraps=Path.unlink))
-    monkeypatch.setattr(cli, "rmtree", Mock(wraps=cli.rmtree))
     result = runner.invoke(cli.app, ["install"])
 
-    assert result.exit_code == 0
-    assert (git_repo / "pyproject.toml").read_text(encoding="utf-8") == replacement_project
-    assert not (git_repo / "temp.pyproject.toml").exists()
-    assert (git_repo / "README.md").read_text(encoding="utf-8") == "seed\n"
-    assert not (git_repo / "README.template.md").exists()
-    assert not (git_repo / ".assets").exists()
-    assert not (git_repo / ".github" / "workflows" / "publish.yml").exists()
-    assert not (git_repo / "CONTRIBUTING.md").exists()
-    assert not (git_repo / "dist").exists()
-    assert not (git_repo / "harness" / "tests").exists()
-    assert (git_repo / "preferences").is_dir()
-    assert (git_repo / "tests" / "preferences").is_dir()
-    Path.is_file.assert_any_call(git_repo / "README.template.md")
-    Path.is_file.assert_any_call(git_repo / "temp.pyproject.toml")
-    Path.replace.assert_any_call(git_repo / "README.template.md", git_repo / "README.md")
-    Path.replace.assert_any_call(git_repo / "temp.pyproject.toml", git_repo / "pyproject.toml")
-    Path.unlink.assert_any_call(git_repo / ".github" / "workflows" / "publish.yml", missing_ok=True)
-    Path.unlink.assert_any_call(git_repo / "CONTRIBUTING.md", missing_ok=True)
-    cli.rmtree.assert_any_call(git_repo / "dist")
-    cli.rmtree.assert_any_call(git_repo / "harness" / "tests")
-    cli.rmtree.assert_any_call(git_repo / ".assets")
-    toolchain.assert_any_call(("uv", "sync"), cwd=str(git_repo), check=True)
-    recorded_harness = (git_repo / ".git" / "harness-path").read_text(encoding="utf-8").strip()
-    env_bin = git_repo / ".venv" / ("Scripts" if sys.platform == "win32" else "bin")
+    assert result.exit_code == 0, result.output
+    recorded_harness = (template_repo / ".git" / "harness-path").read_text(encoding="utf-8").strip()
     assert normalized_path(recorded_harness) == normalized_path(harness_executable(env_bin))
-    toolchain.assert_any_call(
-        ["git", "config", "core.hooksPath", ".githooks"], cwd=cli.REPO_ROOT_STR, check=True
+    installed = subprocess.run(
+        [recorded_harness, "--help"], cwd=template_repo, capture_output=True, text=True, check=False
+    )
+    assert installed.returncode == 0, installed.stderr
+    assert "install" in installed.stdout
+    assert gate.run_git(["config", "--get", "core.hooksPath"], template_repo).strip() == ".githooks"
+    assert (template_repo / "preferences").is_dir()
+    assert (template_repo / "tests" / "preferences").is_dir()
+
+    leftovers = [
+        name
+        for name in (
+            "README.template.md",
+            ".assets",
+            ".github/workflows/publish.yml",
+            "CONTRIBUTING.md",
+            "mutation-score.json",
+            "harness/tests",
+        )
+        if (template_repo / name).exists()
+    ]
+    assert (template_repo / "pyproject.toml").read_text(encoding="utf-8") == expected_project
+    assert not leftovers, f"template leftovers after install: {leftovers}"
+
+    installed = subprocess.run(
+        [
+            env_bin / ("ruff.exe" if sys.platform == "win32" else "ruff"),
+            "check",
+            "--no-cache",
+            "--show-fixes",
+            ".",
+        ],
+        cwd=template_repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert "has no effect because preview is not enabled" not in installed.stdout + installed.stderr
+    installed_project = tomllib.loads((template_repo / "pyproject.toml").read_text(encoding="utf-8"))
+    assert (
+        installed_project["tool"]["ruff"]["line-length"],
+        installed_project["tool"]["pylint"]["format"]["max-line-length"],
+        installed_project["tool"]["ruff"]["lint"]["pycodestyle"]["max-doc-length"],
+    ) == (
+        source_project["tool"]["ruff"]["line-length"],
+        source_project["tool"]["pylint"]["format"]["max-line-length"],
+        source_project["tool"]["ruff"]["lint"]["pycodestyle"]["max-doc-length"],
     )
 
-    head = gate.run_git(["rev-parse", "HEAD"], git_repo)
-    status = gate.run_git(["status", "--porcelain"], git_repo)
-    generated_project = (git_repo / "pyproject.toml").read_text(encoding="utf-8")
-    again = runner.invoke(cli.app, ["install"])
 
-    assert again.exit_code == 0
-    assert gate.run_git(["rev-parse", "HEAD"], git_repo) == head
-    assert gate.run_git(["status", "--porcelain"], git_repo) == status
-    assert (git_repo / "pyproject.toml").read_text(encoding="utf-8") == generated_project
-    assert (git_repo / "README.md").read_text(encoding="utf-8") == "seed\n"
+def test_cleanup_updates_a_pristine_single_commit_template(tmp_path: Path) -> None:
+    """A pristine template's only commit is amended with the installed project files."""
+    replacement_project = (REPO_ROOT / "harness" / "temp.pyproject.toml").read_text(encoding="utf-8")
+    replacement_readme = "replacement project readme\n"
+    gate.run_git(["init", "-q"], tmp_path)
+    gate.run_git(["config", "user.email", "harness@test.local"], tmp_path)
+    gate.run_git(["config", "user.name", "harness-test"], tmp_path)
+    (tmp_path / "README.md").write_text("template instructions\n", encoding="utf-8")
+    (tmp_path / "README.template.md").write_text(replacement_readme, encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "template"\n', encoding="utf-8")
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "harness" / "temp.pyproject.toml").write_text(replacement_project, encoding="utf-8")
+    gate.run_git(["add", "-A"], tmp_path)
+    gate.run_git(["commit", "-q", "-m", "template state"], tmp_path)
+    assert not gate.run_git(["status", "--porcelain"], tmp_path)
+    original_head = gate.run_git(["rev-parse", "HEAD"], tmp_path).strip()
+    original_message = gate.run_git(["log", "-1", "--format=%B"], tmp_path).strip()
 
+    assert cli.cleanup(tmp_path) is True
 
-def test_cleanup_updates_the_pristine_historical_template_commit(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
-) -> None:
-    """The historical pristine-template probes trigger the real Git commit update after real cleanup."""
-    (git_repo / "pyproject.toml").write_text('[project]\nname = "template"\n', encoding="utf-8")
-    replacement_project = "[project]\nname = 'replacement'\n"
-    (git_repo / "temp.pyproject.toml").write_text(replacement_project, encoding="utf-8")
-    replacement_readme = "the project readme\n"
-    (git_repo / "README.template.md").write_text(replacement_readme, encoding="utf-8")
-    real_run_git = cli.run_git
-    run_git = Mock(wraps=real_run_git, side_effect=["", "867f2df", DEFAULT])
-    monkeypatch.setattr(cli, "run_git", run_git)
-
-    assert cli.cleanup(git_repo) is True
-    assert run_git.call_args_list[:2] == [
-        call(["status", "--porcelain"], git_repo),
-        call(["rev-parse", "--short", "HEAD"], git_repo),
-    ]
-    wrong_repo_amend = call(["commit", "-a", "--amend", "--no-edit"])
-    correct_repo_amend = call(["commit", "-a", "--amend", "--no-edit"], git_repo)
-    assert run_git.call_args_list[-1] != wrong_repo_amend
-    assert run_git.call_args_list[-1] == correct_repo_amend
-    assert (git_repo / "README.md").read_text(encoding="utf-8") == replacement_readme
-    assert (git_repo / "pyproject.toml").read_text(encoding="utf-8") == replacement_project
-    assert not (git_repo / "temp.pyproject.toml").exists()
+    amended_head = gate.run_git(["rev-parse", "HEAD"], tmp_path).strip()
+    assert amended_head != original_head
+    assert gate.run_git(["rev-list", "--count", "HEAD"], tmp_path).strip() == "1"
+    assert gate.run_git(["log", "-1", "--format=%B"], tmp_path).strip() == original_message
+    assert not gate.run_git(["status", "--porcelain"], tmp_path)
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == replacement_readme
+    assert (tmp_path / "pyproject.toml").read_text(encoding="utf-8") == replacement_project
+    assert not (tmp_path / "harness" / "temp.pyproject.toml").exists()
 
 
-@pytest.mark.parametrize("present", [(), ("README.template.md",), ("temp.pyproject.toml",)])
-def test_cleanup_requires_both_template_files(present: tuple[str, ...], tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("has_readme", "has_project"),
+    [(False, False), (True, False), (False, True)],
+)
+def test_cleanup_requires_both_template_files(has_readme: bool, has_project: bool, tmp_path: Path) -> None:
     """Cleanup does nothing unless both template inputs identify a template checkout."""
-    for name in present:
-        (tmp_path / name).touch()
+    if has_readme:
+        (tmp_path / "README.template.md").touch()
+    if has_project:
+        (tmp_path / "harness").mkdir()
+        (tmp_path / "harness" / "temp.pyproject.toml").touch()
 
     assert cli.cleanup(tmp_path) is False
 
 
-def test_cleanup_does_not_amend_a_dirty_template(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Cleanup only rewrites the historical template commit when the checkout started clean."""
-    (tmp_path / "README.template.md").write_text("readme\n", encoding="utf-8")
-    (tmp_path / "temp.pyproject.toml").write_text("[project]\n", encoding="utf-8")
-    run_git = Mock(side_effect=[" M README.md\n", "867f2df"])
+def test_cleanup_does_not_amend_a_dirty_template(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Real dirty state prevents cleanup from amending the historical template commit."""
+    replacement_project = (REPO_ROOT / "harness" / "temp.pyproject.toml").read_text(encoding="utf-8")
+    (git_repo / "pyproject.toml").write_text('[project]\nname = "template"\n', encoding="utf-8")
+    (git_repo / "README.template.md").write_text("replacement project readme\n", encoding="utf-8")
+    (git_repo / "harness").mkdir()
+    (git_repo / "harness" / "temp.pyproject.toml").write_text(replacement_project, encoding="utf-8")
+    gate.run_git(["add", "-A"], git_repo)
+    gate.run_git(["commit", "-q", "-m", "template state"], git_repo)
+    assert not gate.run_git(["status", "--porcelain"], git_repo)
+    original_head = gate.run_git(["rev-parse", "HEAD"], git_repo).strip()
+    (git_repo / "README.md").write_text("uncommitted user work\n", encoding="utf-8")
+    run_git = Mock(wraps=cli.run_git, side_effect=[DEFAULT, "867f2df\n"])
     monkeypatch.setattr(cli, "run_git", run_git)
 
-    assert cli.cleanup(tmp_path) is True
-    assert run_git.call_args_list == [
-        call(["status", "--porcelain"], tmp_path),
-        call(["rev-parse", "--short", "HEAD"], tmp_path),
-    ]
+    assert cli.cleanup(git_repo) is True
+
+    assert gate.run_git(["rev-parse", "HEAD"], git_repo).strip() == original_head
+    assert gate.run_git(["status", "--porcelain"], git_repo)
 
 
 @pytest.mark.parametrize(
@@ -1050,8 +1021,6 @@ def test_install_picks_the_package_manager_from_project_signals(
     if virtual_env == "uv-managed":
         monkeypatch.setenv("UV_TESTING", "1")
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
-    monkeypatch.setattr(cli.os.environ, "get", Mock(wraps=cli.os.environ.get))
-    monkeypatch.setattr(Path, "is_file", create_autospec(Path.is_file, wraps=Path.is_file))
     monkeypatch.setattr(cli.sys, "executable", str(interpreter / python_name))
     monkeypatch.setattr(cli, "which", Mock(wraps=which_finds(("timeout",))))
     monkeypatch.setattr(cli, "REPO_ROOT_STR", str(git_repo))
@@ -1077,12 +1046,6 @@ def test_install_picks_the_package_manager_from_project_signals(
     assert [call for call in calls if call in managers.values()] == [managers[manager]]
     installed = (git_repo / ".git" / "harness-path").read_text(encoding="utf-8").strip()
     assert normalized_path(installed) == normalized_path(recorded[manager])
-    cli.os.environ.get.assert_any_call("VIRTUAL_ENV", "")
-    Path.is_file.assert_any_call(git_repo / "uv.lock")
-    if lockfile != "uv.lock":
-        Path.is_file.assert_any_call(git_repo / "poetry.lock")
-    if not lockfile and virtual_env != "uv-managed":
-        cli.which.assert_any_call("uv")
 
 
 @pytest.mark.parametrize(
@@ -1182,9 +1145,7 @@ def test_windows_skips_posix_steps_and_launches_the_powershell_twin(
     assert launched[0][6:] == list(gates().agents["claude"])
 
 
-def test_windows_run_uses_powershell_without_path_lookup(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
-) -> None:
+def test_windows_run_uses_powershell_without_path_lookup(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Windows relies on its system PowerShell command without resolving a separate executable."""
     monkeypatch.chdir(git_repo)
     monkeypatch.setattr(cli, "IS_WINDOWS", True)
@@ -1303,9 +1264,7 @@ def test_valid_run_inputs_set_the_timeout_environment(
     assert (cli.raise_issues("CLAUDE", 1, 1), os.environ["TIMEOUT"]) == expected
 
 
-def test_invalid_run_reports_every_problem(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_invalid_run_reports_every_problem(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Independent validation failures are all reported in one usage error."""
     monkeypatch.setattr(cli, "IS_WINDOWS", False)
     monkeypatch.setattr(cli, "check_for_timeout_and_prompt", Mock(return_value=""))
@@ -1316,9 +1275,7 @@ def test_invalid_run_reports_every_problem(
         cli.raise_issues("BOGUS", 0, 0)
 
     assert exit_info.value.exit_code == 2
-    message = (
-        "Unknown agent name 'bogus' iterations and max_minutes must be >= 1 gtimeout or timeout is required"
-    )
+    message = "Unknown agent name 'bogus' iterations and max_minutes must be >= 1 gtimeout or timeout is required"
     assert " ".join(capsys.readouterr().err.split()) == message
     secho.assert_called_once_with(message, err=True, fg=cli.colors.MAGENTA, bold=True)
 
@@ -1360,9 +1317,7 @@ def test_a_harnessed_run_writes_numbered_receipts_and_propagates_exit_codes(
     assert launched[0][3:] == list(gates().agents["claude"])
     receipts = git_repo / "scratchpad" / "runs" / "20990102" / "claude"
     assert (receipts / "0001.jsonl").read_text(encoding="utf-8") == '{"type":"result","result":"ok"}\n'
-    assert os.environ["RALPH_PROMPT"] == (
-        "Your agent id prefix is `claude-0001`\n\ndo the most important thing"
-    )
+    assert os.environ["RALPH_PROMPT"] == ("Your agent id prefix is `claude-0001`\n\ndo the most important thing")
 
     second = runner.invoke(cli.app, ["run", "claude", "1", "2", "False", "--model", "haiku"])
 

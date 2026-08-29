@@ -3,9 +3,10 @@
 Now that you have the template locally:
 
 1. `uv sync` OR `poetry install` OR `pip install -r requirements.txt`, then `harness install && git add . && git commit`
-2. Write your project goal in [docs/plan.md](docs/plan.md)
-3. `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
-4. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
+2. If your repo is private and you don't have a paid Github delete [ci.yml line#20](.github/workflows/ci.yml#L29) or you will get an `Error: Dependency review is not supported on this repository`
+3. **Write your project goal in [docs/plan.md](docs/plan.md)**
+4. Loop with `harness run <agent=claude|codex|agy|copilot> [max_iterations] [max_minutes]`
+5. Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
 
 ---
 

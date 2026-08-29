@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/dependency-review-action@v5
+      - uses: actions/dependency-review-action@v5  # only works with public repos or paid Github otherwise fail
         with:
           # On push there is no PR base/head, so diff the pushed commit range.
           base-ref: ${{ github.event.pull_request.base.sha || github.event.before }}

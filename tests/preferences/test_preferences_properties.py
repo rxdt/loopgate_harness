@@ -207,9 +207,7 @@ def nested_continue_source(draw: strategies.DrawFn) -> str:
         over-nesting rule always flags it.
     """
     depth = draw(strategies.integers(min_value=2, max_value=4))
-    blocks = draw(
-        strategies.lists(strategies.sampled_from(["if cond", "for i in xs"]), min_size=depth, max_size=depth)
-    )
+    blocks = draw(strategies.lists(strategies.sampled_from(["if cond", "for i in xs"]), min_size=depth, max_size=depth))
 
     lines = ["for outer in items:"]  # an outer loop the continue always belongs to
     indent = "    "
