@@ -1,3 +1,12 @@
+[project]
+name = "harness"
+requires-python = ">=3.10"
+version = "0.1.0"
+[project.scripts]
+harness = "harness.cli:main" # creates the executable `harness`
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build" # allows `harness` commands, runs the executable
 [dependency-groups]
 dev = [
     "complexipy",
@@ -93,9 +102,7 @@ security = [
     ".",
 ]
 types = ["pyright", "--outputjson"]
-test = [
-    "pytest", "-p", "no:cacheprovider", "-n", "auto", "--cov", "--cov-report=term-missing", "--cov-fail-under=100", "--hypothesis-show-statistics",
-]
+test = ["pytest", "-p", "no:cacheprovider", "-n", "auto", "--cov", "--cov-report=term-missing", "--cov-fail-under=100", "--durations=5"]
 
 [tool.harness.FORBIDDEN]
 DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/", "mutation", "tests/mutation/"]
@@ -229,7 +236,7 @@ derandomize = true   # false default seeds random, uncovers more bugs. True = de
 [tool.mutmut]
 max-children = 2
 source_paths = ["preferences", "src"]  # what to mutate
-also_copy = ["mutation", ".githooks"]  # not mutated paths, copied for imports
+also_copy = ["preferences", "mutation", ".githooks"]  # not mutated paths, copied for imports
 
 # ==============================================================================
 # Cognitive Complexity Complexipy Configuration
@@ -264,7 +271,8 @@ main.ignore = [
     "worktrees",
     "mutants",
     ".tox",
-    "tox"
+    "tox",
+    "harness"
 ]
 format.max-line-length = 120         # Keep Pylint line accounting aligned with Ruff E501
 format.max-module-lines = 750        # Enable Pylint C0302 because Ruff has no equivalent, includes docstrings
@@ -279,7 +287,7 @@ design.max-attributes = 10           # Max instance attributes (variables) allow
 # ==============================================================================
 [tool.ruff]
 target-version = "py310"
-preview = false                     # Enable newer Ruff rules before they are fully stable
+preview = true                     # Enable newer Ruff rules before they are fully stable
 line-length = 120                   # Keep code readable without forcing narrow wrapping
 force-exclude = true                # Respect excluded paths even when they are passed directly
 exclude = [
@@ -295,6 +303,7 @@ exclude = [
     ".ruff_cache",
     ".uv",
     "**/.pylint_bits/**",          # Stops Ruff from fighting Pylint's internal cache
+    "harness"   # changes to ruff rules should not trigger non-project harness code
 ]
 [tool.ruff.format]
 quote-style = "double"  # Quote style for strings ("single" or "double")
@@ -395,8 +404,4 @@ ban-relative-imports = "all"  # Enforce absolute imports
     "DOC201", # Tests explain behavior through assertions,  docstring-missing-returns
     "S101",   # Allow 'assert' statements (needed for pytest)
     "PLR0915",  # Tests may need larger setup functions
-]
-"harness/**/*.py" = [
-    "S404", # Harness code intentionally imports subprocess to run local tools. suspicious-subprocess-import
-    "S603", # Harness code intentionally executes trusted local tool commands without a shell. subprocess-without-shell-equals-true
 ]

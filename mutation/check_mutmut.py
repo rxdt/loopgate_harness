@@ -130,9 +130,7 @@ def analyze_mutmut_report_passed(file_path: str = "mutants/mutmut-cicd-stats.jso
     """
     mutation_score: float = 0.0
     if not Path(file_path).exists():
-        rprint(
-            f"[bold red]Mutmut report not at {file_path}[/]:\nRun `mutmut run && mutmut export-cicd-stats`"
-        )
+        rprint(f"[bold red]Mutmut report not at {file_path}[/]:\nRun `mutmut run && mutmut export-cicd-stats`")
         return mutation_score
     data: dict[str, int] = {}
     with Path(file_path).open("r", encoding="utf-8") as fp:

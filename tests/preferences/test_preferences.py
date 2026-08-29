@@ -74,9 +74,7 @@ def test_underscore_names_flagged() -> None:
     assert any("'_hidden'" in message for message in found)
     assert any("'_arg'" in message for message in found)
     assert any("'_value'" in message for message in found)
-    allowed_source = (
-        "_ = 1\nvalue, _ = pair\nfor _ in values:\n    pass\n\ndef consume(_):\n    return None\n"
-    )
+    allowed_source = "_ = 1\nvalue, _ = pair\nfor _ in values:\n    pass\n\ndef consume(_):\n    return None\n"
     assert complaints("named_with_underscore_and_not_in_class_or_dunder", allowed_source) == []
     assert not preferences_violations("harness/cli.py", "env_bin, _ = infer_env_manager()\n")
     class_source = "class Box:\n    def _private(self):\n        _value = 1\n        return _value\n"
@@ -122,14 +120,14 @@ def test_bare_star_and_slash_separators_not_allowed() -> None:
     """The '*' in a def using them with named parameters is unallowed - obfuscates types."""
     message = "'*args', '**kwargs', '*', and '/' hide the function signature, use explicit parameters"
     assert complaints("hidden_signature_star_args", "def f(a, *, b):\n    return b\n") == [message]  # kw-only
-    assert complaints("hidden_signature_star_args", "def f(a, b, /):\n    return a\n") == [
-        message
-    ]  # pos-only
+    assert complaints("hidden_signature_star_args", "def f(a, b, /):\n    return a\n") == [message]  # pos-only
 
 
 def test_dynamic_star_call_flagged() -> None:
     """Splatting a non-literal sequence (a name, or a literal containing a '*') into a call is flagged."""
-    assert len(complaints("dynamic_star_call", "f(*my_list)\n")) == 1
+    assert complaints("dynamic_star_call", "f(*my_list)\n") == [
+        "Dynamic '*' call hides positional arguments; pass explicit arguments"
+    ]
     assert len(complaints("dynamic_star_call", "f(*[1, *items])\n")) == 1
     assert len(complaints("dynamic_star_call", "f(*(1, *items))\n")) == 1
 
@@ -211,7 +209,9 @@ def test_lazy_any_type_hint_flagged() -> None:
 
 def test_continue_in_while_loop_flagged() -> None:
     """A continue inside a while loop is flagged (infinite-freeze risk)."""
-    assert complaints("chaotic_continue_statements", "while True:\n    if x:\n        continue\n")
+    assert complaints("chaotic_continue_statements", "while True:\n    if x:\n        continue\n") == [
+        "'continue' inside a while loop banned to prevent infinite freezes"
+    ]
 
 
 def test_continue_nested_in_stacked_ifs_flagged() -> None:
@@ -243,6 +243,14 @@ def test_continue_deeply_nested_in_loops_flagged() -> None:
     assert "Overly-nested" in preferences_violations("m.py", source)
 
 
+def test_continue_in_two_nested_loops_flagged() -> None:
+    """Two nested loops are the minimum prohibited continue depth."""
+    source = "for outer in xs:\n    for inner in ys:\n        continue\n"
+    assert preferences_violations("m.py", source) == (
+        "m.py:3: Overly-nested 'continue' detected inside multiple if/for blocks"
+    )
+
+
 def test_while_continue_reports_the_while_message_not_the_nested_one() -> None:
     """When a continue sits in an if inside a while, the while-loop ban is reported (that branch runs
     first and returns), not the nested-if message.
@@ -254,7 +262,7 @@ def test_while_continue_reports_the_while_message_not_the_nested_one() -> None:
 
 def test_lazy_assert_flagged() -> None:
     """An assert on a constant or literal container tests nothing and is flagged."""
-    assert complaints("lazy_assert", "assert True\n")  # constant
+    assert complaints("lazy_assert", "assert True\n") == ["Lazy test assertion detected"]  # constant
     assert complaints("lazy_assert", "assert []\n")  # literal container
     assert complaints("lazy_assert", "assert real_condition\n") == []  # a real check passes
 
@@ -262,13 +270,17 @@ def test_lazy_assert_flagged() -> None:
 def test_globals_and_locals_injection_flagged() -> None:
     """Calling globals()/locals() to poke the runtime registry is flagged; a plain call is not."""
     assert complaints("objects_injected_into_runtime_memory", "globals()['x'] = 1\n")
-    assert complaints("objects_injected_into_runtime_memory", "locals()\n")
+    assert complaints("objects_injected_into_runtime_memory", "locals()\n") == [
+        "Dynamic injection of memory registry spotted"
+    ]
     assert complaints("objects_injected_into_runtime_memory", "sorted(items)\n") == []
 
 
 def test_complex_multi_generator_comprehension_flagged() -> None:
     """A comprehension with multiple generators AND a filter is flagged; a simple one is not."""
-    assert complaints("complex_comprehension", "[a for row in grid for a in row if a]\n")
+    assert complaints("complex_comprehension", "[a for row in grid for a in row if a]\n") == [
+        "Overly complex comprehension, use a loop or type Set math"
+    ]
     assert complaints("complex_comprehension", "[a for a in row if a]\n") == []
 
 
@@ -315,9 +327,7 @@ def test_a_clean_file_reports_only_the_kind_that_fired() -> None:
     fires here, so the underscore/star messages must be absent.
     """
     violations = preferences_violations("m.py", "value = lambda a: a\n")  # only lambda_found fires
-    assert violations == (
-        "m.py:1: Lambda found hurting readability and adding complexity, prefer map() or filter()"
-    )
+    assert violations == ("m.py:1: Lambda found hurting readability and adding complexity, prefer map() or filter()")
     assert "starts with underscore" not in violations
     assert "Star unpacking" not in violations
 
@@ -327,9 +337,10 @@ def test_dirty_file_lists_each_violation_on_its_own_line() -> None:
     number, and the two are newline-joined into a single string — pinning the exact flat format.
     """
     violations = preferences_violations("m.py", "_x = lambda a: a\n")
-    assert "m.py:1: Name '_x' starts with underscore" in violations
-    assert "m.py:1: Lambda found" in violations
-    assert violations.count("\n") == 1  # two messages joined by a single newline
+    assert violations == (
+        "m.py:1: Name '_x' starts with underscore and is not in a class\n"
+        "m.py:1: Lambda found hurting readability and adding complexity, prefer map() or filter()"
+    )
 
 
 def test_line_number_in_message_is_accurate() -> None:
@@ -455,9 +466,7 @@ def test_complex_comprehension_flagged_iff_multi_generator_with_filter(case: tup
 def nested_continue_source(draw: strategies.DrawFn) -> str:
     """Draw a continue nested beneath an outer loop and two to four more blocks."""
     depth = draw(strategies.integers(min_value=2, max_value=4))
-    blocks = draw(
-        strategies.lists(strategies.sampled_from(["if cond", "for i in xs"]), min_size=depth, max_size=depth)
-    )
+    blocks = draw(strategies.lists(strategies.sampled_from(["if cond", "for i in xs"]), min_size=depth, max_size=depth))
 
     lines = ["for outer in items:"]
     indent = "    "

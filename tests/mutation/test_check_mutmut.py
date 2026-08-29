@@ -50,9 +50,7 @@ def test_report_with_timeout_passes_and_renders(
     """A timeout counts as detected and remains visible in the report."""
     report = tmp_path / "mutants" / "mutmut-cicd-stats.json"
     report.parent.mkdir()
-    report.write_text(
-        Path(__file__).with_name("mutmut-cicd-stats.json").read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    report.write_text(Path(__file__).with_name("mutmut-cicd-stats.json").read_text(encoding="utf-8"), encoding="utf-8")
 
     checker = Path(__file__).parents[2] / "mutation" / "check_mutmut.py"
     monkeypatch.chdir(tmp_path)
@@ -76,9 +74,7 @@ def test_report_checker_entry_point_exits_zero_and_prints_score(
     """The script entry point reads the default report path and exposes pass/fail through the process exit."""
     report = tmp_path / "mutants" / "mutmut-cicd-stats.json"
     report.parent.mkdir()
-    report.write_text(
-        Path(__file__).with_name("mutmut-cicd-stats.json").read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    report.write_text(Path(__file__).with_name("mutmut-cicd-stats.json").read_text(encoding="utf-8"), encoding="utf-8")
 
     checker = Path(__file__).parents[2] / "mutation" / "check_mutmut.py"
     monkeypatch.chdir(tmp_path)
@@ -104,9 +100,7 @@ def test_report_enforces_threshold(tmp_path: Path, capsys: pytest.CaptureFixture
     assert analyze_mutmut_report_passed(str(report)) == pytest.approx(MINIMUM_MUTATION_SCORE)
 
     failing_score = MINIMUM_MUTATION_SCORE - 1
-    report.write_text(
-        json.dumps({"killed": failing_score, "timeout": 0, "total": 100, "skipped": 0}), encoding="utf-8"
-    )
+    report.write_text(json.dumps({"killed": failing_score, "timeout": 0, "total": 100, "skipped": 0}), encoding="utf-8")
     assert analyze_mutmut_report_passed(str(report)) == pytest.approx(failing_score)
     output = " ".join(unstyle(capsys.readouterr().out).split())
     assert f"Mutation Score: {failing_score}" in output

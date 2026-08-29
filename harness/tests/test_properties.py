@@ -71,8 +71,7 @@ def recased_patterns(draw: strategies.DrawFn) -> tuple[str, ...]:
     """
     return tuple(
         "".join(
-            draw(strategies.sampled_from((char.lower(), char.upper()))) if char.isalpha() else char
-            for char in pattern
+            draw(strategies.sampled_from((char.lower(), char.upper()))) if char.isalpha() else char for char in pattern
         )
         for pattern in gates().forbidden_patterns
     )
@@ -91,9 +90,7 @@ def test_banned_pattern_detected_across_arbitrary_line_casing(recased: tuple[str
 
 def test_banned_pattern_scan_uses_real_staged_diff(scan_repo: Path) -> None:
     """The production Git diff path reports every configured forbidden pattern."""
-    source = "".join(
-        f"value_{index} = 1  # {pattern}\n" for index, pattern in enumerate(gates().forbidden_patterns)
-    )
+    source = "".join(f"value_{index} = 1  # {pattern}\n" for index, pattern in enumerate(gates().forbidden_patterns))
     assert_all_patterns_reported(scan_staged(scan_repo, source))
 
 
@@ -135,9 +132,7 @@ def test_banned_pattern_ignores_a_removed_line(monkeypatch: pytest.MonkeyPatch, 
     assert scan_staged(git_repo, "value = 1\n") == []
 
 
-def test_casefold_colliding_forbidden_paths_are_both_ejected(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
-) -> None:
+def test_casefold_colliding_forbidden_paths_are_both_ejected(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Two forbidden paths differing only in case must both be unstaged. A case-insensitive filesystem
     cannot hold both as files, so they go into the index directly; neither may slip through.
     """

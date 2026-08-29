@@ -245,11 +245,7 @@ def objects_injected_into_runtime_memory(node: ast.AST) -> str | None:
     Returns:
         A complaint if the node calls globals()/locals(), else None.
     """
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id in {"globals", "locals"}
-    ):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"globals", "locals"}:
         return "Dynamic injection of memory registry spotted"
     return None
 
@@ -263,10 +259,7 @@ def complex_comprehension(node: ast.AST) -> str | None:
     Returns:
         A complaint if a multi-generator comprehension also filters, else None.
     """
-    if (
-        isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp)
-        and len(node.generators) > 1
-    ):
+    if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp) and len(node.generators) > 1:
         for generator in node.generators:
             if generator.ifs:
                 return "Overly complex comprehension, use a loop or type Set math"

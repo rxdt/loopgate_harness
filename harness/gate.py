@@ -41,13 +41,9 @@ class Gate:
         toml = tomllib.loads(pyproject.read_text(encoding="utf-8")).unwrap() if pyproject.is_file() else {}
         harness = toml.get("tool", {}).get("harness")
         if not harness:
-            defaults = tomllib.loads(
-                Path(__file__).with_name("temp.pyproject.toml").read_text(encoding="utf-8")
-            )
+            defaults = tomllib.loads(Path(__file__).with_name("temp.pyproject.toml").read_text(encoding="utf-8"))
             harness = defaults["tool"]["harness"]
-        self.settings = harness.get(
-            "settings", {"behavior": "fail", "error_diff_lines": 500, "languages": ["py"]}
-        )
+        self.settings = harness.get("settings", {"behavior": "fail", "error_diff_lines": 500, "languages": ["py"]})
         self.forbidden: dict[str, list[str]] = harness.get("FORBIDDEN", {})
         self.agents: dict[str, list[str]] = harness.get("agents", {})
         self.commit_checks: dict[str, list[str]] = harness.get("preflight", {})
@@ -152,9 +148,7 @@ class Gate:
                     for pattern in self.forbidden_patterns
                     if pattern.casefold() in line.casefold()
                 )
-        colorize(
-            "BANNED PATTERNS FOR AGENT", f"check for banned patterns in staged files\nIssues:\n{problems}"
-        )
+        colorize("BANNED PATTERNS FOR AGENT", f"check for banned patterns in staged files\nIssues:\n{problems}")
         return list(problems)
 
     def _check_diff_size(self, ref: str, results: dict[str, list[str]], key: str):
@@ -211,9 +205,7 @@ class Gate:
                     messages: str = prefs(path, run_git(["show", f":{path}"]))
                     if messages:
                         problems.append(messages)
-        colorize(
-            "REPO PREFERENCES", f"checking repo preferences are respected by agents\nIssues:\n{problems}"
-        )
+        colorize("REPO PREFERENCES", f"checking repo preferences are respected by agents\nIssues:\n{problems}")
         return "\n".join(problems)
 
     def run_preflight(self) -> dict[str, list[str]]:
@@ -255,9 +247,7 @@ class Gate:
             msg += "Empty commit detected. Stage real work, Don't use --allow-empty. Say if you're blocked\n"
         if Path(commit_msg_file).exists():
             content = Path(commit_msg_file).read_text(encoding="utf-8")
-            actual_text = "\n".join([
-                line for line in content.splitlines() if not line.startswith("#")
-            ]).strip()
+            actual_text = "\n".join([line for line in content.splitlines() if not line.startswith("#")]).strip()
             if not actual_text:
                 msg += "Commit message is blank. Provide an informative message with your agent ID.\n"
         if msg:

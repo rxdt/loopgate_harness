@@ -131,9 +131,7 @@ def gate() -> None:
 
 
 @app.command(hidden=True, help="Git prepare-commit-msg hook. Called by .githooks, not by people.")
-def prepare_commit_msg(
-    args: Annotated[list[str] | None, Argument(help="What git passes the hook")] = None,
-) -> None:
+def prepare_commit_msg(args: Annotated[list[str] | None, Argument(help="What git passes the hook")] = None) -> None:
     """Dumb pass-through to prepare_commit_msg hook logic. Hidden git-only usage, not a human command.
 
     Args:
@@ -176,17 +174,17 @@ def cleanup(cwd: Path) -> bool:
     Returns:
         bool True if successful
     """
-    if not ((cwd / "README.template.md").is_file() and (cwd / "temp.pyproject.toml").is_file()):
+    if not ((cwd / "README.template.md").is_file() and (cwd / "harness" / "temp.pyproject.toml").is_file()):
         return False
     clean_tree = not run_git(["status", "--porcelain"], cwd).strip()
     (cwd / "README.template.md").replace(cwd / "README.md")
-    (cwd / "temp.pyproject.toml").replace(cwd / "pyproject.toml")
-    for file_name in (".github/workflows/publish.yml", "CONTRIBUTING.md"):
+    (cwd / "harness" / "temp.pyproject.toml").replace(cwd / "pyproject.toml")
+    for file_name in ("mutation-score.json", ".github/workflows/publish.yml", "CONTRIBUTING.md"):
         (cwd / file_name).unlink(missing_ok=True)
-    for directory in (cwd / "dist", cwd / "harness" / "tests", cwd / ".assets"):
+    for directory in (cwd / "harness" / "tests", cwd / ".assets", cwd / ".*cache"):
         if directory.exists():
             rmtree(directory)
-    if run_git(["rev-parse", "--short", "HEAD"], cwd).startswith("867f2df") and clean_tree:
+    if run_git(["rev-list", "--count", "HEAD"], cwd).strip() == "1" and clean_tree:
         run_git(["commit", "-a", "--amend", "--no-edit"], cwd)
     return True
 
@@ -198,51 +196,39 @@ def cleanup(cwd: Path) -> bool:
 def install() -> None:
     """Used by template cloned from Github. Syncs dependencies, and activates the git hooks."""
     rprint("\n[cyan2]installing dependencies[/cyan2]")
-    env_bin, args = infer_env_manager()
-    subprocess.run(tuple(args), cwd=REPO_ROOT_STR, check=True)
-    if args[0] == "poetry":
-        poetry_python = subprocess.run(
-            ["poetry", "env", "info", "--executable"],
-            cwd=REPO_ROOT_STR,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        env_bin = Path(poetry_python).parent
+    env_bin = infer_env_manager_and_install()
     cleanup(REPO_ROOT)
     setup_git_hooks(env_bin)
     check_for_timeout_and_prompt()
     rprint("\n[cyan2]If install left git dirty, commit unstaged changes[/]")
 
 
-def infer_env_manager() -> tuple[Path, list[str]]:
-    """Use environment signals to make a best-guess of which dependency manager is used.
-
-    Returns:
-        env_bin: the path to the binary of the virtual env
-        args: arguments needed to install dependencies
-    """
+def infer_env_manager_and_install() -> Path:
+    """Infer the dependency manager, install dependencies, and return its bin directory."""
     python_path = sys.executable
     env = os.environ.get("VIRTUAL_ENV", "")
     env_bin = Path(python_path).parent
     scripts = "Scripts" if IS_WINDOWS else "bin"
-    if (REPO_ROOT / "uv.lock").is_file():
-        env_bin = REPO_ROOT / ".venv" / scripts
-        args = ["uv", "sync"]
-    elif (REPO_ROOT / "poetry.lock").is_file():
-        args = ["poetry", "install"]
-    elif (
-        any(key.startswith("UV_") for key in os.environ)
+    if (
+        (REPO_ROOT / "uv.lock").is_file()
+        or any(key.startswith("UV_") for key in os.environ)
         or which("uv") is not None
         or "uv" in Path(env).name.lower()
     ):
         env_bin = REPO_ROOT / ".venv" / scripts
         args = ["uv", "sync"]
-    elif "pypoetry" in env or "pypoetry" in python_path:
+    elif (REPO_ROOT / "poetry.lock").is_file() or "pypoetry" in env or "pypoetry" in python_path:
         args = ["poetry", "install"]
     else:
         args = [python_path, "-m", "pip", "install", "-r", "requirements.txt", "-e", "."]
-    return env_bin, args
+    subprocess.run(tuple(args), cwd=REPO_ROOT_STR, check=True)
+    if args[0] == "poetry":
+        poetry_python = subprocess.run(
+            ["poetry", "env", "info", "--executable"], cwd=REPO_ROOT_STR, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        env_bin = Path(poetry_python).parent
+
+    return env_bin
 
 
 @app.command(hidden=True)
@@ -434,12 +420,7 @@ def inspect_configs(  # pylint: disable=locally-disabled,too-many-branches,too-m
         if not (standalone or in_pyproject):
             if tool_name in section_names or f"tool:{args[0]}" in section_names:
                 other_config = True
-            elif (
-                not categories["test"]
-                and tool_name == "pytest"
-                and "testenv" in section_names
-                and which("tox")
-            ):
+            elif not categories["test"] and tool_name == "pytest" and "testenv" in section_names and which("tox"):
                 other_config = True
                 command = "tox"
                 args = [command]
@@ -514,17 +495,13 @@ def configure_agents() -> bool:
     )
     claude = json.loads(claude_path.read_text("utf-8") if claude_path.is_file() else "{}")
     codex = parse(codex_path.read_text("utf-8") if codex_path.is_file() else "")
-    cl_confirm = confirm(
-        style("\n5.1. Can we update CLAUDE rules and settings?", fg=10), default=True, abort=True
-    )
+    cl_confirm = confirm(style("\n5.1. Can we update CLAUDE rules and settings?", fg=10), default=True, abort=True)
     if cl_confirm and claude_path.is_file():
         rprint(f"settings.json edited. Original copy at {copy2(claude_path, f'{claude_path}.bak')}")
     claude.setdefault("env", {})["RALPH_LOOP"] = "1"
     permissions: dict[str, Any] = claude.setdefault("permissions", {})
     permissions["deny"] = list(set(permissions.get("deny", [])) | CLAUDE_RULES)
-    cx_confirm = confirm(
-        style("5.2. Can we update CODEX rules and settings?", fg=10), default=True, abort=True
-    )
+    cx_confirm = confirm(style("5.2. Can we update CODEX rules and settings?", fg=10), default=True, abort=True)
     if cx_confirm and codex_path.is_file():
         rprint(f"config.toml edited. Original backup at {copy2(codex_path, bak)}\n")
     codex.setdefault("shell_environment_policy", {}).setdefault("set", {})["RALPH_LOOP"] = "1"

@@ -19,8 +19,6 @@
 ![GitHub Repo Size](https://img.shields.io/github/repo-size/rxdt/loopgate-harness)
 [![mutation](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frxdt%2Floopgate_harness%2Fmain%2Fmutation-score.json)](https://github.com/rxdt/loopgate_harness/actions/workflows/mutation.yml)
 
-
-
 </div>
 
 ---
@@ -28,7 +26,7 @@
 ## TL;DR
 
 1. `gh repo create <your-github-username>/<your-new-app-name> --template rxdt/loopgate_harness --private --clone && cd <your-new-app-name> && uv run harness install && source .venv/bin/activate && git add . && git commit --amend --no-edit`
-2. `harness run codex`
+2. `harness gate` and to loop `harness codex`
 
 **Requirements**: `pip`, `uv`, or `poetry`; Python 3.10 or newer; Linux or macOS. Windows support is experimental.
 
