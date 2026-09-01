@@ -86,9 +86,9 @@ copilot = [
 # checks = ["bundle", "exec", "rspec"]
 
 [tool.harness.preflight]
-lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
+ruff_lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
 pylint = ["pylint", "."]  # second tool in category can just be named the tool
-format = ["ruff", "format", "--no-cache", "--check"]
+ruff_format = ["ruff", "format", "--no-cache", "--check"]
 complexity = ["complexipy", ".", "--suggest-refactors"]
 
 [tool.harness.gate]

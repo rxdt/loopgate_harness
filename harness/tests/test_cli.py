@@ -168,9 +168,7 @@ def write_executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
-def test_entry_point_propagates_exit_codes_and_rejects_unknown_commands(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_entry_point_propagates_exit_codes_and_rejects_unknown_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     """The console script lets typer.Exit reach the shell; unknown or missing commands are usage errors."""
     monkeypatch.delenv("RALPH_LOOP", raising=False)
     with pytest.raises(SystemExit) as exit_info:
@@ -180,13 +178,13 @@ def test_entry_point_propagates_exit_codes_and_rejects_unknown_commands(
     assert runner.invoke(cli.app, ["bogus"]).exit_code == 2
     assert runner.invoke(cli.app, []).exit_code == 2
 
-    fake_popen(monkeypatch, fails=[gates().commit_checks["lint"], gates().commit_checks["format"]])
+    fake_popen(monkeypatch, fails=[gates().commit_checks["ruff_lint"], gates().commit_checks["ruff_format"]])
     rejected = runner.invoke(cli.app, ["preflight"])
     summary = " ".join(unstyle(rejected.stdout).split())
 
     assert rejected.exit_code == 1
-    assert "FAILED lint" in summary
-    assert "WARNED format" in summary
+    assert "FAILED ruff_lint" in summary
+    assert "WARNED ruff_format" in summary
     assert "rejected by harness" in summary
 
 
@@ -509,8 +507,8 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     ruff_lint_no_format = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
     assert ruff_lint_no_format["tool"]["harness"]["preflight"] == {
         "complexity": ["complexipy", ".", "--suggest-refactors"],
-        "format": ["ruff", "format", "--no-cache", "--check"],
-        "lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
+        "ruff_format": ["ruff", "format", "--no-cache", "--check"],
+        "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
     }
     assert ruff_lint_no_format["tool"]["ruff"] == {"line-length": 99}
     assert ruff_lint_no_format["tool"]["harness"]["preflight"].get("pylint") is None
@@ -521,8 +519,8 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     assert tool_ruff_adds_format["tool"]["ruff"]["lint"] == {"select": ["F"]}
     assert tool_ruff_adds_format["tool"]["harness"]["preflight"] == {
         "complexity": ["complexipy", ".", "--suggest-refactors"],
-        "format": ["ruff", "format", "--no-cache", "--check"],
-        "lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
+        "ruff_format": ["ruff", "format", "--no-cache", "--check"],
+        "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
     }
     assert tool_ruff_adds_format["tool"].get("pylint") is None
     assert tool_ruff_adds_format["tool"]["harness"]["preflight"].get("pylint") is None
@@ -544,8 +542,8 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
         preflight_args = configured_not_installed["tool"]["harness"]["preflight"]
         assert preflight_args == {
             "complexity": cli.TOOLS["complexipy"]["args"],
-            "format": cli.TOOLS["black"]["args"],
-            "lint": cli.TOOLS["flake8"]["args"],
+            "black": cli.TOOLS["black"]["args"],
+            "flake8": cli.TOOLS["flake8"]["args"],
         }
     (git_repo / ".flake8").unlink()
 
@@ -553,8 +551,8 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     cli.write_harness_config()
     dotted_format = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
     assert dotted_format["tool"]["ruff"]["format"]["quote-style"] == "double"
-    assert dotted_format["tool"]["harness"]["preflight"]["format"] == cli.TOOLS["ruff_format"]["args"]
-    assert dotted_format["tool"]["harness"]["preflight"]["lint"] == cli.TOOLS["ruff_lint"]["args"]
+    assert dotted_format["tool"]["harness"]["preflight"]["ruff_format"] == cli.TOOLS["ruff_format"]["args"]
+    assert dotted_format["tool"]["harness"]["preflight"]["ruff_lint"] == cli.TOOLS["ruff_lint"]["args"]
     assert dotted_format["tool"]["harness"]["preflight"].get("pylint") is None
 
     (git_repo / "pyproject.toml").write_text(
@@ -566,11 +564,11 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     assert lint_and_format["tool"]["ruff"]["format"]["quote-style"] == "single"
     assert lint_and_format["tool"]["harness"]["preflight"] == {
         "complexity": ["complexipy", ".", "--suggest-refactors"],
-        "format": ["ruff", "format", "--no-cache", "--check"],
-        "lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
+        "ruff_format": ["ruff", "format", "--no-cache", "--check"],
+        "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
     }
-    assert lint_and_format["tool"]["harness"]["preflight"]["format"] == cli.TOOLS["ruff_format"]["args"]
-    assert lint_and_format["tool"]["harness"]["preflight"]["lint"] == cli.TOOLS["ruff_lint"]["args"]
+    assert lint_and_format["tool"]["harness"]["preflight"]["ruff_format"] == cli.TOOLS["ruff_format"]["args"]
+    assert lint_and_format["tool"]["harness"]["preflight"]["ruff_lint"] == cli.TOOLS["ruff_lint"]["args"]
     assert lint_and_format["tool"]["harness"]["preflight"].get("pylint") is None
 
     (git_repo / "pyproject.toml").write_text(
@@ -579,12 +577,12 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     )
     cli.write_harness_config()
     user_project = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
-    assert user_project["tool"]["harness"]["preflight"]["format"] == cli.TOOLS["black"]["args"]
+    assert user_project["tool"]["harness"]["preflight"]["ruff_format"] == cli.TOOLS["ruff_format"]["args"]
     assert user_project["tool"]["ruff"]["lint"] == {"select": ["F"]}
     assert user_project["tool"]["harness"]["preflight"] == {
-        "lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
-        "format": ["black", "--check", "."],
+        "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
         "ruff_format": ["ruff", "format", "--no-cache", "--check"],
+        "black": ["black", "--check", "."],
         "complexity": ["complexipy", ".", "--suggest-refactors"],
     }
     assert user_project["tool"]["ruff"]["line-length"] == 120
@@ -596,8 +594,7 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     (git_repo / "ruff.toml").write_text('select = ["ALL"]\nexclude = ["**/*"]\n')
     (git_repo / ".flake8").touch()
     (git_repo / "pyproject.toml").write_text(
-        "[project]\nname = 'existing'\n[tool.black]\nline-length = 100\n[tool.keep]\nuser = 'wins'\n",
-        encoding="utf-8",
+        "[project]\nname = 'existing'\n[tool.black]\nline-length = 100\n[tool.keep]\nuser = 'wins'\n", encoding="utf-8"
     )
     (git_repo / "tox.ini").write_text("[testenv]\n", encoding="utf-8")
     (git_repo / "setup.cfg").write_text("[tool:pytest]\n", encoding="utf-8")
@@ -609,11 +606,11 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     assert user_project["tool"].get("ruff") is None  # no table because standalone file exists
     assert user_project["tool"]["harness"]["preflight"] == {
         "complexity": ["complexipy", ".", "--suggest-refactors"],
-        "format": ["black", "--check", "."],
-        "lint": ["flake8", "."],
-        "pylint": ["pylint", "."],
         "ruff_format": ["ruff", "format", "--no-cache", "--check"],
         "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
+        "pylint": ["pylint", "."],
+        "black": ["black", "--check", "."],
+        "flake8": ["flake8", "."],
     }
     assert user_project["tool"]["harness"]["preflight"]["pylint"] == ["pylint", "."]
 
@@ -772,9 +769,7 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     (repo / "docs").mkdir(parents=True)
     (repo / "docs" / "existing.txt").write_text("existing\n", encoding="utf-8")
     monkeypatch.setattr(
-        cli,
-        "ASSETS",
-        {"docs": (package_docs, repo / "docs"), "githooks": (package_hooks, repo / ".githooks")},
+        cli, "ASSETS", {"docs": (package_docs, repo / "docs"), "githooks": (package_hooks, repo / ".githooks")}
     )
     monkeypatch.setattr(cli, "REPO_ROOT", repo)
     confirm = Mock(return_value=True)
@@ -816,12 +811,7 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     ]
     assert message.call_args_list[-1] == call(f"`scratchpad/` and `runs/` also added at {repo}")
     run_git.assert_called_once_with(
-        [
-            "-c",
-            'alias.loopgate-hoist=!f() { sh "$1"; }; f',
-            "loopgate-hoist",
-            (package_hooks / "hoist").as_posix(),
-        ],
+        ["-c", 'alias.loopgate-hoist=!f() { sh "$1"; }; f', "loopgate-hoist", (package_hooks / "hoist").as_posix()],
         repo,
     )
 
@@ -834,9 +824,7 @@ def test_hoist_aborts_before_writing_when_declined(monkeypatch: pytest.MonkeyPat
     package_hooks.mkdir(parents=True)
     repo = tmp_path / "repo"
     monkeypatch.setattr(
-        cli,
-        "ASSETS",
-        {"docs": (package_docs, repo / "docs"), "githooks": (package_hooks, repo / ".githooks")},
+        cli, "ASSETS", {"docs": (package_docs, repo / "docs"), "githooks": (package_hooks, repo / ".githooks")}
     )
 
     with runner.isolation(input="n\n"), pytest.raises(Abort):
@@ -850,15 +838,13 @@ def test_installing_the_template_cleans_the_repo_and_sets_hooks(
 ) -> None:
     """Install a fresh template checkout with real process, filesystem, and Git boundaries."""
     template_repo = tmp_path / "template"
-    subprocess.run(
-        ["git", "clone", "--quiet", "--shared", str(REPO_ROOT), str(template_repo)],
-        check=True,
-    )
+    subprocess.run(["git", "clone", "--quiet", "--shared", str(REPO_ROOT), str(template_repo)], check=True)
     expected_project = (REPO_ROOT / "harness" / "temp.pyproject.toml").read_text(encoding="utf-8")
     (template_repo / "harness" / "temp.pyproject.toml").write_text(expected_project, encoding="utf-8")
-    (template_repo / "harness" / "cli.py").write_text(
-        (REPO_ROOT / "harness" / "cli.py").read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    for module in ("cli.py", "config.py"):
+        (template_repo / "harness" / module).write_text(
+            (REPO_ROOT / "harness" / module).read_text(encoding="utf-8"), encoding="utf-8"
+        )
     source_project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     env_bin = template_repo / ".venv" / ("Scripts" if sys.platform == "win32" else "bin")
     monkeypatch.setattr(cli, "REPO_ROOT", template_repo)
@@ -896,13 +882,7 @@ def test_installing_the_template_cleans_the_repo_and_sets_hooks(
     assert not leftovers, f"template leftovers after install: {leftovers}"
 
     installed = subprocess.run(
-        [
-            env_bin / ("ruff.exe" if sys.platform == "win32" else "ruff"),
-            "check",
-            "--no-cache",
-            "--show-fixes",
-            ".",
-        ],
+        [env_bin / ("ruff.exe" if sys.platform == "win32" else "ruff"), "check", "--no-cache", "--show-fixes", "."],
         cwd=template_repo,
         capture_output=True,
         text=True,
@@ -952,10 +932,7 @@ def test_cleanup_updates_a_pristine_single_commit_template(tmp_path: Path) -> No
     assert not (tmp_path / "harness" / "temp.pyproject.toml").exists()
 
 
-@pytest.mark.parametrize(
-    ("has_readme", "has_project"),
-    [(False, False), (True, False), (False, True)],
-)
+@pytest.mark.parametrize(("has_readme", "has_project"), [(False, False), (True, False), (False, True)])
 def test_cleanup_requires_both_template_files(has_readme: bool, has_project: bool, tmp_path: Path) -> None:
     """Cleanup does nothing unless both template inputs identify a template checkout."""
     if has_readme:
@@ -999,11 +976,7 @@ def test_cleanup_does_not_amend_a_dirty_template(monkeypatch: pytest.MonkeyPatch
     ],
 )
 def test_install_picks_the_package_manager_from_project_signals(
-    lockfile: str | None,
-    virtual_env: str | None,
-    manager: str,
-    monkeypatch: pytest.MonkeyPatch,
-    git_repo: Path,
+    lockfile: str | None, virtual_env: str | None, manager: str, monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
     """Lockfiles and active Poetry environments select the manager whose harness path hooks record.
 
@@ -1188,10 +1161,7 @@ def test_tracked_hooks_call_registered_commands_without_venv_paths(hook: str) ->
 
 @pytest.mark.parametrize(
     ("arguments", "code"),
-    [
-        pytest.param([".git/COMMIT_EDITMSG", "merge"], 1, id="blocked-merge"),
-        pytest.param([], 0, id="no-arguments"),
-    ],
+    [pytest.param([".git/COMMIT_EDITMSG", "merge"], 1, id="blocked-merge"), pytest.param([], 0, id="no-arguments")],
 )
 def test_prepare_commit_msg_forwards_gits_own_arguments(
     arguments: list[str], code: int, monkeypatch: pytest.MonkeyPatch
@@ -1356,10 +1326,7 @@ def test_run_worker_logs_every_line_and_streams_only_when_verbose(
 
     assert cli.run_worker(streaming_worker, log, verbose=True) == 0
     popen.assert_called_once_with(streaming_worker, cwd=str(tmp_path), stdout=subprocess.PIPE, text=True)
-    assert cli.JSON.call_args_list == [
-        call('{ "type" : "result" }\n', indent=None),
-        call("not json\n", indent=None),
-    ]
+    assert cli.JSON.call_args_list == [call('{ "type" : "result" }\n', indent=None), call("not json\n", indent=None)]
     assert [printed.kwargs for printed in cli.console.print.call_args_list] == [{"end": "\n"}, {"end": "\n"}]
 
     streamed = capsys.readouterr().out
@@ -1424,10 +1391,7 @@ def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyP
         f"{identity}build from specs\n\nRALPH_ITERATION=2/2\n"
     )
     preset_args = preset[2:]
-    assert (git_repo / "claude-args.txt").read_text(encoding="utf-8").splitlines() == [
-        *preset_args,
-        *preset_args,
-    ]
+    assert (git_repo / "claude-args.txt").read_text(encoding="utf-8").splitlines() == [*preset_args, *preset_args]
     receipt = git_repo / "scratchpad" / "runs" / "20990102" / "claude" / "0001.jsonl"
     events = [json.loads(line) for line in receipt.read_text(encoding="utf-8").splitlines()]
     assert [event["type"] for event in events] == ["ralph", "result", "ralph", "result", "ralph"]

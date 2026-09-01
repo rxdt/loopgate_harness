@@ -335,27 +335,23 @@ def raise_issues(agent: str, num_iterations: int, max_minutes: int):
 )
 def init() -> None:
     """Add harness assets, merge tool config, write the CI gate, and enable hooks"""
-    init_confirm = confirm(
+    if not confirm(
         style("\n1. Confirm loopgate can read configs and write configs to wire checks:", fg=10), default=True
-    )
-    if not init_confirm:
+    ):
         secho("Run `harness init` to configure loopgate", fg=colors.MAGENTA, bold=True)
         raise Exit(code=0)
     if write_harness_config():
-        init_confirm = confirm(
-            style("\n2. Can we wire githooks so quality checks run?", fg=10), default=True, abort=True
-        )
-    if init_confirm:
-        hoisted = hoist()
-        hooks = setup_git_hooks(Path(sys.executable).parent)
-        timeout = check_for_timeout_and_prompt() or IS_WINDOWS
-        agents = configure_agents()
-        rprint(
-            f"\n[bold cyan2]RESULT:[/]\nfiles added: {hoisted}\ngit hooks available via path: {hooks}"
-            f"\ntimeout-ready: {timeout}\nagents configured: {agents}"
-            f"\n[bold cyan2]Can likely run loops: [/]{bool(hoisted and hooks and timeout)}\n"
-            "\n[italic]Ensure your environemnt is activated to use the `harness run` command[/]\n"
-        )
+        confirm(style("\n2. Can we wire githooks so quality checks run?", fg=10), default=True, abort=True)
+    hoisted = hoist()
+    hooks = setup_git_hooks(Path(sys.executable).parent)
+    timeout = check_for_timeout_and_prompt() or IS_WINDOWS
+    agents = configure_agents()
+    rprint(
+        f"\n[bold cyan2]RESULT:[/]\nfiles added: {hoisted}\ngit hooks available via path: {hooks}"
+        f"\ntimeout-ready: {timeout}\nagents configured: {agents}"
+        f"\n[bold cyan2]Can likely run loops: [/]{bool(hoisted and hooks and timeout)}\n"
+        "\n[italic]Ensure your environemnt is activated to use the `harness run` command[/]\n"
+    )
 
 
 def write_harness_config() -> bool:
@@ -383,60 +379,73 @@ def write_harness_config() -> bool:
     return bool(pyproject_path.write_text(dumps(user_pyproject), encoding="utf-8"))
 
 
-# ruff: ignore[complex-structure,too-many-branches,too-many-locals] # complexipy: ignore
-def inspect_configs(  # pylint: disable=locally-disabled,too-many-branches,too-many-locals
+def find_configured_command(
+    tool_name: str,
+    tool_config: dict[str, Any],
     section_names: list[str],
     user_pyproject_tools: dict[str, Any],
-    categories: dict[str, dict[str, list[str]]],
+    test_configured: bool,
+) -> tuple[list[str], bool] | None:
+    """Find a configured command using the configuration file precedence.
+
+    Args:
+        tool_name: Name of the tool being inspected.
+        tool_config: Harness defaults for the tool.
+        section_names: Sections in tox.ini and setup.cfg, if found.
+        user_pyproject_tools: The tool's tables found in a user's pyproject.toml, if it exists.
+        test_configured: Whether a test tool was already added to the harness config.
+
+    Returns:
+        Command arguments and whether to keep their template table, or None if no configuration was found.
+    """
+    args = tool_config["args"]
+    if any((REPO_ROOT / filename).is_file() for filename in tool_config.get("filenames", [])):
+        return args, False
+    if args[0] in user_pyproject_tools:
+        return args, True
+    if tool_name in section_names:
+        return args, False
+    tox_fallback = not test_configured and tool_name == "pytest" and "testenv" in section_names and which("tox")
+    if tox_fallback:
+        args = ["tox"]
+    return (args, False) if tox_fallback or f"tool:{args[0]}" in section_names else None
+
+
+def inspect_configs(
+    section_names: list[str],
+    user_pyproject_tools: dict[str, Any],
+    categories: dict[str, str],
     template: dict[str, Any],
 ) -> None:
     """For each tool in a pre-built internal map, see if user has the tool installed and configured.
-
     Args:
         section_names: Configuration section names found outside pyproject.toml.
         user_pyproject_tools: Tool configurations from the user's pyproject.toml.
-        categories: Installed tools grouped by check category.
+        categories: Primary template check remaining for each category.
         template: Tool configurations from the harness template.
     """
-    preflight_stage = template["harness"]["preflight"]
-    gate_stage = template["harness"]["gate"]
     for tool_name, tool_config in TOOLS.items():
-        standalone, in_pyproject, other_config, pop_table = False, False, False, True
         category: str = tool_config["category"]
-        harness_stage = preflight_stage if category in {"complexity", "format", "lint"} else gate_stage
+        harness_stage = template["harness"]["preflight" if category in {"complexity", "format", "lint"} else "gate"]
         args = tool_config.get("args")
         if not args:
             continue
-        if not (util.find_spec(tool_name) or which(args[0])):
+        if util.find_spec(tool_name) is None and which(args[0]) is None:
             harness_stage.pop(tool_name, None)
             template.pop(args[0], None)
             continue
-        for name in tool_config.get("filenames", []):
-            if (REPO_ROOT / name).is_file():
-                standalone = True
-        if standalone is False and args[0] in user_pyproject_tools:
-            pop_table = False
-            in_pyproject = True
-        if not (standalone or in_pyproject):
-            if tool_name in section_names or f"tool:{args[0]}" in section_names:
-                other_config = True
-            elif not categories["test"] and tool_name == "pytest" and "testenv" in section_names and which("tox"):
-                other_config = True
-                command = "tox"
-                args = [command]
-
-        if standalone or in_pyproject or other_config:
-            current_tool_in_category = harness_stage.get(category) or tool_name
-            if not categories[category]:
-                if "ruff" in current_tool_in_category and not tool_name.startswith("ruff"):
-                    template.get("ruff", {}).pop(category[0], None)
-                elif pop_table:
-                    template.pop(current_tool_in_category[0], None)
-            harness_stage.pop(tool_name, None)
-            harness_stage[category if not categories[category] else tool_name] = args
-            categories[category][tool_name] = args
-            if pop_table:
-                template.pop(args[0], None)
+        configured_command = find_configured_command(
+            tool_name, tool_config, section_names, user_pyproject_tools, "test" not in categories
+        )
+        if configured_command is None:
+            continue
+        args, keep_template_table = configured_command
+        replaced_check = categories.pop(category, tool_name)
+        current_args = harness_stage.pop(replaced_check, args)
+        harness_stage[category if replaced_check == category else tool_name] = args
+        if not keep_template_table:
+            template.pop(current_args[0], None)
+            template.pop(args[0], None)
 
 
 def hoist() -> bool:
