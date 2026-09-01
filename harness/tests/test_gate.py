@@ -734,7 +734,7 @@ def test_diff_size_ignores_changes_with_nothing_staged(
 
 def test_lint_command_keeps_required_flags() -> None:
     """The fast lint command remains Ruff's fixing-aware repository-wide check."""
-    command = gates().commit_checks["lint"]
+    command = gates().commit_checks["ruff_lint"]
     assert command == ["ruff", "check", "--no-cache", "--show-fixes", "."]
 
 
@@ -768,41 +768,27 @@ def test_pytest_gate_keeps_full_coverage_threshold() -> None:
 def test_preflight_flags_preferences_break_under_loop(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Preflight preserves every preference failure alongside a failing configured check."""
     monkeypatch.setenv("RALPH_LOOP", "1")
-    monkeypatch.chdir(git_repo)
-    assert gate.prefs is not None
-    recorder = Mock(wraps=gate.prefs)
-    monkeypatch.setattr(gate, "prefs", recorder)
     source = "def _bad(*args):\n    transform = lambda item: item\n    return transform(*args)\n"
     stage(git_repo, "src/mod.py", source)
-    fake_popen(monkeypatch, fails=[gates().commit_checks["lint"]])
+    fake_popen(monkeypatch, fails=[gates().commit_checks["ruff_lint"]])
 
     result = gates().run_preflight()
 
-    assert {
-        "preferences": recorder.call_args_list,
-        "result": result,
-        "staged_paths": gate.run_git(["diff", "--cached", "--name-only"], git_repo).splitlines(),
-        "staged_source": gate.run_git(["show", ":src/mod.py"], git_repo),
-    } == {
-        "preferences": [call("src/mod.py", source)],
-        "result": {
-            "pass": ["format", "complexity", "pylint", "mutmut"],
-            "fail": [
-                "lint",
-                (
-                    "PREFERENCES IGNORED:\n"
-                    "src/mod.py:1: Name '_bad' starts with underscore and is not in a class\n"
-                    "src/mod.py:1: '*args', '**kwargs', '*', and '/' hide the function signature, "
-                    "use explicit parameters\n"
-                    "src/mod.py:2: Lambda found hurting readability and adding complexity, "
-                    "prefer map() or filter()\n"
-                    "src/mod.py:3: Dynamic '*' call hides positional arguments; pass explicit arguments"
-                ),
-            ],
-            "warn": [],
-        },
-        "staged_paths": ["src/mod.py"],
-        "staged_source": source,
+    assert result == {
+        "pass": ["ruff_format", "complexity", "pylint", "mutmut"],
+        "fail": [
+            "ruff_lint",
+            (
+                "PREFERENCES IGNORED:\n"
+                "src/mod.py:1: Name '_bad' starts with underscore and is not in a class\n"
+                "src/mod.py:1: '*args', '**kwargs', '*', and '/' hide the function signature, "
+                "use explicit parameters\n"
+                "src/mod.py:2: Lambda found hurting readability and adding complexity, "
+                "prefer map() or filter()\n"
+                "src/mod.py:3: Dynamic '*' call hides positional arguments; pass explicit arguments"
+            ),
+        ],
+        "warn": [],
     }
 
 

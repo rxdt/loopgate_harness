@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
-from importlib.metadata import distribution
+from importlib.metadata import distribution, packages_distributions
 from pathlib import Path
 from typing import Any
 
 from harness.gate import gates
 
-site_packages = Path(str(distribution("harness").locate_file("")))
+distribution_name = packages_distributions()["harness"][0]
+site_packages = Path(str(distribution(distribution_name).locate_file("")))
 package_root = site_packages / "harness"
 repo_root = gates().repo_root
 
-CATEGORIES: dict[str, dict[str, list[str]]] = {
-    "audit": {},
-    "complexity": {},
-    "format": {},
-    "lint": {},
-    "security": {},
-    "test": {},
-    "types": {},
+CATEGORIES: dict[str, str] = {
+    "audit": "audit",
+    "complexity": "complexity",
+    "format": "ruff_format",
+    "lint": "ruff_lint",
+    "security": "security",
+    "test": "test",
+    "types": "types",
 }
 
 PHASES = (
@@ -64,6 +65,18 @@ TOOLS: dict[str, dict[str, Any]] = {
         "pyproject": ["bandit"],
         "args": ["bandit", "-r", ".", "-x", "build,tox,docs,tests,.venv,scratchpad,mutants,tests"],
     },
+    "ruff_format": {
+        "category": "format",
+        "filenames": [".ruff.toml", "ruff.toml"],
+        "pyproject": ["ruff", "format"],
+        "args": gates().commit_checks["ruff_format"],
+    },
+    "ruff_lint": {
+        "category": "lint",
+        "filenames": [".ruff.toml", "ruff.toml"],
+        "pyproject": ["ruff", "lint"],
+        "args": gates().commit_checks["ruff_lint"],
+    },
     "black": {"category": "format", "pyproject": ["black"], "args": ["black", "--check", "."]},
     "coverage": {
         "category": "test",
@@ -78,18 +91,6 @@ TOOLS: dict[str, dict[str, Any]] = {
         "filenames": ["pytest.toml", ".pytest.toml", "pytest.ini", ".pytest.ini"],
         "pyproject": ["pytest", "ini_options"],
         "args": gates().gate_checks["test"],
-    },
-    "ruff_format": {
-        "category": "format",
-        "filenames": [".ruff.toml", "ruff.toml"],
-        "pyproject": ["ruff", "format"],
-        "args": gates().commit_checks["format"],
-    },
-    "ruff_lint": {
-        "category": "lint",
-        "filenames": [".ruff.toml", "ruff.toml"],
-        "pyproject": ["ruff", "lint"],
-        "args": gates().commit_checks["lint"],
     },
     "pyright": {
         "category": "types",
