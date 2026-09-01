@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from importlib.metadata import distribution
+from importlib.metadata import distribution, packages_distributions
 from pathlib import Path
 from typing import Any
 
