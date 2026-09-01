@@ -25,5 +25,7 @@ jobs:
       - name: Build distributions
         run: uv build
 
-      - name: Publish distributions to PyPI
+      - name: Publish distributions to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

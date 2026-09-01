@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from importlib.metadata import distribution
+from importlib.metadata import distribution, packages_distributions
 from pathlib import Path
 from typing import Any
 
 from harness.gate import gates
 
-site_packages = Path(str(distribution("harness").locate_file("")))
+distribution_name = packages_distributions()["harness"][0]
+site_packages = Path(str(distribution(distribution_name).locate_file("")))
 package_root = site_packages / "harness"
 repo_root = gates().repo_root
 
