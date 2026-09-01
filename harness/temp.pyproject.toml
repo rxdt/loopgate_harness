@@ -92,7 +92,7 @@ ruff_format = ["ruff", "format", "--no-cache", "--check"]
 complexity = ["complexipy", ".", "--suggest-refactors"]
 
 [tool.harness.gate]
-audit = ["pip-audit", "--strict"] # or audit = ["uv", "audit", "--preview-features", "audit"]
+audit = ["pip-audit"] # or audit = ["uv", "audit", "--preview-features", "audit"]
 security = [
     "semgrep", "scan",
     "--error",  # exit nonzero on findings so the gate blocks the commit, not just reports

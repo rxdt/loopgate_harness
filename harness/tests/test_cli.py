@@ -38,7 +38,7 @@ from pathlib import Path
 from harness import config
 
 print(json.dumps({
-    "distribution_root": str(Path(distribution("harness").locate_file("")).resolve()),
+    "distribution_root": str(Path(distribution("loopgate").locate_file("")).resolve()),
     "site_packages": str(config.site_packages.resolve()),
     "package_root": str(config.package_root.resolve()),
     "repo_root": str(config.repo_root.resolve()),
