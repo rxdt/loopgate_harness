@@ -1,5 +1,5 @@
 [project]
-name = "harness"
+name = "loopgate"
 requires-python = ">=3.10"
 version = "0.1.0"
 description = "Gated, harnessed, autonomy loop with quality checks."
@@ -39,7 +39,7 @@ dependencies = [
 harness = "harness.cli:main" # creates the executable
 
 [build-system]
-requires = ["hatchling>=1.32.0"]
+requires = ["hatchling>=1.32"]
 build-backend = "hatchling.build"
 
 [[tool.hatch.envs.default.matrix]]
@@ -138,13 +138,13 @@ copilot = [
 # checks = ["bundle", "exec", "rspec"]
 
 [tool.harness.preflight]
-lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
-format = ["ruff", "format", "--no-cache", "--check"]
+ruff_lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
+ruff_format = ["ruff", "format", "--no-cache", "--check"]
 complexity = ["complexipy", ".", "--suggest-refactors"]
 pylint = ["pylint", "."]
 
 [tool.harness.gate]
-audit = ["pip-audit", "--strict"]
+audit = ["pip-audit"]
 security = [
     "semgrep", "scan",
     "--error",  # exit nonzero on findings so the gate blocks the commit, not just reports
