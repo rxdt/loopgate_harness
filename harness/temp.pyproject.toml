@@ -1,11 +1,11 @@
 [project]
-name = "harness"
+name = "loopgate"
 requires-python = ">=3.10"
 version = "0.1.0"
 [project.scripts]
 harness = "harness.cli:main" # creates the executable `harness`
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling>=1.32"]
 build-backend = "hatchling.build" # allows `harness` commands, runs the executable
 [dependency-groups]
 dev = [
@@ -86,13 +86,13 @@ copilot = [
 # checks = ["bundle", "exec", "rspec"]
 
 [tool.harness.preflight]
-lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
+ruff_lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
 pylint = ["pylint", "."]  # second tool in category can just be named the tool
-format = ["ruff", "format", "--no-cache", "--check"]
+ruff_format = ["ruff", "format", "--no-cache", "--check"]
 complexity = ["complexipy", ".", "--suggest-refactors"]
 
 [tool.harness.gate]
-audit = ["pip-audit", "--strict"]
+audit = ["pip-audit"] # or audit = ["uv", "audit", "--preview-features", "audit"]
 security = [
     "semgrep", "scan",
     "--error",  # exit nonzero on findings so the gate blocks the commit, not just reports

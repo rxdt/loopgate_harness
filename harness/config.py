@@ -8,18 +8,18 @@ from typing import Any
 
 from harness.gate import gates
 
-site_packages = Path(str(distribution("harness").locate_file("")))
+site_packages = Path(str(distribution("loopgate").locate_file("")))
 package_root = site_packages / "harness"
 repo_root = gates().repo_root
 
-CATEGORIES: dict[str, dict[str, list[str]]] = {
-    "audit": {},
-    "complexity": {},
-    "format": {},
-    "lint": {},
-    "security": {},
-    "test": {},
-    "types": {},
+CATEGORIES: dict[str, str] = {
+    "audit": "audit",
+    "complexity": "complexity",
+    "format": "ruff_format",
+    "lint": "ruff_lint",
+    "security": "security",
+    "test": "test",
+    "types": "types",
 }
 
 PHASES = (
@@ -64,12 +64,20 @@ TOOLS: dict[str, dict[str, Any]] = {
         "pyproject": ["bandit"],
         "args": ["bandit", "-r", ".", "-x", "build,tox,docs,tests,.venv,scratchpad,mutants,tests"],
     },
-    "black": {"category": "format", "pyproject": ["black"], "args": ["black", "--check", "."]},
-    "coverage": {
-        "category": "test",
-        "filenames": [".coveragerc", ".coveragerc.toml"],
-        "pyproject": ["coverage"],
+    "ruff_format": {
+        "category": "format",
+        "filenames": [".ruff.toml", "ruff.toml"],
+        "pyproject": ["ruff", "format"],
+        "args": gates().commit_checks["ruff_format"],
     },
+    "ruff_lint": {
+        "category": "lint",
+        "filenames": [".ruff.toml", "ruff.toml"],
+        "pyproject": ["ruff", "lint"],
+        "args": gates().commit_checks["ruff_lint"],
+    },
+    "black": {"category": "format", "pyproject": ["black"], "args": ["black", "--check", "."]},
+    "coverage": {"category": "test", "filenames": [".coveragerc", ".coveragerc.toml"], "pyproject": ["coverage"]},
     "flake8": {"category": "lint", "filenames": [".flake8"], "args": ["flake8", "."]},
     "hypothesis": {"category": "test", "pyproject": ["hypothesis"]},
     "lint": {"category": "lint", "pyproject": ["lint"]},
@@ -78,18 +86,6 @@ TOOLS: dict[str, dict[str, Any]] = {
         "filenames": ["pytest.toml", ".pytest.toml", "pytest.ini", ".pytest.ini"],
         "pyproject": ["pytest", "ini_options"],
         "args": gates().gate_checks["test"],
-    },
-    "ruff_format": {
-        "category": "format",
-        "filenames": [".ruff.toml", "ruff.toml"],
-        "pyproject": ["ruff", "format"],
-        "args": gates().commit_checks["format"],
-    },
-    "ruff_lint": {
-        "category": "lint",
-        "filenames": [".ruff.toml", "ruff.toml"],
-        "pyproject": ["ruff", "lint"],
-        "args": gates().commit_checks["lint"],
     },
     "pyright": {
         "category": "types",
@@ -103,12 +99,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "pyproject": ["pylint"],
         "args": gates().commit_checks["pylint"],
     },
-    "mypy": {
-        "category": "types",
-        "filenames": ["mypy.ini", ".mypy.ini"],
-        "pyproject": ["mypy"],
-        "args": ["mypy", "."],
-    },
+    "mypy": {"category": "types", "filenames": ["mypy.ini", ".mypy.ini"], "pyproject": ["mypy"], "args": ["mypy", "."]},
     "mutmut": {"category": "test", "pyproject": ["mutmut"]},
     "radon": {
         "category": "complexity",
@@ -172,12 +163,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "filenames": [".xenon.yml"],
         "args": ["xenon", "--max-absolute", "B", "--max-modules", "A", "--max-average", "A", "."],
     },
-    "zuban": {
-        "category": "types",
-        "filenames": [".zuban.toml"],
-        "pyproject": ["zuban"],
-        "args": ["zuban", "check"],
-    },
+    "zuban": {"category": "types", "filenames": [".zuban.toml"], "pyproject": ["zuban"], "args": ["zuban", "check"]},
 }
 
 CLAUDE_RULES: set[str] = {
