@@ -1,7 +1,7 @@
 [project]
-name = "harness"
+name = "loopgate"
 requires-python = ">=3.10"
-version = "0.1.0"
+version = "0.2.0"
 description = "Gated, harnessed, autonomy loop with quality checks."
 authors = [{ name = "rxdt" }]
 readme = "README.md"
@@ -39,7 +39,7 @@ dependencies = [
 harness = "harness.cli:main" # creates the executable
 
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling>=1.32"]
 build-backend = "hatchling.build"
 
 [[tool.hatch.envs.default.matrix]]
