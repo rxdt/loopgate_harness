@@ -74,7 +74,16 @@ Acceptance criteria: Each changed line traces directly to the user's request.
 
 - Write simple, readable Python.
 - Prefer module-level functions. Reserve classes for changed state on data grouped with behavior.
-- Avoid AI-bloat, like:
+- Avoid bloat like:
   - wrapping literals in their constructors (`"x"`, not `str("x")`; `[]`, not `list([])`)
   - repeated string normalization (`.strip()` later followed by`.replace()`)
-  - overly defensive checks not at boundaries
+  - overly defensive checks
+  - unecessary `.sort` or `sorted()`
+- Focus on readability and functionality first, rather than micro-optimizations.
+
+## 5. Approach
+- Be pragmatic
+- Prioritize the big picture
+- Emphasize readability
+- Keep code lightweight and linear
+=> do **NOT** be pedantic

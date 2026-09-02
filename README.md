@@ -209,6 +209,10 @@ harness run claude 10 20
 harness run codex 2 20
 harness run agy 3 10
 harness run copilot 2 20
+
+> which harness  # the actual executable
+~/your-repo/.venv/bin/harness
+> uv run harness  # will find harness if executable exists
 ```
 #### To run LoopGate with any agent, the worker must be installed and authenticated separately.
 

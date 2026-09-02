@@ -17,11 +17,11 @@ from typing import Annotated, Any
 
 from rich import print as rprint
 from rich.json import JSON
-from rich.table import Table, box
+from rich.table import Table
 from tomlkit import TOMLDocument, document, dumps, parse, table
-from typer import Argument, Exit, Option, Typer, colors, confirm, echo, secho, style
+from typer import Argument, Exit, Option, Typer, colors, confirm, echo, prompt, secho, style
 
-from harness.config import ASSETS, CATEGORIES, CLAUDE_RULES, CODEX_RULES, PHASES, TOOLS
+from harness.config import ASSETS, CATEGORIES, CLAUDE_RULES, CODEX_RULES, PHASES, get_tools
 from harness.gate import console, gates, run_git
 
 app = Typer(
@@ -62,9 +62,8 @@ def setup_git_hooks(env_bin: Path) -> Path:
 
 
 def run_worker(command: list[str], log: Path, verbose: bool) -> int:
-    """Run the worker command, always saving stdout and optionally streaming it live.
-
-    ralph.sh gets the prompt as a string to pass to the worker in the command
+    """Run the worker command, always saving stdout and optionally streaming it live. ralph.sh gets the prompt as a
+    string to pass to a worker via the command.
 
     Args:
         command: The worker argv to execute.
@@ -118,13 +117,15 @@ def check(name: str, command: Callable[[], dict[str, list[str]]]) -> dict[str, l
     raise Exit(code=1 if results["fail"] else 0)
 
 
-@app.command(help="Fast pre-commit checks (lint/format) plus agent containment")
+@app.command(help="Fast pre-commit checks (lint/format/complexity) plus agent containment (check no-touch forbidden)")
 def preflight() -> None:
     """Dumb pass-through to the fast pre-commit gate."""
     check("preflight", gates().run_preflight)
 
 
-@app.command(help="Pre-push checks match the CI gate exactly (lint, types, security, etc.)")
+@app.command(
+    help="Pre-push that runs ALL checks (lint, types, security, etc.). If CI is set up, this should match CI gate."
+)
 def gate() -> None:
     """Dumb pass-through to the full pre-push gate; exit nonzero if anything fails."""
     check("gate", gates().run_gate)
@@ -143,14 +144,18 @@ def prepare_commit_msg(args: Annotated[list[str] | None, Argument(help="What git
     raise Exit(code=gates().prepare_commit_msg(["prepare-commit-msg", *(args or [])]))
 
 
-@app.command(help="Show harness configuration and capabilitie in pyproject.toml")
-def info() -> None:
-    """Print everything the harness reads from [tool.harness] so nobody has to open pyproject.toml."""
-    config = Table(
-        title="\n[cyan2]Basic Harness Configuration Settings[/]\n[dim cyan2]See pyproject.toml for more[/]",
-        box=box.MINIMAL,
-    )
-    for title, checks in PHASES:
+@app.command(help="Show active harness configuration and capabilitie in pyproject.toml")
+def info(verbose: Annotated[bool, Option("--verbose", "-v", help="Show all checks and commands")] = False) -> None:
+    """Print everything the harness reads from [tool.harness] so nobody has to open pyproject.toml.
+
+    Args:
+        verbose: `--verbose` or `-v` shows most of `tool.harness` configurations
+    """
+    if verbose:
+        PHASES.update({"agents": gates().agents, "forbidden": gates().forbidden})
+    phases = PHASES
+    config = Table(title="\n[cyan2]Harness Configurations & Commands[/]\n[dim cyan2]See pyproject.toml[/]", box=None)
+    for title, checks in phases.items():
         config.add_row(f"[bold cyan]{title}[/]", "")
         for name, command in checks.items():
             config.add_row(f"  {name}", f"[dim]{' '.join(command)}[/]")
@@ -161,7 +166,7 @@ def info() -> None:
 def status() -> None:
     """Count run logs and point at the newest one."""
     runs = REPO_ROOT / "scratchpad" / "runs"
-    logs = sorted(runs.glob("*.jsonl"), reverse=True) if runs.is_dir() else []
+    logs = sorted(runs.rglob("*.jsonl"), reverse=True) if runs.is_dir() else []
     newest = "\n".join(str(log) for log in logs[:3]) if logs else ""
     secho(f"{len(logs)} run log(s) in {runs}\nnewest:\n{newest}", fg=30)
 
@@ -256,7 +261,7 @@ def check_for_timeout_and_prompt() -> str | None:
 
 
 @app.command(
-    help="Run one harnessed ralph loop with <agent>, e.g. harness run claude 3 20.\n\n"
+    help="Run one harnessed ralph loop with <agent>, e.g. `harness run claude 3 20`.\n\n"
     f"Agents in pyproject.toml (from tool.harness.agents): {', '.join(gates().agents)}"
 )
 def run(
@@ -283,8 +288,8 @@ def run(
     runs = cwd / "scratchpad" / "runs" / datetime.now(tz=timezone.utc).strftime("%Y%m%d") / agent
     runs.mkdir(parents=True, exist_ok=True)
     worker_id = f"{max((int(p.stem) for p in runs.glob('[0-9][0-9][0-9][0-9].jsonl')), default=0) + 1:04d}"
-    prompt = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")  # hand agent fixed ID
-    os.environ["RALPH_PROMPT"] = f"Your agent id prefix is `{agent}-{worker_id}`\n\n{prompt}"
+    prompt_file = (cwd / "docs" / "PROMPT.md").read_text(encoding="utf-8").rstrip("\n")  # hand agent fixed ID
+    os.environ["RALPH_PROMPT"] = f"Your agent id prefix is `{agent}-{worker_id}`\n\n{prompt_file}"
     log = runs / f"{worker_id}.jsonl"  # each log file is one run / ralph invocation, not one iteration
     loop_dir = Path(__file__).resolve().parent
     launcher = (
@@ -331,8 +336,8 @@ def raise_issues(agent: str, num_iterations: int, max_minutes: int):
 
 
 @app.command(
-    help="Bootstraps harness into an existing repository. Set up your project for loops and gates. Run this "
-    "if you've installed into an existing project and are setting up for the first time. Adds to configs."
+    help="Bootstraps harness into an existing repository. Set up your project for loops and gates. Use this if "
+    "installed into an existing project and are setting up for the first time. Reads from and adds configurations."
 )
 def init() -> None:
     """Add harness assets, merge tool config, write the CI gate, and enable hooks"""
@@ -341,7 +346,10 @@ def init() -> None:
     ):
         secho("Run `harness init` to configure loopgate", fg=colors.MAGENTA, bold=True)
         raise Exit(code=0)
-    wired = write_harness_config()
+    raw_paths = prompt("Enter your source directories to be checked, comma-separated, e.g. `src, evals`")
+    split: set[str] = {path.strip() for path in raw_paths.split(",")} if raw_paths else set()
+    tools = get_tools(split)
+    wired = write_harness_config(tools)
     hoisted = hoist()
     hooks = setup_git_hooks(Path(sys.executable).parent)
     timeout = check_for_timeout_and_prompt() or IS_WINDOWS
@@ -355,8 +363,15 @@ def init() -> None:
     )
 
 
-def write_harness_config() -> set[str]:
-    """Takes user's configs and creates a pyproject.toml or appends to an existing pyproject.toml."""
+def write_harness_config(tools: dict[str, dict[str, Any]]) -> set[str]:
+    """Takes user's configs and creates a pyproject.toml or appends to an existing pyproject.toml.
+
+    Args:
+        tools: tool name to tool config object (which contains things like args to run the tool)
+
+    Returns:
+        unique names of checks the gate will run
+    """
     pyproject_path = REPO_ROOT / "pyproject.toml"
     user_pyproject: TOMLDocument = document()
     user_pyproject_tools: dict[str, Any] = {}
@@ -364,19 +379,19 @@ def write_harness_config() -> set[str]:
         user_pyproject: TOMLDocument = parse(pyproject_path.read_text(encoding="utf-8"))
         user_pyproject_tools: dict[str, Any] = user_pyproject.setdefault("tool", table())
     template: Path = Path(__file__).resolve().with_name("temp.pyproject.toml")
-    template_contents: TOMLDocument = parse(template.read_text(encoding="utf-8"))
-    template_tools = template_contents["tool"]
+    template_tools = parse(template.read_text(encoding="utf-8"))["tool"]
     for t in template_tools:
         if t in user_pyproject_tools:
             template_tools[t] = deepcopy(user_pyproject_tools[t])
+        generated_table = tools.get(t, {}).get("table", {})
+        template_tools[t].update(generated_table)
     contents = ConfigParser(interpolation=None)
     contents.read([(REPO_ROOT / "tox.ini"), (REPO_ROOT / "setup.cfg")], encoding="utf-8")
-    section_names = contents.sections()
-    inspect_configs(section_names, user_pyproject_tools, deepcopy(CATEGORIES), template_contents["tool"])
+    inspect_configs(contents.sections(), user_pyproject_tools, deepcopy(CATEGORIES), template_tools, tools)
     user_pyproject.setdefault("tool", {}).update(template_tools)
     pyproject_path.write_text(dumps(user_pyproject), encoding="utf-8")
     updated_pyproject: TOMLDocument = parse(pyproject_path.read_text(encoding="utf-8"))
-    harness: dict[str, Any] = updated_pyproject.setdefault("tool", table()).get("harness", {})
+    harness: dict[str, Any] = updated_pyproject["tool"]["harness"]
     return set(harness.get("preflight", {}) | harness.get("gate", {}))
 
 
@@ -413,7 +428,11 @@ def find_configured_command(
 
 
 def inspect_configs(
-    section_names: list[str], user_pyproject_tools: dict[str, Any], categories: dict[str, str], template: dict[str, Any]
+    section_names: list[str],
+    user_pyproject_tools: dict[str, Any],
+    categories: dict[str, str],
+    template: dict[str, Any],
+    tools: dict[str, dict[str, Any]],
 ) -> None:
     """For each tool in a pre-built internal map, see if user has the tool installed and configured.
     Args:
@@ -421,26 +440,34 @@ def inspect_configs(
         user_pyproject_tools: Tool configurations from the user's pyproject.toml.
         categories: Primary template check remaining for each category.
         template: Tool configurations from the harness template.
+        tools: Generic configurations for potential tools repo has
     """
-    for tool_name, tool_config in TOOLS.items():
+    for tool_name, tool_config in tools.items():
         category: str = tool_config["category"]
         harness_stage = template["harness"]["preflight" if category in {"complexity", "format", "lint"} else "gate"]
         args = tool_config.get("args")
         if not args:
             continue
-        if util.find_spec(tool_name) is None and which(args[0]) is None:
+        if not (util.find_spec(tool_name) or which(args[0])):
             harness_stage.pop(tool_name, None)
             template.pop(args[0], None)
             continue
+        default_check = categories.get(category)
+        is_default = bool(default_check and harness_stage.get(default_check, [None])[0] == args[0])
+        if is_default:
+            harness_stage[default_check] = args
         configured_command = find_configured_command(
             tool_name, tool_config, section_names, user_pyproject_tools, "test" not in categories
         )
         if configured_command is None:
+            if not is_default:
+                harness_stage.pop(tool_name, None)
+                template.pop(args[0], None)
             continue
         args, keep_template_table = configured_command
-        replaced_check = categories.pop(category, tool_name)
-        current_args = harness_stage.pop(replaced_check, args)
-        harness_stage[category if replaced_check == category else tool_name] = args
+        replaced_tool_name = categories.pop(category, tool_name)
+        current_args = harness_stage.pop(replaced_tool_name, args)
+        harness_stage[category if replaced_tool_name == category else tool_name] = args
         if not keep_template_table:
             template.pop(current_args[0], None)
             template.pop(args[0], None)
@@ -451,12 +478,11 @@ def hoist() -> bool:
     if not (ASSETS["docs"][0].is_dir() and ASSETS["githooks"][0].is_dir()):
         rprint("Harness is missing required assets: `docs/` and `githooks/`")
         return False
-    confirm(style("\n2. Can we wire githooks so quality checks run?", fg=10), default=True, abort=True)
-    repo_root = REPO_ROOT
+    confirm(style("\n2. OK to wire githooks so quality checks run?", fg=10), default=True, abort=True)
     ASSETS["githooks"][1].mkdir(parents=True, exist_ok=True)
     hoist_script: str = (ASSETS["githooks"][0] / "hoist").as_posix()
     run_git(["-c", 'alias.loopgate-hoist=!f() { sh "$1"; }; f', "loopgate-hoist", hoist_script], REPO_ROOT)
-    console.print("[green]\n3. Ran script to make `.githooks` executable[/]\n")
+    console.print("[green]\n3. Ran script to make `.githooks` executable[/]")
     rprint(
         "\n[bold yellow]We will need to add these files[/]\n* `.githooks` are what ensure quality checks run"
         "\n* Mutation tests promote better tests. Docs and code for example test at `mutation/` and `tests/mutation`"
@@ -465,11 +491,7 @@ def hoist() -> bool:
         "\n*`scratchpad/` allows local agent use and contains a `runs/` directory for logs."
     )
     confirm(
-        style(
-            "\n4. Confirm, loopgate can add those files? Pre-existing files in the expected paths will remain "
-            "and loopgate will skip adding them.",
-            fg=10,
-        ),
+        style("4. Confirm, loopgate can add those files?\nPre-existing files in the expected paths will remain", fg=10),
         default=True,
         abort=True,
     )
@@ -486,25 +508,22 @@ def hoist() -> bool:
             else:
                 rprint(f"Skipped existing `{destination_path}` during copy")
         rprint(f"`{key}/` exists {destination.exists()}")
-    (repo_root / "scratchpad" / "runs").mkdir(parents=True, exist_ok=True)
-    (repo_root / "scratchpad" / "runs" / ".gitkeep").touch()
-    rprint(f"`scratchpad/` and `runs/` also added at {repo_root}")
+    (REPO_ROOT / "scratchpad" / "runs").mkdir(parents=True, exist_ok=True)
+    (REPO_ROOT / "scratchpad" / "runs" / ".gitkeep").touch()
+    rprint(f"`scratchpad/` and `runs/` also added at {REPO_ROOT}")
     return True
 
 
 @app.command(
-    help="This will set an env variable in Claude and Codex configuration files and add rules that they "
-    "cannot edit that variable. This ensures interactive agents (e.g. in IDEs) are held to the same standards"
-    " as headless agents. It makes gates un-bypassable. You can always return to rerun this later too."
+    help="This sets an env variable in Claude and Codex configuration files and adds rules that agents cannot edit that"
+    "env variable. This ensures interactive agents (e.g. in IDEs) are held to the same standards as headless agents. It"
+    " makes gates harder to bypass."
 )
 def configure_agents() -> bool:
     """Configure Claude and Codex for contained loops."""
     home = Path.home()
-    claude_path, codex_path, bak = (
-        home / ".claude/settings.json",
-        home / ".codex/config.toml",
-        home / ".codex/config.toml.bak",
-    )
+    claude_path = home / ".claude/settings.json"
+    codex_path = home / ".codex/config.toml"
     claude = json.loads(claude_path.read_text("utf-8") if claude_path.is_file() else "{}")
     codex = parse(codex_path.read_text("utf-8") if codex_path.is_file() else "")
     cl_confirm = confirm(style("\n5.1. Can we update CLAUDE rules and settings?", fg=10), default=True, abort=True)
@@ -515,7 +534,7 @@ def configure_agents() -> bool:
     permissions["deny"] = list(set(permissions.get("deny", [])) | CLAUDE_RULES)
     cx_confirm = confirm(style("5.2. Can we update CODEX rules and settings?", fg=10), default=True, abort=True)
     if cx_confirm and codex_path.is_file():
-        rprint(f"config.toml edited. Original backup at {copy2(codex_path, bak)}\n")
+        rprint(f"config.toml edited. Original backup at {copy2(codex_path, f'{codex_path}.bak')}")
     codex.setdefault("shell_environment_policy", {}).setdefault("set", {})["RALPH_LOOP"] = "1"
     claude_path.parent.mkdir(parents=True, exist_ok=True)
     claude_path.write_text(f"{json.dumps(claude, indent=2)}\n", encoding="utf-8")

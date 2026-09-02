@@ -454,6 +454,7 @@ def test_gate_runs_exactly_what_pyproject_configures(
         "forbidden": raw_harness_toml["FORBIDDEN"],
         "agents": raw_harness_toml["agents"],
         "commit_checks": raw_harness_toml["preflight"],
+        "gate": raw_harness_toml["gate"],
         "gate_checks": raw_harness_toml["gate"] | raw_harness_toml["preflight"],
         "forbidden_files": tuple(raw_harness_toml["FORBIDDEN"]["FILES"]),
         "forbidden_dirs": tuple(raw_harness_toml["FORBIDDEN"]["DIRS"]),
@@ -735,7 +736,7 @@ def test_diff_size_ignores_changes_with_nothing_staged(
 def test_lint_command_keeps_required_flags() -> None:
     """The fast lint command remains Ruff's fixing-aware repository-wide check."""
     command = gates().commit_checks["ruff_lint"]
-    assert command == ["ruff", "check", "--no-cache", "--show-fixes", "."]
+    assert command == ["ruff", "check", "--no-cache", "--show-fixes", "preferences"]
 
 
 def test_type_check_keeps_machine_readable_output() -> None:
