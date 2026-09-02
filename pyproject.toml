@@ -1,16 +1,16 @@
 [project]
 name = "loopgate"
 requires-python = ">=3.10"
-version = "0.1.0"
+version = "0.1.1"
 description = "Gated, harnessed, autonomy loop with quality checks."
 authors = [{ name = "rxdt" }]
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["agent", "autonomy", "scaffold", "harness", "llm", "codex", "claude", "loop"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -138,10 +138,10 @@ copilot = [
 # checks = ["bundle", "exec", "rspec"]
 
 [tool.harness.preflight]
-ruff_lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
 ruff_format = ["ruff", "format", "--no-cache", "--check"]
-complexity = ["complexipy", ".", "--suggest-refactors"]
+ruff_lint = ["ruff", "check", "--no-cache", "--show-fixes", "."]
 pylint = ["pylint", "."]
+complexity = ["complexipy", ".", "--suggest-refactors"]
 
 [tool.harness.gate]
 audit = ["pip-audit"]
@@ -153,8 +153,8 @@ security = [
     "--exclude-rule", "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag",
     ".",
 ]
-types = ["pyright", "--outputjson"]
 test = ["pytest", "-p", "no:cacheprovider", "-n", "auto", "--cov", "--cov-report=term-missing", "--cov-fail-under=100", "--durations=5"]
+types = ["pyright", "--outputjson"]
 
 [tool.harness.FORBIDDEN]
 DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/", "mutation", "tests/mutation/"]

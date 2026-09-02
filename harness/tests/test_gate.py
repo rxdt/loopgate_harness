@@ -775,7 +775,7 @@ def test_preflight_flags_preferences_break_under_loop(monkeypatch: pytest.Monkey
     result = gates().run_preflight()
 
     assert result == {
-        "pass": ["ruff_format", "complexity", "pylint", "mutmut"],
+        "pass": ["ruff_format", "pylint", "complexity", "mutmut"],
         "fail": [
             "ruff_lint",
             (

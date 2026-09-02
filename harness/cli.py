@@ -161,8 +161,9 @@ def info() -> None:
 def status() -> None:
     """Count run logs and point at the newest one."""
     runs = REPO_ROOT / "scratchpad" / "runs"
-    logs = sorted(runs.glob("*.jsonl")) if runs.is_dir() else [""]
-    secho(f"{len(logs)} run log(s) in {runs}\nnewest: {logs[-1]}", fg=colors.CYAN, bold=True)
+    logs = sorted(runs.glob("*.jsonl"), reverse=True) if runs.is_dir() else []
+    newest = "\n".join(str(log) for log in logs[:3]) if logs else ""
+    secho(f"{len(logs)} run log(s) in {runs}\nnewest:\n{newest}", fg=30)
 
 
 def cleanup(cwd: Path) -> bool:
@@ -195,7 +196,7 @@ def cleanup(cwd: Path) -> bool:
 )
 def install() -> None:
     """Used by template cloned from Github. Syncs dependencies, and activates the git hooks."""
-    rprint("\n[cyan2]installing dependencies[/cyan2]")
+    rprint("\n[cyan2]installing dependencies[/]")
     env_bin = infer_env_manager_and_install()
     cleanup(REPO_ROOT)
     setup_git_hooks(env_bin)
@@ -340,21 +341,21 @@ def init() -> None:
     ):
         secho("Run `harness init` to configure loopgate", fg=colors.MAGENTA, bold=True)
         raise Exit(code=0)
-    if write_harness_config():
-        confirm(style("\n2. Can we wire githooks so quality checks run?", fg=10), default=True, abort=True)
+    wired = write_harness_config()
     hoisted = hoist()
     hooks = setup_git_hooks(Path(sys.executable).parent)
     timeout = check_for_timeout_and_prompt() or IS_WINDOWS
     agents = configure_agents()
     rprint(
-        f"\n[bold cyan2]RESULT:[/]\nfiles added: {hoisted}\ngit hooks available via path: {hooks}"
-        f"\ntimeout-ready: {timeout}\nagents configured: {agents}"
-        f"\n[bold cyan2]Can likely run loops: [/]{bool(hoisted and hooks and timeout)}\n"
-        "\n[italic]Ensure your environemnt is activated to use the `harness run` command[/]\n"
+        f"\n[bold cyan2]RESULT:[/]\ngit hooks available via path: {hooks}\ntimeout-ready: {timeout}"
+        f"\nfiles added: {hoisted}\nagents configured: {agents}"
+        f"\nHarness commands in `pyproject.toml to run as checks`:\n{set(wired)}\n"
+        f"\n[bold cyan2]Can likely run loops with checks: [/]{bool(wired and hoisted and hooks and timeout)}\n"
+        "\n[italic]To loop with checks using `harness run` command, ensure your environemnt is activated[/]\n"
     )
 
 
-def write_harness_config() -> bool:
+def write_harness_config() -> set[str]:
     """Takes user's configs and creates a pyproject.toml or appends to an existing pyproject.toml."""
     pyproject_path = REPO_ROOT / "pyproject.toml"
     user_pyproject: TOMLDocument = document()
@@ -362,21 +363,21 @@ def write_harness_config() -> bool:
     if pyproject_path.is_file():
         user_pyproject: TOMLDocument = parse(pyproject_path.read_text(encoding="utf-8"))
         user_pyproject_tools: dict[str, Any] = user_pyproject.setdefault("tool", table())
-        user_harness = user_pyproject_tools.get("harness", {})
-        checks = user_harness.get("gate", {})
-        if checks and checks.get("test"):
-            confirm(style("Seems loopgate may be wired already. Continue?", fg=10), default=True, abort=True)
     template: Path = Path(__file__).resolve().with_name("temp.pyproject.toml")
     template_contents: TOMLDocument = parse(template.read_text(encoding="utf-8"))
-    for t in template_contents["tool"]:
+    template_tools = template_contents["tool"]
+    for t in template_tools:
         if t in user_pyproject_tools:
-            template_contents["tool"][t] = deepcopy(user_pyproject_tools[t])
+            template_tools[t] = deepcopy(user_pyproject_tools[t])
     contents = ConfigParser(interpolation=None)
     contents.read([(REPO_ROOT / "tox.ini"), (REPO_ROOT / "setup.cfg")], encoding="utf-8")
     section_names = contents.sections()
     inspect_configs(section_names, user_pyproject_tools, deepcopy(CATEGORIES), template_contents["tool"])
-    user_pyproject.setdefault("tool", {}).update(template_contents["tool"])
-    return bool(pyproject_path.write_text(dumps(user_pyproject), encoding="utf-8"))
+    user_pyproject.setdefault("tool", {}).update(template_tools)
+    pyproject_path.write_text(dumps(user_pyproject), encoding="utf-8")
+    updated_pyproject: TOMLDocument = parse(pyproject_path.read_text(encoding="utf-8"))
+    harness: dict[str, Any] = updated_pyproject.setdefault("tool", table()).get("harness", {})
+    return set(harness.get("preflight", {}) | harness.get("gate", {}))
 
 
 def find_configured_command(
@@ -412,10 +413,7 @@ def find_configured_command(
 
 
 def inspect_configs(
-    section_names: list[str],
-    user_pyproject_tools: dict[str, Any],
-    categories: dict[str, str],
-    template: dict[str, Any],
+    section_names: list[str], user_pyproject_tools: dict[str, Any], categories: dict[str, str], template: dict[str, Any]
 ) -> None:
     """For each tool in a pre-built internal map, see if user has the tool installed and configured.
     Args:
@@ -453,35 +451,40 @@ def hoist() -> bool:
     if not (ASSETS["docs"][0].is_dir() and ASSETS["githooks"][0].is_dir()):
         rprint("Harness is missing required assets: `docs/` and `githooks/`")
         return False
+    confirm(style("\n2. Can we wire githooks so quality checks run?", fg=10), default=True, abort=True)
+    repo_root = REPO_ROOT
+    ASSETS["githooks"][1].mkdir(parents=True, exist_ok=True)
+    hoist_script: str = (ASSETS["githooks"][0] / "hoist").as_posix()
+    run_git(["-c", 'alias.loopgate-hoist=!f() { sh "$1"; }; f', "loopgate-hoist", hoist_script], REPO_ROOT)
+    console.print("[green]\n3. Ran script to make `.githooks` executable[/]\n")
     rprint(
-        "\n[bold yellow]We will need to add these files[/]\n* Git hooks are what ensure quality checks run"
-        "\n* Mutation tests promote good tests.\n* `preferences` allow for checks beyond what tooling catches"
-        "and demonstrate Hypothesis property tests\n* `docs` contain the instructions and memory for loops "
+        "\n[bold yellow]We will need to add these files[/]\n* `.githooks` are what ensure quality checks run"
+        "\n* Mutation tests promote better tests. Docs and code for example test at `mutation/` and `tests/mutation`"
+        "\n* `preferences/` allows for checks beyond what tooling catches"
+        "and demonstrates Hypothesis property tests\n* `docs` contain the instructions and memory for loops "
         "\n*`scratchpad/` allows local agent use and contains a `runs/` directory for logs."
     )
     confirm(
         style(
-            "3. Confirm, loopgate can add those files? Pre-existing files in the expected paths will remain "
+            "\n4. Confirm, loopgate can add those files? Pre-existing files in the expected paths will remain "
             "and loopgate will skip adding them.",
             fg=10,
         ),
         default=True,
         abort=True,
     )
-    repo_root = REPO_ROOT
-    ASSETS["githooks"][1].mkdir(parents=True, exist_ok=True)
-    hoist_script: str = (ASSETS["githooks"][0] / "hoist").as_posix()
-    run_git(["-c", 'alias.loopgate-hoist=!f() { sh "$1"; }; f', "loopgate-hoist", hoist_script], REPO_ROOT)
-    console.print(f"[green]\n4. Ran {hoist_script}[/]\n")
     for key, paths in ASSETS.items():
         source, destination = paths
-        for source_path in source.rglob("*"):
-            destination_path = destination / source_path.relative_to(source)
+        source_paths = source.rglob("*") if source.is_dir() else (source,)
+        for source_path in source_paths:
+            destination_path = destination / source_path.relative_to(source) if source.is_dir() else destination
             if source_path.is_dir():
                 destination_path.mkdir(parents=True, exist_ok=True)
             elif not destination_path.exists():
                 destination_path.parent.mkdir(parents=True, exist_ok=True)
                 copy2(source_path, destination_path)
+            else:
+                rprint(f"Skipped existing `{destination_path}` during copy")
         rprint(f"`{key}/` exists {destination.exists()}")
     (repo_root / "scratchpad" / "runs").mkdir(parents=True, exist_ok=True)
     (repo_root / "scratchpad" / "runs" / ".gitkeep").touch()

@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import DEFAULT, Mock, call, create_autospec
+from zipfile import ZipFile
 
 import pytest
 import tomlkit as tomllib
@@ -21,7 +22,7 @@ from click import unstyle
 from typer import Abort
 from typer.testing import CliRunner
 
-from harness import cli, gate
+from harness import cli, config, gate
 from harness.gate import Gate, gates
 from harness.tests.conftest import REPO_ROOT, fake_home, fake_popen
 
@@ -50,16 +51,53 @@ print(json.dumps({
 """
 
 
-def assert_installed_config_paths(environment: dict[str, str], foreign_repo: Path) -> dict[str, tuple[Path, Path]]:
-    """The installed config keeps package sources separate from the active repository targets."""
+def run_checked(command: list[str]) -> None:
+    """Run an integration-test setup command and expose its complete failure output."""
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def install_local_wheel(test_root: Path) -> Path:
+    """Build the current wheel and install it with dependencies in an isolated environment."""
+    wheel_dir = test_root / "dist"
+    environment_dir = test_root / ".venv"
+    environment_bin = environment_dir / ("Scripts" if sys.platform == "win32" else "bin")
+    environment_python = environment_bin / ("python.exe" if sys.platform == "win32" else "python")
+
+    run_checked(["uv", "build", "--wheel", "--out-dir", str(wheel_dir), str(REPO_ROOT)])
+    wheels = list(wheel_dir.glob("loopgate-*.whl"))
+    assert len(wheels) == 1, wheels
+    with ZipFile(wheels[0]) as wheel:
+        cache_members = [name for name in wheel.namelist() if "__pycache__" in name or name.endswith(".pyc")]
+    assert not cache_members, cache_members
+    run_checked(["uv", "venv", "--no-project", "--python", sys.executable, str(environment_dir)])
+    run_checked(["uv", "pip", "install", "--python", str(environment_python), str(wheels[0])])
+    return environment_python
+
+
+def isolated_environment(environment_python: Path, home: Path) -> dict[str, str]:
+    """Give an installed command its own environment and home without source-checkout imports."""
+    environment = {
+        key: value for key, value in os.environ.items() if key not in {"PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"}
+    }
+    environment["PATH"] = f"{environment_python.parent}{os.pathsep}{environment.get('PATH', '')}"
+    environment["VIRTUAL_ENV"] = str(environment_python.parents[1])
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    return environment
+
+
+def assert_installed_config_paths(foreign_repo: Path) -> Path:
+    """A wheel installed into an isolated environment resolves assets into the active repository."""
+    environment_python = install_local_wheel(foreign_repo.parent / f"{foreign_repo.name}-package")
     probe_cwd = foreign_repo / "nested"
     probe_cwd.mkdir()
     probe = subprocess.run(
-        [sys.executable, "-c", INSTALLED_CONFIG_PROBE],
+        [environment_python, "-c", INSTALLED_CONFIG_PROBE],
         cwd=probe_cwd,
         capture_output=True,
         text=True,
-        env=environment,
+        env=isolated_environment(environment_python, foreign_repo.parent / "probe-home"),
         check=False,
     )
     assert probe.returncode == 0, probe.stderr
@@ -68,6 +106,13 @@ def assert_installed_config_paths(environment: dict[str, str], foreign_repo: Pat
     repo_root = foreign_repo.resolve()
     assets: dict[str, tuple[Path, Path]] = {
         name: (Path(paths[0]), Path(paths[1])) for name, paths in observed["assets"].items()
+    }
+    expected_assets = {
+        name: (
+            installed_root / source.relative_to(config.site_packages),
+            repo_root / destination.relative_to(config.repo_root),
+        )
+        for name, (source, destination) in config.ASSETS.items()
     }
     assert {
         "site_packages": Path(observed["site_packages"]),
@@ -78,16 +123,10 @@ def assert_installed_config_paths(environment: dict[str, str], foreign_repo: Pat
         "site_packages": installed_root,
         "package_root": installed_root / "harness",
         "repo_root": repo_root,
-        "assets": {
-            "docs": (installed_root / "harness/docs", repo_root / "docs"),
-            "githooks": (installed_root / "harness/.githooks", repo_root / ".githooks"),
-            "preferences": (installed_root / "preferences", repo_root / "preferences"),
-            "mutation": (installed_root / "mutation", repo_root / "mutation"),
-            "pref_tests": (installed_root / "harness/tests/preferences", repo_root / "tests/preferences"),
-            "mutation_tests": (installed_root / "harness/tests/mutation", repo_root / "tests/mutation"),
-        },
+        "assets": expected_assets,
     }
-    return assets
+    assert all(source.is_file() or source.is_dir() for source, _ in assets.values())
+    return environment_python
 
 
 CONFIG_SOURCE_MATRIX = (
@@ -308,22 +347,37 @@ def test_cli_summaries_report_complete_agent_check_results(
     ]
 
 
-def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path) -> None:
-    """Status reports its empty placeholder, then counts receipts and points at the last one."""
+def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The installed and importable status commands count receipts and name the newest three."""
     runs = git_repo / "scratchpad" / "runs"
-    empty = runner.invoke(cli.app, ["status"])
+    command = [str(Path(sys.executable).with_name("harness.exe" if cli.IS_WINDOWS else "harness")), "status"]
+    environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    empty = subprocess.run(command, cwd=git_repo, capture_output=True, text=True, env=environment, check=False)
 
-    assert empty.exit_code == 0
-    assert empty.stdout == f"1 run log(s) in {runs}\nnewest: \n"
+    assert empty.returncode == 0, empty.stderr
+    assert empty.stdout == f"0 run log(s) in {runs}\nnewest:\n\n"
 
     runs.mkdir(parents=True)
     (runs / "0001-claude.jsonl").write_text("{}\n", encoding="utf-8")
     (runs / "0002-codex.jsonl").write_text("{}\n", encoding="utf-8")
+    (runs / "0003-claude.jsonl").write_text("{}\n", encoding="utf-8")
+    (runs / "0004-codex.jsonl").write_text("{}\n", encoding="utf-8")
 
-    counted = runner.invoke(cli.app, ["status"])
+    counted = subprocess.run(command, cwd=git_repo, capture_output=True, text=True, env=environment, check=False)
 
-    assert counted.exit_code == 0
-    assert counted.stdout == f"2 run log(s) in {runs}\nnewest: {runs / '0002-codex.jsonl'}\n"
+    assert counted.returncode == 0, counted.stderr
+    lines = counted.stdout.splitlines()
+    assert lines[0] == f"4 run log(s) in {runs}"
+    assert lines[1:] == [
+        "newest:",
+        str(runs / "0004-codex.jsonl"),
+        str(runs / "0003-claude.jsonl"),
+        str(runs / "0002-codex.jsonl"),
+    ]
+    monkeypatch.setattr(cli, "REPO_ROOT", git_repo)
+    imported = runner.invoke(cli.app, ["status"])
+    assert imported.exit_code == 0, imported.output
+    assert imported.stdout == counted.stdout
 
 
 def test_setup_git_hooks_records_exact_posix_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -461,27 +515,28 @@ def test_configure_agents_aborts_without_writing(monkeypatch: pytest.MonkeyPatch
     assert not home.exists()
 
 
-def test_write_harness_config_aborts_when_existing_wiring_is_declined(
+def test_write_harness_config_is_idempotent_with_existing_wiring(
     monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
-    """Declining an already-wired configuration leaves pyproject.toml unchanged."""
+    """Reconfiguring an already-wired project leaves its generated configuration unchanged."""
     pyproject = git_repo / "pyproject.toml"
-    original = '[tool.harness.gate]\ntest = ["pytest"]\n'
+    original = f'{INIT_PROJECT_COMMENT}\n[tool.project]\nsentinel = "keep"\n\n[tool.harness.gate]\ntest = ["pytest"]\n'
     pyproject.write_text(original, encoding="utf-8")
     monkeypatch.setattr(cli, "TOOLS", {})
-    monkeypatch.setattr(Path, "is_file", create_autospec(Path.is_file, wraps=Path.is_file))
-    monkeypatch.setattr(Path, "read_text", create_autospec(Path.read_text, wraps=Path.read_text))
-    monkeypatch.setattr(cli, "confirm", Mock(side_effect=Abort()))
+    confirm = Mock()
+    monkeypatch.setattr(cli, "confirm", confirm)
 
-    with pytest.raises(Abort):
-        cli.write_harness_config()
+    first_checks = cli.write_harness_config()
+    first_config = pyproject.read_text(encoding="utf-8")
+    second_checks = cli.write_harness_config()
+    configured = tomllib.loads(first_config)
 
-    Path.is_file.assert_called_once_with(pyproject)
-    Path.read_text.assert_called_once_with(pyproject, encoding="utf-8")
-    cli.confirm.assert_called_once_with(
-        cli.style("Seems loopgate may be wired already. Continue?", fg=10), default=True, abort=True
-    )
-    assert pyproject.read_text(encoding="utf-8") == original
+    assert first_checks == second_checks == {"test"}
+    assert INIT_PROJECT_COMMENT in first_config
+    assert configured["tool"]["project"] == {"sentinel": "keep"}
+    assert configured["tool"]["harness"]["gate"]["test"] == ["pytest"]
+    assert pyproject.read_text(encoding="utf-8") == first_config
+    confirm.assert_not_called()
 
 
 def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
@@ -499,6 +554,7 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     assert Path.read_text.call_args_list == [
         call(git_repo / "pyproject.toml", encoding="utf-8"),
         call(Path(cli.__file__).resolve().parent / "temp.pyproject.toml", encoding="utf-8"),
+        call(git_repo / "pyproject.toml", encoding="utf-8"),
     ]
     assert Path.write_text.call_args.args[0] == git_repo / "pyproject.toml"
     assert Path.write_text.call_args.kwargs == {"encoding": "utf-8"}
@@ -666,64 +722,72 @@ def test_init_declines_without_mutating_repo(git_repo: Path) -> None:
     assert "Run `harness init`" in fresh.stdout
 
 
-def test_init_hoists_and_records_the_installed_harness(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """Init handles hook consent, hoisting, and recording the installed harness."""
-    monkeypatch.setattr(cli, "TOOLS", {})
-    bin_dir = git_repo / "bin"
-    bin_dir.mkdir()
-    write_executable(bin_dir / "gtimeout", "#!/bin/sh\nexit 0\n")
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setattr(Path, "home", fake_home(git_repo / "home"))
-    installed_assets = assert_installed_config_paths(
-        {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}, git_repo
+def test_init_hoists_and_records_the_installed_harness(git_repo: Path) -> None:
+    """A wheel-installed harness creates a foreign project's config and its hooks work from Git."""
+    assert not (git_repo / "pyproject.toml").exists()
+    environment_python = assert_installed_config_paths(git_repo)
+    installed_harness = harness_executable(environment_python.parent)
+    write_executable(environment_python.parent / "gtimeout", "")
+    environment = isolated_environment(environment_python, git_repo.parent / "home")
+    initialized = subprocess.run(
+        [installed_harness, "init"],
+        cwd=git_repo,
+        input="y\n" * 5,
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
     )
-    assert (installed_assets["githooks"][0] / "hoist").is_file()
-    hoist = Mock(return_value=False)
-    monkeypatch.setattr(cli, "hoist", hoist)
 
-    result = runner.invoke(cli.app, ["init"], input="y\nn\n")
-
-    assert result.exit_code == 1
-    assert "Aborted" in result.output
-    assert "harness" in tomllib.loads((git_repo / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
-    hoist.assert_not_called()
-
-    result = runner.invoke(cli.app, ["init"], input="y\n" * 5)
-
-    assert result.exit_code == 0, result.output
-    assert "2. Can we wire githooks so quality checks run?" in result.output
-    retry_output = unstyle(result.output)
-    assert "Can likely run loops: False" in retry_output
-    assert "Success. Try running loops with `harness run <agent>`" not in retry_output
-    assert "macOS harness needs timeout/gtimeout from coreutils" not in retry_output
-    assert "Install `brew install coreutils` now?" not in retry_output
-
-    hoist.assert_called_once_with()
+    assert initialized.returncode == 0, initialized.stdout + initialized.stderr
+    generated = tomllib.loads((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
+    assert generated["tool"]["harness"]["preflight"]
+    assert generated["tool"]["harness"]["gate"]
     recorded = git_repo / ".git" / "harness-path"
-    assert (
-        recorded.read_text(encoding="utf-8")
-        == (Path(sys.executable).parent / ("harness.exe" if cli.IS_WINDOWS else "harness")).as_posix() + "\n"
+    assert recorded.read_text(encoding="utf-8") == f"{installed_harness.as_posix()}\n"
+    assert gate.run_git(["config", "--get", "core.hooksPath"], git_repo).strip() == ".githooks"
+    required_assets = (
+        "docs/PROMPT.md",
+        "preferences/preferences.py",
+        "mutation/check_mutmut.py",
+        "tests/preferences/test_preferences.py",
+        "tests/mutation/test_check_mutmut.py",
+    )
+    for path in required_assets:
+        assert (git_repo / path).is_file()
+    assert all(
+        (git_repo / ".githooks" / name).is_file()
+        for name in ("_resolve", "pre-commit", "pre-push", "prepare-commit-msg")
+    )
+    status = subprocess.run(
+        [installed_harness, "status"], cwd=git_repo, capture_output=True, text=True, env=environment, check=False
     )
 
-    hoist.return_value = True
-    setup_hooks = Mock(return_value=recorded)
-    configure = Mock()
-    monkeypatch.setattr(cli, "setup_git_hooks", setup_hooks)
-    monkeypatch.setattr(cli, "configure_agents", configure)
-
-    result = runner.invoke(cli.app, ["init"], input="y\n" * 3)
-
-    assert result.exit_code == 0, result.output
-    success_output = unstyle(result.output)
-    assert "files added: True" in success_output
-    assert "Can likely run loops: True" in success_output
-    assert hoist.call_args_list == [call(), call()]
-    setup_hooks.assert_called_once_with(Path(sys.executable).parent)
-    configure.assert_called_once_with()
+    (git_repo / "hook_check.py").write_text('"""Hook integration fixture."""\n\nVALUE = 1\n', encoding="utf-8")
+    gate.run_git(["add", "hook_check.py"], git_repo)
+    committed = subprocess.run(
+        ["git", "commit", "-q", "-m", "exercise installed hooks"],
+        cwd=git_repo,
+        capture_output=True,
+        text=True,
+        env=environment | {"RALPH_LOOP": "1"},
+        check=False,
+    )
+    assert committed.returncode == 0, committed.stdout + committed.stderr
+    assert gate.run_git(["show", "--name-only", "--format=", "HEAD"], git_repo).splitlines() == ["hook_check.py"]
+    assert status.returncode == 0, status.stderr
+    assert status.stdout == f"0 run log(s) in {git_repo / 'scratchpad/runs'}\nnewest:\n\n"
+    cache_files = []
+    for destination in ("preferences", "mutation", "tests"):
+        cache_files.extend(
+            path for path in (git_repo / destination).rglob("*") if "__pycache__" in path.parts or path.suffix == ".pyc"
+        )
+    assert not cache_files, "\n".join(str(path.relative_to(git_repo)) for path in cache_files)
+    assert "Can likely run loops with checks: True" in unstyle(initialized.stdout)
 
 
 def test_init_aborts_when_required_hooks_are_declined(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """Init stops when its required hook confirmation aborts."""
+    """Init stops when its required hook confirmation aborts and reports successful setup."""
     (git_repo / "pyproject.toml").write_text("", encoding="utf-8")
     confirm = Mock(side_effect=[True, Abort()])
     write_config = Mock()
@@ -737,6 +801,17 @@ def test_init_aborts_when_required_hooks_are_declined(monkeypatch: pytest.Monkey
 
     write_config.assert_called_once()
     message.assert_not_called()
+
+    confirm.side_effect = None
+    confirm.return_value = True
+    write_config.return_value = {"test"}
+    monkeypatch.setattr(cli, "hoist", Mock(return_value=True))
+    monkeypatch.setattr(cli, "setup_git_hooks", Mock(return_value=git_repo / ".githooks"))
+    monkeypatch.setattr(cli, "check_for_timeout_and_prompt", Mock(return_value="timeout"))
+    monkeypatch.setattr(cli, "configure_agents", Mock(return_value=True))
+    cli.init()
+
+    assert "\n[bold cyan2]Can likely run loops with checks: [/]True\n" in message.call_args.args[0]
 
 
 def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -785,27 +860,32 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     assert (repo / "docs" / "nested" / "new.txt").read_text(encoding="utf-8") == "new\n"
     assert (repo / "docs" / "existing.txt").read_text(encoding="utf-8") == "existing\n"
     assert (repo / "scratchpad" / "runs" / ".gitkeep").is_file()
-    confirm.assert_called_once_with(
-        cli.style(
-            "3. Confirm, loopgate can add those files? Pre-existing files in the expected paths will remain "
-            "and loopgate will skip adding them.",
-            fg=10,
+    assert confirm.call_args_list == [
+        call(cli.style("\n2. Can we wire githooks so quality checks run?", fg=10), default=True, abort=True),
+        call(
+            cli.style(
+                "\n4. Confirm, loopgate can add those files? Pre-existing files in the expected paths will remain "
+                "and loopgate will skip adding them.",
+                fg=10,
+            ),
+            default=True,
+            abort=True,
         ),
-        default=True,
-        abort=True,
-    )
+    ]
     Path.mkdir.assert_any_call(repo / ".githooks", parents=True, exist_ok=True)
     assert Path.mkdir.call_args_list.count(call(repo / "docs" / "nested", parents=True, exist_ok=True)) == 2
     Path.mkdir.assert_any_call(repo / "scratchpad" / "runs", parents=True, exist_ok=True)
     Path.touch.assert_called_once_with(repo / "scratchpad" / "runs" / ".gitkeep")
-    cli.console.print.assert_called_once_with(f"[green]\n4. Ran {(package_hooks / 'hoist').as_posix()}[/]\n")
+    cli.console.print.assert_called_once_with("[green]\n3. Ran script to make `.githooks` executable[/]\n")
     assert message.call_args_list[0] == call(
-        "\n[bold yellow]We will need to add these files[/]\n* Git hooks are what ensure quality checks run"
-        "\n* Mutation tests promote good tests.\n* `preferences` allow for checks beyond what tooling catches"
-        "and demonstrate Hypothesis property tests\n* `docs` contain the instructions and memory for loops "
+        "\n[bold yellow]We will need to add these files[/]\n* `.githooks` are what ensure quality checks run"
+        "\n* Mutation tests promote better tests. Docs and code for example test at `mutation/` and `tests/mutation`"
+        "\n* `preferences/` allows for checks beyond what tooling catches"
+        "and demonstrates Hypothesis property tests\n* `docs` contain the instructions and memory for loops "
         "\n*`scratchpad/` allows local agent use and contains a `runs/` directory for logs."
     )
-    assert message.call_args_list[1:3] == [
+    assert message.call_args_list[1:4] == [
+        call(f"Skipped existing `{repo / 'docs/existing.txt'}` during copy"),
         call(f"`docs/` exists {(repo / 'docs').exists()}"),
         call(f"`githooks/` exists {(repo / '.githooks').exists()}"),
     ]
