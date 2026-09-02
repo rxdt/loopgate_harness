@@ -727,8 +727,7 @@ def test_init_hoists_and_records_the_installed_harness(git_repo: Path) -> None:
     assert not (git_repo / "pyproject.toml").exists()
     environment_python = assert_installed_config_paths(git_repo)
     installed_harness = harness_executable(environment_python.parent)
-    if not cli.IS_WINDOWS:
-        write_executable(environment_python.parent / "gtimeout", "#!/bin/sh\nexit 0\n")
+    write_executable(environment_python.parent / "gtimeout", "")
     environment = isolated_environment(environment_python, git_repo.parent / "home")
     initialized = subprocess.run(
         [installed_harness, "init"],
