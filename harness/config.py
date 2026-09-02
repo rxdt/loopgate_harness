@@ -181,8 +181,14 @@ CLAUDE_RULES: set[str] = {
 ASSETS: dict[str, tuple[Path, Path]] = {
     "docs": (package_root / "docs", repo_root / "docs"),
     "githooks": (package_root / ".githooks", repo_root / ".githooks"),
-    "preferences": (site_packages / "preferences", repo_root / "preferences"),
-    "mutation": (site_packages / "mutation", repo_root / "mutation"),
-    "pref_tests": (package_root / "tests/preferences", repo_root / "tests/preferences"),
-    "mutation_tests": (package_root / "tests/mutation", repo_root / "tests/mutation"),
+    "preferences": (site_packages / "preferences/preferences.py", repo_root / "preferences/preferences.py"),
+    "mutation": (site_packages / "mutation/check_mutmut.py", repo_root / "mutation/check_mutmut.py"),
+    "tests/preferences": (
+        package_root / "tests/preferences/test_preferences.py",
+        repo_root / "tests/preferences/test_preferences.py",
+    ),
+    "tests/mutation": (
+        package_root / "tests/mutation/test_check_mutmut.py",
+        repo_root / "tests/mutation/test_check_mutmut.py",
+    ),
 }

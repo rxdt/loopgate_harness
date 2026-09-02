@@ -1,7 +1,7 @@
 [project]
 name = "loopgate"
 requires-python = ">=3.10"
-version = "0.1.0"
+version = "0.1.1"
 [project.scripts]
 harness = "harness.cli:main" # creates the executable `harness`
 [build-system]
