@@ -969,7 +969,7 @@ def test_installing_the_template_cleans_the_repo_and_sets_hooks(
     subprocess.run(["git", "clone", "--quiet", "--shared", str(REPO_ROOT), str(template_repo)], check=True)
     expected_project = (REPO_ROOT / "harness" / "temp.pyproject.toml").read_text(encoding="utf-8")
     (template_repo / "harness" / "temp.pyproject.toml").write_text(expected_project, encoding="utf-8")
-    for module in ("cli.py", "config.py"):
+    for module in ("cli.py", "config.py", "gate.py"):
         (template_repo / "harness" / module).write_text(
             (REPO_ROOT / "harness" / module).read_text(encoding="utf-8"), encoding="utf-8"
         )

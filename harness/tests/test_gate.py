@@ -599,19 +599,31 @@ def test_gate_runs_exactly_what_pyproject_configures(
 
 
 @pytest.mark.parametrize(
-    ("score", "loop", "bucket"),
+    ("score", "loop", "behavior", "bucket"),
     [
-        pytest.param(gate.MINIMUM_MUTATION_SCORE, False, "pass", id="at-minimum"),
-        pytest.param(gate.MINIMUM_MUTATION_SCORE - 0.1, False, "warn", id="human-below"),
-        pytest.param(gate.MINIMUM_MUTATION_SCORE - 0.1, True, "fail", id="agent-below"),
+        pytest.param(gate.MINIMUM_MUTATION_SCORE, False, "fail", "pass", id="at-minimum"),
+        pytest.param(gate.MINIMUM_MUTATION_SCORE - 0.1, False, "fail", "warn", id="human-below"),
+        pytest.param(gate.MINIMUM_MUTATION_SCORE - 0.1, True, "fail", "fail", id="agent-below-fail"),
+        pytest.param(gate.MINIMUM_MUTATION_SCORE - 0.1, True, "warn", "warn", id="agent-below-warn"),
     ],
 )
 def test_mutation_score_uses_the_configured_minimum(
-    score: float, loop: bool, bucket: str, monkeypatch: pytest.MonkeyPatch
+    score: float,
+    loop: bool,
+    behavior: str,
+    bucket: str,
+    monkeypatch: pytest.MonkeyPatch,
+    git_repo: Path,
 ) -> None:
     """The score passes at the configured boundary and falls into the caller's failure bucket below it."""
-    monkeypatch.setattr(gate, "analyze_mutmut_report_passed", Mock(return_value=score))
-    monkeypatch.setattr(Gate, "_run_non_human_checks", Mock())
+    checker = Mock(return_value=score)
+    containment = Mock()
+    monkeypatch.setattr(gate, "analyze_mutmut_report_passed", checker)
+    monkeypatch.setattr(Gate, "_run_non_human_checks", containment)
+    monkeypatch.setitem(gates().settings, "behavior", behavior)
+    nested = git_repo / "nested"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
     if loop:
         monkeypatch.setenv("RALPH_LOOP", "1")
     else:
@@ -621,6 +633,8 @@ def test_mutation_score_uses_the_configured_minimum(
 
     assert results[bucket] == ["mutmut"]
     assert sum("mutmut" in values for values in results.values()) == 1
+    assert containment.call_args.args[1] == (behavior if loop else "warn")
+    checker.assert_called_once_with(str(git_repo / "mutants" / "mutmut-cicd-stats.json"))
 
 
 def test_diff_size_counts_only_relevant_changed_lines(
@@ -655,16 +669,18 @@ def test_diff_size_counts_only_relevant_changed_lines(
 
 
 @pytest.mark.parametrize(
-    ("lines", "verdict"),
+    ("lines", "behavior", "verdict"),
     [
-        pytest.param(WARNING_THRESHOLD, "quiet", id="at-warn"),
-        pytest.param(WARNING_THRESHOLD + 1, "advised", id="over-warn"),
-        pytest.param(gates().settings["error_diff_lines"], "advised", id="at-cap"),
-        pytest.param(gates().settings["error_diff_lines"] + 1, "blocked", id="over-cap"),
+        pytest.param(WARNING_THRESHOLD, "fail", "quiet", id="at-warn"),
+        pytest.param(WARNING_THRESHOLD + 1, "fail", "advised", id="over-warn"),
+        pytest.param(gates().settings["error_diff_lines"], "fail", "advised", id="at-cap"),
+        pytest.param(gates().settings["error_diff_lines"] + 1, "fail", "blocked", id="over-cap"),
+        pytest.param(gates().settings["error_diff_lines"] + 1, "warn", "advised", id="over-cap-warn"),
     ],
 )
 def test_diff_size_warns_then_blocks_as_the_change_grows(
     lines: int,
+    behavior: str,
     verdict: str,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
@@ -672,6 +688,7 @@ def test_diff_size_warns_then_blocks_as_the_change_grows(
 ) -> None:
     """The configured thresholds advise first and only block once the change reaches the cap."""
     monkeypatch.setenv("RALPH_LOOP", "1")
+    monkeypatch.setitem(gates().settings, "behavior", behavior)
     monkeypatch.setattr(gates(), "commit_checks", {})
     stage(git_repo, "src/big.py", "value = 1\n" * lines)
 

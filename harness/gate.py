@@ -79,10 +79,11 @@ class Gate:
                 results["warn"].append(name)
             else:
                 results[self.settings["behavior"]].append(name)
-        key = "fail" if os.environ.get("RALPH_LOOP") else "warn"
+        key = self.settings["behavior"] if os.environ.get("RALPH_LOOP") else "warn"
         colorize("AGENT CHECKs", "running non-human agent checks")
         self._run_non_human_checks(results, key)
-        mutmut_key = "pass" if analyze_mutmut_report_passed() >= MINIMUM_MUTATION_SCORE else key
+        report = self.repo_root / "mutants" / "mutmut-cicd-stats.json"
+        mutmut_key = "pass" if analyze_mutmut_report_passed(str(report)) >= MINIMUM_MUTATION_SCORE else key
         results[mutmut_key].append("mutmut")
         return results
 

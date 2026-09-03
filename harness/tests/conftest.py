@@ -6,7 +6,6 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
-from functools import partial
 from pathlib import Path
 from subprocess import PIPE
 
@@ -15,7 +14,6 @@ from typing_extensions import Self
 
 from harness import cli, gate
 from harness.gate import gates
-from mutation.check_mutmut import analyze_mutmut_report_passed
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 collect_ignore = ["test_ralph.py"] if sys.platform == "win32" else ["test_ralph_ps1.py"]
@@ -112,11 +110,6 @@ def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(cli, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(cli, "REPO_ROOT_STR", str(tmp_path))
     monkeypatch.setattr(gates(), "repo_root", tmp_path)
-    monkeypatch.setattr(
-        gate,
-        "analyze_mutmut_report_passed",
-        partial(analyze_mutmut_report_passed, str(report)),
-    )
     return tmp_path
 
 
