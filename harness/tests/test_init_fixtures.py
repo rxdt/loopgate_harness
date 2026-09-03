@@ -16,7 +16,8 @@ runner = CliRunner()
 TEMPLATE: dict[str, Any] = tomlkit.parse(
     (REPO_ROOT / "harness" / "temp.pyproject.toml").read_text(encoding="utf-8")
 ).unwrap()["tool"]
-MODULES = frozenset(cli.TOOLS)
+TOOLS = cli.get_tools([])
+MODULES = frozenset(TOOLS)
 
 
 def configure_repo(
@@ -59,59 +60,59 @@ def configure_repo(
     monkeypatch.setattr(cli, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(cli.util, "find_spec", fake_find_spec)
     monkeypatch.setattr(cli, "which", fake_which)
-    cli.write_harness_config()
+    cli.write_harness_config(TOOLS)
     return tomlkit.parse((tmp_path / "pyproject.toml").read_text(encoding="utf-8")).unwrap()["tool"]
 
 
 def test_mypy_ini_replaces_the_types_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, root_files=("mypy.ini",))
-    assert written["harness"]["gate"]["types"] == cli.TOOLS["mypy"]["args"]
+    assert written["harness"]["gate"]["types"] == TOOLS["mypy"]["args"]
 
 
 def test_black_table_replaces_the_format_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, pyproject="[tool.black]\n")
-    assert written["harness"]["preflight"]["black"] == cli.TOOLS["black"]["args"]
+    assert written["harness"]["preflight"]["black"] == TOOLS["black"]["args"]
     assert "ruff_format" not in written["harness"]["preflight"]
 
 
 def test_flake8_section_replaces_the_lint_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, setup_cfg="[flake8]\n")
-    assert written["harness"]["preflight"]["flake8"] == cli.TOOLS["flake8"]["args"]
+    assert written["harness"]["preflight"]["flake8"] == TOOLS["flake8"]["args"]
     assert "ruff_lint" not in written["harness"]["preflight"]
 
 
 def test_bandit_file_replaces_the_security_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, root_files=(".bandit",))
-    assert written["harness"]["gate"]["security"] == cli.TOOLS["bandit"]["args"]
+    assert written["harness"]["gate"]["security"] == TOOLS["bandit"]["args"]
 
 
 def test_additional_type_checker_gets_named_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, root_files=("pyrightconfig.json", "mypy.ini"))
-    assert written["harness"]["gate"]["types"] == cli.TOOLS["pyright"]["args"]
-    assert written["harness"]["gate"]["mypy"] == cli.TOOLS["mypy"]["args"]
+    assert written["harness"]["gate"]["types"] == TOOLS["pyright"]["args"]
+    assert written["harness"]["gate"]["mypy"] == TOOLS["mypy"]["args"]
 
 
 def test_additional_formatter_gets_named_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, pyproject="[tool.black]\n[tool.ruff]\n")
-    assert written["harness"]["preflight"]["ruff_format"] == cli.TOOLS["ruff_format"]["args"]
-    assert written["harness"]["preflight"]["black"] == cli.TOOLS["black"]["args"]
+    assert written["harness"]["preflight"]["ruff_format"] == TOOLS["ruff_format"]["args"]
+    assert written["harness"]["preflight"]["black"] == TOOLS["black"]["args"]
 
 
 def test_additional_linter_gets_named_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, setup_cfg="[flake8]\n", root_files=("ruff.toml",))
-    assert written["harness"]["preflight"]["ruff_lint"] == cli.TOOLS["ruff_lint"]["args"]
-    assert written["harness"]["preflight"]["flake8"] == cli.TOOLS["flake8"]["args"]
+    assert written["harness"]["preflight"]["ruff_lint"] == TOOLS["ruff_lint"]["args"]
+    assert written["harness"]["preflight"]["flake8"] == TOOLS["flake8"]["args"]
 
 
 def test_additional_complexity_tool_gets_named_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, root_files=("complexipy.toml", ".xenon.yml"))
-    assert written["harness"]["preflight"]["complexity"] == cli.TOOLS["complexipy"]["args"]
-    assert written["harness"]["preflight"]["xenon"] == cli.TOOLS["xenon"]["args"]
+    assert written["harness"]["preflight"]["complexity"] == TOOLS["complexipy"]["args"]
+    assert written["harness"]["preflight"]["xenon"] == TOOLS["xenon"]["args"]
 
 
 def test_primary_pylint_does_not_leave_duplicate_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, root_files=(".pylintrc",))
-    assert written["harness"]["preflight"]["pylint"] == cli.TOOLS["pylint"]["args"]
+    assert written["harness"]["preflight"]["pylint"] == TOOLS["pylint"]["args"]
     assert "ruff_lint" not in written["harness"]["preflight"]
 
 
@@ -143,15 +144,17 @@ def test_standalone_config_drops_packaged_table(
 def test_user_pyproject_table_is_preserved_exactly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, pyproject="[tool.pylint]\njobs = 2\n")
     assert written["pylint"] == {"jobs": 2}, "the user's [tool.pylint] was not preserved exactly"
-    assert cli.find_configured_command("pylint", cli.TOOLS["pylint"], ["pylint"], written, False) == (
-        cli.TOOLS["pylint"]["args"],
+    assert written["harness"]["preflight"]["pylint"] == TOOLS["pylint"]["args"]
+    assert "ruff_lint" not in written["harness"]["preflight"]
+    assert cli.find_configured_command("pylint", TOOLS["pylint"], ["pylint"], written, False) == (
+        TOOLS["pylint"]["args"],
         True,
     ), "pyproject.toml did not take precedence over INI configuration"
 
 
 def test_tox_ini_pytest_section_selects_pytest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, tox_ini="[pytest]\n")
-    assert written["harness"]["gate"]["test"] == cli.TOOLS["pytest"]["args"]
+    assert written["harness"]["gate"]["test"] == TOOLS["pytest"]["args"]
 
 
 def test_setup_cfg_pytest_section_drops_packaged_pytest_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,16 +169,49 @@ def test_testenv_with_tox_available_selects_tox(tmp_path: Path, monkeypatch: pyt
     assert written["harness"]["gate"]["test"] == ["tox"], "tox.ini did not take precedence over setup.cfg"
 
 
-def test_testenv_without_tox_keeps_the_template_pytest_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_testenv_without_tox_keeps_the_init_pytest_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, tox_ini="[tox]\n[testenv]\n")
-    assert written["harness"]["gate"]["test"] == TEMPLATE["harness"]["gate"]["test"]
+    assert written["harness"]["gate"]["test"] == TOOLS["pytest"]["args"]
+    assert written["pytest"] == TEMPLATE["pytest"]
+
+
+def test_init_uses_lenient_coverage_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    written = configure_repo(tmp_path, monkeypatch)
+    assert written["coverage"] == {
+        "run": {"source": ["."]},
+        "report": {
+            "show_missing": True,
+            "skip_covered": False,
+            "fail_under": TEMPLATE["coverage"]["report"]["fail_under"],
+        },
+        "skip_covered": False,
+    }
+    assert set(written) == {  # table keys for new toml
+        "complexipy",
+        "coverage",
+        "harness",
+        "hatch",
+        "hypothesis",
+        "mutmut",
+        "pyright",
+        "pytest",
+        "ruff",  # no pylint present
+    }
+    assert "pylint" not in written["harness"]["preflight"]
+    assert "pylint" not in written
+    assert written["harness"]["gate"]["test"] == TOOLS["pytest"]["args"]
+
+
+def test_user_coverage_threshold_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    written = configure_repo(tmp_path, monkeypatch, pyproject="[tool.coverage.report]\nfail_under = 80\n")
+    assert written["coverage"]["report"]["fail_under"] == 80
 
 
 def test_explicit_pytest_config_beats_tox_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(
         tmp_path, monkeypatch, tox_ini="[tox]\n[testenv]\n[pytest]\n", executables=frozenset({"tox"})
     )
-    assert written["harness"]["gate"]["test"] == cli.TOOLS["pytest"]["args"]
+    assert written["harness"]["gate"]["test"] == TOOLS["pytest"]["args"]
 
 
 def test_testenv_ruff_section_is_not_ruff_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -206,11 +242,12 @@ def test_untouched_checks_keep_exact_argv(tmp_path: Path, monkeypatch: pytest.Mo
             assert len(written["harness"][stage].items()) == 4
             for name, argv in written["harness"][stage].items():
                 if name != "types":
-                    assert argv == TEMPLATE["harness"][stage][name], f"{name} changed but only types was replaced"
+                    expected = TOOLS["pytest"]["args"] if name == "test" else TEMPLATE["harness"][stage][name]
+                    assert argv == expected, f"{name} changed but only types was replaced"
                 else:
                     assert argv[0] == "mypy"
         if stage == "preflight":
-            assert len(written["harness"][stage].items()) == 4
+            assert len(written["harness"][stage].items()) == 3
         assert "pyright" not in written["harness"][stage]
 
 
@@ -239,32 +276,80 @@ def test_init_writes_detected_configuration(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(cli, "setup_git_hooks", Mock(return_value=tmp_path / "harness-path"))
     monkeypatch.setattr(cli, "check_for_timeout_and_prompt", Mock(return_value="timeout"))
     monkeypatch.setattr(cli, "configure_agents", Mock(return_value=True))
-    monkeypatch.setattr(cli.util, "find_spec", cli.TOOLS.get)
+    monkeypatch.setattr(cli.util, "find_spec", TOOLS.get)
     monkeypatch.setattr(cli, "which", Mock(return_value=None))
 
-    result = runner.invoke(cli.app, ["init"], input="y\n" * 5)
+    result = runner.invoke(cli.app, ["init"], input="y\nletta_evals\n" + "y\n" * 4)
 
     assert result.exit_code == 0, result.output
     written = tomlkit.parse((tmp_path / "pyproject.toml").read_text(encoding="utf-8")).unwrap()
-    assert written["project"]["name"] == "mine", result.output
-    assert written["tool"]["harness"]["preflight"]["black"] == cli.TOOLS["black"]["args"], result.output
-    assert written["tool"]["harness"]["gate"]["types"] == cli.TOOLS["mypy"]["args"], result.output
-    assert written["tool"]["harness"]["gate"]["test"] == cli.TOOLS["pytest"]["args"], result.output
+    assert written["project"] == {"name": "mine"}
+    assert written["tool"]["harness"]["preflight"] == {
+        "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "letta_evals"],
+        "complexity": ["complexipy", "letta_evals"],
+        "black": ["black", "--check", "letta_evals"],
+    }
+    assert written["tool"]["harness"]["gate"] == {
+        "audit": ["pip-audit"],
+        "security": [
+            "semgrep",
+            "scan",
+            "--no-error",
+            "--config",
+            "auto",
+            "--config",
+            "p/secrets",
+            "--exclude-rule",
+            "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag",
+            "letta_evals",
+        ],
+        "types": ["mypy", "letta_evals"],
+        "test": [
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-n",
+            "auto",
+            "--cov",
+            "--cov-report=term-missing",
+            "--cov-fail-under=25",
+            "--durations=5",
+        ],
+    }
+    written["tool"]["coverage"]["run"]["source"].sort()
+    assert written["tool"]["coverage"] == {
+        "run": {"source": ["letta_evals", "mutation", "preferences"]},
+        "report": {"show_missing": True, "skip_covered": False, "fail_under": 25},
+        "skip_covered": False,
+    }
+    assert written["tool"]["mutmut"] == {
+        "max-children": 2,
+        "source_paths": ["letta_evals"],
+        "also_copy": ["mutation", ".githooks"],
+    }
+    assert written["tool"]["complexipy"] == {
+        "paths": ["letta_evals"],
+        "exclude": ["**/tests/**"],
+        "max-complexity-allowed": 30,
+        "no-ignore": False,
+        "report-ignored": True,
+        "failed": True,
+        "sort": "asc",
+        "quiet": False,
+        "ignore-complexity": False,
+    }
     assert (tmp_path / "pytest.ini").read_text(encoding="utf-8") == pytest_ini
     parsed_pytest_ini = cli.ConfigParser(interpolation=None)
     parsed_pytest_ini.read_string(pytest_ini)
     pytest_settings = parsed_pytest_ini["pytest"]
-    assert pytest_settings["testpaths"] == "tests/unittests/"
-    assert pytest_settings["addopts"].split() == [
-        "--ff",
-        "--show-capture=stderr",
-        "--maxfail",
-        "5",
-        "--cov=hubblestack",
-        "--cov-report=html:tests/unittests/output/coverage",
-    ]
-    assert pytest_settings["log_cli"] == "no"
-    assert pytest_settings["log_cli_level"] == "CRITICAL"
-    assert pytest_settings["log_cli_format"] == "%(asctime)s %(name)17s %(levelname)5s %(message)s"
-    assert pytest_settings["log_date_format"] == "%H:%M:%S"
-    assert pytest_settings["filterwarnings"].strip() == "ignore::urllib3.exceptions.InsecureRequestWarning"
+    assert pytest_settings == {
+        "testpaths": "tests/unittests/",
+        "addopts": (
+            "--ff --show-capture=stderr --maxfail 5 --cov=hubblestack --cov-report=html:tests/unittests/output/coverage"
+        ),
+        "log_cli": "no",
+        "log_cli_level": "CRITICAL",
+        "log_cli_format": "%(asctime)s %(name)17s %(levelname)5s %(message)s",
+        "log_date_format": "%H:%M:%S",
+        "filterwarnings": "\nignore::urllib3.exceptions.InsecureRequestWarning",
+    }

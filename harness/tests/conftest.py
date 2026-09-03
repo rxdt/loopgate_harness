@@ -170,21 +170,16 @@ raise SystemExit(int(status_file.read_text(encoding="utf-8")) if status_file.exi
     return git_repo
 
 
-def seed_repo(directory: Path) -> Path:
-    """Create a temp git repository with one commit and point gate's git calls at it."""
-    gate.run_git(["init", "-q"], directory)
-    gate.run_git(["config", "user.email", "harness@test.local"], directory)
-    gate.run_git(["config", "user.name", "harness-test"], directory)
-    (directory / "README.md").write_text("seed\n", encoding="utf-8")
-    gate.run_git(["add", "README.md"], directory)
-    gate.run_git(["commit", "-q", "-m", "seed"], directory)
-    return directory
-
-
 @pytest.fixture(scope="module")
 def scan_repo(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """A temp repo shared by the generated examples, since @given cannot take a per-test fixture."""
-    repo = seed_repo(tmp_path_factory.mktemp("banned-patterns"))
+    repo = tmp_path_factory.mktemp("banned-patterns")
+    gate.run_git(["init", "-q"], repo)
+    gate.run_git(["config", "user.email", "harness@test.local"], repo)
+    gate.run_git(["config", "user.name", "harness-test"], repo)
+    (repo / "README.md").write_text("seed\n", encoding="utf-8")
+    gate.run_git(["add", "README.md"], repo)
+    gate.run_git(["commit", "-q", "-m", "seed"], repo)
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("RALPH_LOOP", "1")
         patch.setattr(gates(), "repo_root", repo)

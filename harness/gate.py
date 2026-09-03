@@ -47,7 +47,8 @@ class Gate:
         self.forbidden: dict[str, list[str]] = harness.get("FORBIDDEN", {})
         self.agents: dict[str, list[str]] = harness.get("agents", {})
         self.commit_checks: dict[str, list[str]] = harness.get("preflight", {})
-        self.gate_checks: dict[str, list[str]] = harness.get("gate", {}) | self.commit_checks
+        self.gate = harness.get("gate", {})
+        self.gate_checks: dict[str, list[str]] = self.gate | self.commit_checks
         self.forbidden_files: tuple[str, ...] = tuple(self.forbidden.get("FILES", []))
         self.forbidden_dirs: tuple[str, ...] = tuple(self.forbidden.get("DIRS", []))
         self.forbidden_patterns: tuple[str, ...] = tuple(self.forbidden.get("PATTERNS", []))
@@ -94,13 +95,7 @@ class Gate:
             key: `results` dictionary will use "fail"/"warn" if an agent is being checked
         """
         ref = "HEAD" if run_git(["rev-parse", "--verify", "HEAD"], check=False).strip() else self.EMPTY_TREE
-        staged = run_git([
-            "diff",
-            "--cached",
-            "--name-only",
-            "--no-renames",
-            "--diff-filter=ACMRD",
-        ]).splitlines()
+        staged = run_git(["diff", "--cached", "--name-only", "--no-renames", "--diff-filter=ACMRD"]).splitlines()
         if not staged:
             colorize("EMPTY COMMIT", "nothing staged: do real work, do not commit empty")
             return
@@ -192,14 +187,7 @@ class Gate:
         """
         problems: list[str] = []
         if "py" in self.settings["languages"]:
-            staged = run_git([
-                "diff",
-                "--cached",
-                "--name-only",
-                "--diff-filter=d",
-                "--",
-                "*.py",
-            ]).splitlines()
+            staged = run_git(["diff", "--cached", "--name-only", "--diff-filter=d", "--", "*.py"]).splitlines()
             if prefs:
                 for path in staged:
                     messages: str = prefs(path, run_git(["show", f":{path}"]))

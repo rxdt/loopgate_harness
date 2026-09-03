@@ -11,14 +11,16 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from shutil import rmtree
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from unittest.mock import DEFAULT, Mock, call, create_autospec
+from unittest.mock import DEFAULT, Mock, call, create_autospec, patch
 from zipfile import ZipFile
 
 import pytest
 import tomlkit as tomllib
 from click import unstyle
+from rich.console import Console
 from typer import Abort
 from typer.testing import CliRunner
 
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 runner = CliRunner()
+TOOLS = config.get_tools([])
 INIT_PROJECT_COMMENT = "# keep this project comment"
 INSTALLED_CONFIG_PROBE = """
 import json
@@ -231,15 +234,25 @@ def test_help_and_info_surface_every_check_agent_and_containment_rule() -> None:
     """Nobody has to open pyproject.toml: info renders both phases with their argv, the containment
     lists and the agents, while help offers the human commands and hides the git-only plumbing.
     """
-    info = runner.invoke(cli.app, ["info"])
+    harness_config = tomllib.parse((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["harness"]
+    with patch.object(cli, "console", Console(width=512, color_system=None, force_terminal=False)):
+        info = runner.invoke(cli.app, ["info"])
+
+    assert info.exit_code == 0
+    rows = [" ".join(line.split()) for line in unstyle(info.output).splitlines()]
+    preflight_start = rows.index("preflight") + 1
+    gate_heading = rows.index("gate", preflight_start)
+    assert [row for row in rows[preflight_start:gate_heading] if row] == [
+        f"{name} {' '.join(command)}" for name, command in harness_config["preflight"].items()
+    ]
+    assert [row for row in rows[gate_heading + 1 :] if row] == [
+        f"{name} {' '.join(command)}" for name, command in harness_config["gate"].items()
+    ]
+
+    info = runner.invoke(cli.app, ["info", "-v"])
 
     assert info.exit_code == 0
     flat = " ".join(unstyle(info.output).replace("│", " ").split())
-    for phase in ("preflight", "gate"):
-        assert phase in flat
-    for name, command in gates().gate_checks.items():
-        assert name in flat
-        assert command[0] in flat
     for pattern in gates().forbidden_patterns:
         assert pattern in flat
     for path in (*gates().forbidden_dirs, *gates().forbidden_files):
@@ -357,11 +370,14 @@ def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path, monkeyp
     assert empty.returncode == 0, empty.stderr
     assert empty.stdout == f"0 run log(s) in {runs}\nnewest:\n\n"
 
-    runs.mkdir(parents=True)
-    (runs / "0001-claude.jsonl").write_text("{}\n", encoding="utf-8")
-    (runs / "0002-codex.jsonl").write_text("{}\n", encoding="utf-8")
-    (runs / "0003-claude.jsonl").write_text("{}\n", encoding="utf-8")
-    (runs / "0004-codex.jsonl").write_text("{}\n", encoding="utf-8")
+    claude_runs = runs / "20990102" / "claude"
+    codex_runs = runs / "20990102" / "codex"
+    claude_runs.mkdir(parents=True)
+    codex_runs.mkdir(parents=True)
+    (claude_runs / "0001.jsonl").write_text("{}\n", encoding="utf-8")
+    (claude_runs / "0002.jsonl").write_text("{}\n", encoding="utf-8")
+    (claude_runs / "0003.jsonl").write_text("{}\n", encoding="utf-8")
+    (codex_runs / "0001.jsonl").write_text("{}\n", encoding="utf-8")
 
     counted = subprocess.run(command, cwd=git_repo, capture_output=True, text=True, env=environment, check=False)
 
@@ -370,9 +386,9 @@ def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path, monkeyp
     assert lines[0] == f"4 run log(s) in {runs}"
     assert lines[1:] == [
         "newest:",
-        str(runs / "0004-codex.jsonl"),
-        str(runs / "0003-claude.jsonl"),
-        str(runs / "0002-codex.jsonl"),
+        str(codex_runs / "0001.jsonl"),
+        str(claude_runs / "0003.jsonl"),
+        str(claude_runs / "0002.jsonl"),
     ]
     monkeypatch.setattr(cli, "REPO_ROOT", git_repo)
     imported = runner.invoke(cli.app, ["status"])
@@ -394,7 +410,7 @@ def test_setup_git_hooks_records_exact_posix_commands(monkeypatch: pytest.Monkey
     monkeypatch.setattr(cli.subprocess, "run", run)
     monkeypatch.setattr(cli, "rprint", print_message)
 
-    write_text = create_autospec(Path.write_text, wraps=Path.write_text)
+    write_text = create_autospec(Path.write_text, side_effect=Path.write_text)
     monkeypatch.setattr(Path, "write_text", write_text)
     recorded = cli.setup_git_hooks(env_bin)
 
@@ -518,38 +534,53 @@ def test_configure_agents_aborts_without_writing(monkeypatch: pytest.MonkeyPatch
 def test_write_harness_config_is_idempotent_with_existing_wiring(
     monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
-    """Reconfiguring an already-wired project leaves its generated configuration unchanged."""
+    """A second configuration run preserves effective tool settings without enabling Pylint."""
     pyproject = git_repo / "pyproject.toml"
-    original = f'{INIT_PROJECT_COMMENT}\n[tool.project]\nsentinel = "keep"\n\n[tool.harness.gate]\ntest = ["pytest"]\n'
+    original = f'{INIT_PROJECT_COMMENT}\n[tool.project]\nsentinel = "keep"\n'
     pyproject.write_text(original, encoding="utf-8")
-    monkeypatch.setattr(cli, "TOOLS", {})
-    confirm = Mock()
-    monkeypatch.setattr(cli, "confirm", confirm)
+    selected_tools = config.get_tools({"package"})
+    monkeypatch.setattr(cli.util, "find_spec", Mock(side_effect={name: object() for name in selected_tools}.get))
+    monkeypatch.setattr(cli, "which", Mock(return_value=None))
 
-    first_checks = cli.write_harness_config()
+    first_checks = cli.write_harness_config(selected_tools)
     first_config = pyproject.read_text(encoding="utf-8")
-    second_checks = cli.write_harness_config()
+    second_checks = cli.write_harness_config(selected_tools)
+    second_config = pyproject.read_text(encoding="utf-8")
     configured = tomllib.loads(first_config)
 
-    assert first_checks == second_checks == {"test"}
+    assert first_checks == second_checks
     assert INIT_PROJECT_COMMENT in first_config
+    assert INIT_PROJECT_COMMENT in second_config
     assert configured["tool"]["project"] == {"sentinel": "keep"}
-    assert configured["tool"]["harness"]["gate"]["test"] == ["pytest"]
-    assert pyproject.read_text(encoding="utf-8") == first_config
-    confirm.assert_not_called()
+    assert "pylint" not in configured["tool"]
+    assert "pylint" not in configured["tool"]["harness"]["preflight"]
+    assert configured["tool"]["harness"]["preflight"] == {
+        "ruff_lint": selected_tools["ruff_lint"]["args"],
+        "ruff_format": selected_tools["ruff_format"]["args"],
+        "complexity": selected_tools["complexipy"]["args"],
+    }
+    assert configured["tool"]["harness"]["gate"] == {
+        "audit": selected_tools["audit"]["args"],
+        "security": selected_tools["semgrep"]["args"],
+        "types": selected_tools["pyright"]["args"],
+        "test": selected_tools["pytest"]["args"],
+    }
+    assert tomllib.loads(second_config) == configured
 
 
 def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Config generation preserves user settings and selects project and standalone tool configs."""
-    installed = {name: object() for name in cli.TOOLS if name != "pylint"}
+    installed = {name: object() for name in TOOLS if name != "pylint"}
     monkeypatch.setattr(cli.util, "find_spec", Mock(side_effect=installed.get))
     monkeypatch.setattr(cli, "which", Mock(return_value=None))
     (git_repo / "pyproject.toml").write_text("[tool.ruff]\nline-length = 99\n", encoding="utf-8")
-    monkeypatch.setattr(Path, "with_name", create_autospec(Path.with_name, wraps=Path.with_name))
-    monkeypatch.setattr(Path, "read_text", create_autospec(Path.read_text, wraps=Path.read_text))
-    monkeypatch.setattr(Path, "write_text", create_autospec(Path.write_text, wraps=Path.write_text))
-    monkeypatch.setattr(cli.ConfigParser, "read", create_autospec(cli.ConfigParser.read, wraps=cli.ConfigParser.read))
-    cli.write_harness_config()
+    monkeypatch.setattr(Path, "with_name", create_autospec(Path.with_name, side_effect=Path.with_name))
+    monkeypatch.setattr(Path, "read_text", create_autospec(Path.read_text, side_effect=Path.read_text))
+    monkeypatch.setattr(Path, "write_text", create_autospec(Path.write_text, side_effect=Path.write_text))
+    monkeypatch.setattr(
+        cli.ConfigParser, "read", create_autospec(cli.ConfigParser.read, side_effect=cli.ConfigParser.read)
+    )
+    cli.write_harness_config(TOOLS)
     Path.with_name.assert_called_once_with(Path(cli.__file__).resolve(), "temp.pyproject.toml")
     assert Path.read_text.call_args_list == [
         call(git_repo / "pyproject.toml", encoding="utf-8"),
@@ -562,20 +593,20 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     assert cli.ConfigParser.read.call_args.kwargs == {"encoding": "utf-8"}
     ruff_lint_no_format = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
     assert ruff_lint_no_format["tool"]["harness"]["preflight"] == {
-        "complexity": ["complexipy", ".", "--suggest-refactors"],
-        "ruff_format": ["ruff", "format", "--no-cache", "--check"],
+        "complexity": ["complexipy", "."],
+        "ruff_format": ["ruff", "format", "--no-cache", "--check", "."],
         "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
     }
     assert ruff_lint_no_format["tool"]["ruff"] == {"line-length": 99}
     assert ruff_lint_no_format["tool"]["harness"]["preflight"].get("pylint") is None
 
     (git_repo / "pyproject.toml").write_text("[tool.ruff.lint]\nselect = ['F']\n", encoding="utf-8")
-    cli.write_harness_config()
+    cli.write_harness_config(TOOLS)
     tool_ruff_adds_format = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
     assert tool_ruff_adds_format["tool"]["ruff"]["lint"] == {"select": ["F"]}
     assert tool_ruff_adds_format["tool"]["harness"]["preflight"] == {
-        "complexity": ["complexipy", ".", "--suggest-refactors"],
-        "ruff_format": ["ruff", "format", "--no-cache", "--check"],
+        "complexity": ["complexipy", "."],
+        "ruff_format": ["ruff", "format", "--no-cache", "--check", "."],
         "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
     }
     assert tool_ruff_adds_format["tool"].get("pylint") is None
@@ -591,62 +622,62 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
         )
         no_ruff.setattr(cli.util, "find_spec", Mock(side_effect=installed_without_ruff.get))
         no_ruff.setattr(cli, "which", Mock(return_value=None))
-        cli.write_harness_config()
+        cli.write_harness_config(TOOLS)
         configured_not_installed = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
         assert configured_not_installed["tool"]["ruff"] == {"lint": {"select": ["ALL"]}}
         assert configured_not_installed["tool"]["black"] == {"line-length": 88}
         preflight_args = configured_not_installed["tool"]["harness"]["preflight"]
         assert preflight_args == {
-            "complexity": cli.TOOLS["complexipy"]["args"],
-            "black": cli.TOOLS["black"]["args"],
-            "flake8": cli.TOOLS["flake8"]["args"],
+            "complexity": ["complexipy", "."],
+            "black": TOOLS["black"]["args"],
+            "flake8": TOOLS["flake8"]["args"],
         }
     (git_repo / ".flake8").unlink()
 
     (git_repo / "pyproject.toml").write_text("", encoding="utf-8")
-    cli.write_harness_config()
+    cli.write_harness_config(TOOLS)
     dotted_format = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
     assert dotted_format["tool"]["ruff"]["format"]["quote-style"] == "double"
-    assert dotted_format["tool"]["harness"]["preflight"]["ruff_format"] == cli.TOOLS["ruff_format"]["args"]
-    assert dotted_format["tool"]["harness"]["preflight"]["ruff_lint"] == cli.TOOLS["ruff_lint"]["args"]
+    assert dotted_format["tool"]["harness"]["preflight"]["ruff_format"] == TOOLS["ruff_format"]["args"]
+    assert dotted_format["tool"]["harness"]["preflight"]["ruff_lint"] == TOOLS["ruff_lint"]["args"]
     assert dotted_format["tool"]["harness"]["preflight"].get("pylint") is None
 
     (git_repo / "pyproject.toml").write_text(
         "[tool.ruff.lint]\nselect = ['F']\n[tool.ruff.format]\nquote-style = 'single'\n", encoding="utf-8"
     )
-    cli.write_harness_config()
+    cli.write_harness_config(TOOLS)
     lint_and_format = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
     assert lint_and_format["tool"]["ruff"]["lint"]["select"] == ["F"]
     assert lint_and_format["tool"]["ruff"]["format"]["quote-style"] == "single"
     assert lint_and_format["tool"]["harness"]["preflight"] == {
-        "complexity": ["complexipy", ".", "--suggest-refactors"],
-        "ruff_format": ["ruff", "format", "--no-cache", "--check"],
+        "complexity": ["complexipy", "."],
+        "ruff_format": ["ruff", "format", "--no-cache", "--check", "."],
         "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
     }
-    assert lint_and_format["tool"]["harness"]["preflight"]["ruff_format"] == cli.TOOLS["ruff_format"]["args"]
-    assert lint_and_format["tool"]["harness"]["preflight"]["ruff_lint"] == cli.TOOLS["ruff_lint"]["args"]
+    assert lint_and_format["tool"]["harness"]["preflight"]["ruff_format"] == TOOLS["ruff_format"]["args"]
+    assert lint_and_format["tool"]["harness"]["preflight"]["ruff_lint"] == TOOLS["ruff_lint"]["args"]
     assert lint_and_format["tool"]["harness"]["preflight"].get("pylint") is None
 
     (git_repo / "pyproject.toml").write_text(
         "[tool.black]\nline-length = 88\n[tool.ruff]\nline-length = 120\n[tool.ruff.lint]\nselect = ['F']\n",
         encoding="utf-8",
     )
-    cli.write_harness_config()
+    cli.write_harness_config(TOOLS)
     user_project = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
-    assert user_project["tool"]["harness"]["preflight"]["ruff_format"] == cli.TOOLS["ruff_format"]["args"]
+    assert user_project["tool"]["harness"]["preflight"]["ruff_format"] == TOOLS["ruff_format"]["args"]
     assert user_project["tool"]["ruff"]["lint"] == {"select": ["F"]}
     assert user_project["tool"]["harness"]["preflight"] == {
         "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
-        "ruff_format": ["ruff", "format", "--no-cache", "--check"],
+        "ruff_format": ["ruff", "format", "--no-cache", "--check", "."],
         "black": ["black", "--check", "."],
-        "complexity": ["complexipy", ".", "--suggest-refactors"],
+        "complexity": ["complexipy", "."],
     }
     assert user_project["tool"]["ruff"]["line-length"] == 120
     assert user_project["tool"]["black"] == {"line-length": 88}
     assert user_project["tool"]["ruff"].get("format") is None
     assert user_project["tool"]["harness"]["preflight"].get("pylint") is None
 
-    installed.update({"pylint": cli.TOOLS["pylint"]})
+    installed.update({"pylint": TOOLS["pylint"]})
     (git_repo / "ruff.toml").write_text('select = ["ALL"]\nexclude = ["**/*"]\n')
     (git_repo / ".flake8").touch()
     (git_repo / "pyproject.toml").write_text(
@@ -654,21 +685,20 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     )
     (git_repo / "tox.ini").write_text("[testenv]\n", encoding="utf-8")
     (git_repo / "setup.cfg").write_text("[tool:pytest]\n", encoding="utf-8")
-    cli.write_harness_config()
+    cli.write_harness_config(TOOLS)
     user_project = tomllib.loads((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
     assert user_project["project"]["name"] == "existing"
     assert user_project["tool"]["black"] == {"line-length": 100}
     assert user_project["tool"]["keep"] == {"user": "wins"}
     assert user_project["tool"].get("ruff") is None  # no table because standalone file exists
     assert user_project["tool"]["harness"]["preflight"] == {
-        "complexity": ["complexipy", ".", "--suggest-refactors"],
-        "ruff_format": ["ruff", "format", "--no-cache", "--check"],
+        "complexity": ["complexipy", "."],
+        "ruff_format": ["ruff", "format", "--no-cache", "--check", "."],
         "ruff_lint": ["ruff", "check", "--no-cache", "--show-fixes", "."],
-        "pylint": ["pylint", "."],
         "black": ["black", "--check", "."],
         "flake8": ["flake8", "."],
     }
-    assert user_project["tool"]["harness"]["preflight"]["pylint"] == ["pylint", "."]
+    assert user_project["tool"]["harness"]["preflight"].get("pylint") is None
 
     assert not {"format", "pytest", "template-format", "template-lint"} & user_project["tool"].keys()
 
@@ -676,11 +706,11 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
     monkeypatch.setattr(cli.util, "find_spec", Mock(side_effect={"pytest": object()}.get))
     monkeypatch.setattr(cli, "which", which_finds(("tox",)))
     (git_repo / "pyproject.toml").write_text("[project]\nname = 'existing'\n[tool.black]\n", encoding="utf-8")
-    cli.write_harness_config()
+    cli.write_harness_config(TOOLS)
     user_project = tomllib.loads((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
     assert user_project["tool"]["harness"]["gate"] == {
-        "security": cli.TOOLS["semgrep"]["args"],
-        "types": ["pyright", "--outputjson"],
+        "security": TOOLS["semgrep"]["args"],
+        "types": ["pyright", "--outputjson", "."],
         "test": ["tox"],
     }
     monkeypatch.setattr(cli.util, "find_spec", Mock(side_effect={"bandit": object()}.get))
@@ -691,12 +721,10 @@ def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.M
             (git_repo / ".bandit").unlink(missing_ok=True)
         (git_repo / "setup.cfg").write_text("[bandit]\n" if case["other"] else "", encoding="utf-8")
         (git_repo / "pyproject.toml").write_text("[tool.bandit]\n" if case["pyproject"] else "", encoding="utf-8")
-        cli.write_harness_config()
+        cli.write_harness_config(TOOLS)
         user_project = tomllib.parse((git_repo / "pyproject.toml").read_text(encoding="utf-8"))
 
-        assert (user_project["tool"]["harness"]["gate"].get("security") == cli.TOOLS["bandit"]["args"]) is case[
-            "detected"
-        ]
+        assert (user_project["tool"]["harness"]["gate"].get("security") == TOOLS["bandit"]["args"]) is case["detected"]
 
 
 def test_init_declines_without_mutating_repo(git_repo: Path) -> None:
@@ -732,7 +760,7 @@ def test_init_hoists_and_records_the_installed_harness(git_repo: Path) -> None:
     initialized = subprocess.run(
         [installed_harness, "init"],
         cwd=git_repo,
-        input="y\n" * 5,
+        input="y\n.\n" + "y\n" * 4,
         capture_output=True,
         text=True,
         env=environment,
@@ -750,11 +778,22 @@ def test_init_hoists_and_records_the_installed_harness(git_repo: Path) -> None:
         "docs/PROMPT.md",
         "preferences/preferences.py",
         "mutation/check_mutmut.py",
+        "scratchpad/runs/.gitkeep",
         "tests/preferences/test_preferences.py",
         "tests/mutation/test_check_mutmut.py",
     )
     for path in required_assets:
         assert (git_repo / path).is_file()
+    assert not (git_repo / "tests/mutation/mutmut-cicd-stats.json").exists()
+    status = subprocess.run(
+        [environment_python, "-m", "pytest", "-p", "no:cacheprovider", "tests/mutation/test_check_mutmut.py"],
+        cwd=git_repo,
+        capture_output=True,
+        text=True,
+        env=environment | {"PYTHONDONTWRITEBYTECODE": "1"},
+        check=False,
+    )
+    assert status.returncode == 0, status.stdout + status.stderr
     assert all(
         (git_repo / ".githooks" / name).is_file()
         for name in ("_resolve", "pre-commit", "pre-push", "prepare-commit-msg")
@@ -793,6 +832,7 @@ def test_init_aborts_when_required_hooks_are_declined(monkeypatch: pytest.Monkey
     write_config = Mock()
     message = Mock()
     monkeypatch.setattr(cli, "confirm", confirm)
+    monkeypatch.setattr(cli, "prompt", Mock(return_value=""))
     monkeypatch.setattr(cli, "write_harness_config", write_config)
     monkeypatch.setattr(cli, "rprint", message)
 
@@ -836,15 +876,25 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     repo = tmp_path / "repo"
     package_docs = tmp_path / "package" / "docs"
     package_hooks = tmp_path / "package" / ".githooks"
+    package_gitkeep = tmp_path / "package" / "scratchpad" / "runs" / ".gitkeep"
     (package_docs / "nested").mkdir(parents=True)
     package_hooks.mkdir(parents=True)
+    package_gitkeep.parent.mkdir(parents=True)
     (package_docs / "nested" / "new.txt").write_text("new\n", encoding="utf-8")
     (package_docs / "existing.txt").write_text("packaged\n", encoding="utf-8")
     (package_hooks / "hoist").write_text("#!/bin/sh\n", encoding="utf-8")
+    package_gitkeep.touch()
     (repo / "docs").mkdir(parents=True)
     (repo / "docs" / "existing.txt").write_text("existing\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("*.pyc", encoding="utf-8")
     monkeypatch.setattr(
-        cli, "ASSETS", {"docs": (package_docs, repo / "docs"), "githooks": (package_hooks, repo / ".githooks")}
+        cli,
+        "ASSETS",
+        {
+            "docs": (package_docs, repo / "docs"),
+            "githooks": (package_hooks, repo / ".githooks"),
+            "scratchpad": (package_gitkeep, repo / "scratchpad" / "runs" / ".gitkeep"),
+        },
     )
     monkeypatch.setattr(cli, "REPO_ROOT", repo)
     confirm = Mock(return_value=True)
@@ -852,8 +902,7 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     message.reset_mock()
     monkeypatch.setattr(cli, "confirm", confirm)
     monkeypatch.setattr(cli, "run_git", run_git)
-    monkeypatch.setattr(Path, "mkdir", create_autospec(Path.mkdir, wraps=Path.mkdir))
-    monkeypatch.setattr(Path, "touch", create_autospec(Path.touch, wraps=Path.touch))
+    monkeypatch.setattr(Path, "mkdir", create_autospec(Path.mkdir, side_effect=Path.mkdir))
     monkeypatch.setattr(cli.console, "print", Mock(wraps=cli.console.print))
 
     assert cli.hoist() is True
@@ -861,11 +910,10 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     assert (repo / "docs" / "existing.txt").read_text(encoding="utf-8") == "existing\n"
     assert (repo / "scratchpad" / "runs" / ".gitkeep").is_file()
     assert confirm.call_args_list == [
-        call(cli.style("\n2. Can we wire githooks so quality checks run?", fg=10), default=True, abort=True),
+        call(cli.style("\n2. OK to wire githooks so quality checks run?", fg=10), default=True, abort=True),
         call(
             cli.style(
-                "\n4. Confirm, loopgate can add those files? Pre-existing files in the expected paths will remain "
-                "and loopgate will skip adding them.",
+                "4. Confirm, loopgate can add those files?\nPre-existing files in the expected paths will remain",
                 fg=10,
             ),
             default=True,
@@ -875,8 +923,7 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     Path.mkdir.assert_any_call(repo / ".githooks", parents=True, exist_ok=True)
     assert Path.mkdir.call_args_list.count(call(repo / "docs" / "nested", parents=True, exist_ok=True)) == 2
     Path.mkdir.assert_any_call(repo / "scratchpad" / "runs", parents=True, exist_ok=True)
-    Path.touch.assert_called_once_with(repo / "scratchpad" / "runs" / ".gitkeep")
-    cli.console.print.assert_called_once_with("[green]\n3. Ran script to make `.githooks` executable[/]\n")
+    cli.console.print.assert_called_once_with("[green]\n3. Ran script to make `.githooks` executable[/]")
     assert message.call_args_list[0] == call(
         "\n[bold yellow]We will need to add these files[/]\n* `.githooks` are what ensure quality checks run"
         "\n* Mutation tests promote better tests. Docs and code for example test at `mutation/` and `tests/mutation`"
@@ -894,6 +941,7 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
         ["-c", 'alias.loopgate-hoist=!f() { sh "$1"; }; f', "loopgate-hoist", (package_hooks / "hoist").as_posix()],
         repo,
     )
+    assert cli.hoist() is True
 
 
 def test_hoist_aborts_before_writing_when_declined(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -961,16 +1009,44 @@ def test_installing_the_template_cleans_the_repo_and_sets_hooks(
     assert (template_repo / "pyproject.toml").read_text(encoding="utf-8") == expected_project
     assert not leftovers, f"template leftovers after install: {leftovers}"
 
+    rmtree(template_repo / ".venv")
+    run_checked(["uv", "sync", "--all-groups", "--project", str(template_repo)])
+    environment = isolated_environment(
+        env_bin / ("python.exe" if sys.platform == "win32" else "python"), tmp_path / "fresh-home"
+    )
+    installed = subprocess.run(
+        [harness_executable(env_bin), "--help"],
+        cwd=template_repo,
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert "install" in installed.stdout
+    installed = subprocess.run(
+        [env_bin / ("pylint.exe" if sys.platform == "win32" else "pylint"), "--version"],
+        cwd=template_repo,
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert "pylint" in installed.stdout.lower()
     installed = subprocess.run(
         [env_bin / ("ruff.exe" if sys.platform == "win32" else "ruff"), "check", "--no-cache", "--show-fixes", "."],
         cwd=template_repo,
         capture_output=True,
         text=True,
+        env=environment,
         check=False,
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr
     assert "has no effect because preview is not enabled" not in installed.stdout + installed.stderr
     installed_project = tomllib.loads((template_repo / "pyproject.toml").read_text(encoding="utf-8"))
+    assert installed_project["tool"]["pylint"] == source_project["tool"]["pylint"]
+    assert installed_project["tool"]["harness"]["preflight"]["pylint"][0] == "pylint"
     assert (
         installed_project["tool"]["ruff"]["line-length"],
         installed_project["tool"]["pylint"]["format"]["max-line-length"],
@@ -980,6 +1056,15 @@ def test_installing_the_template_cleans_the_repo_and_sets_hooks(
         source_project["tool"]["pylint"]["format"]["max-line-length"],
         source_project["tool"]["ruff"]["lint"]["pycodestyle"]["max-doc-length"],
     )
+    installed = subprocess.run(
+        [harness_executable(env_bin), "preflight"],
+        cwd=template_repo,
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
 
 
 def test_cleanup_updates_a_pristine_single_commit_template(tmp_path: Path) -> None:
@@ -1399,7 +1484,7 @@ def test_run_worker_logs_every_line_and_streams_only_when_verbose(
     streaming_worker = [sys.executable, "-c", 'print(\'{ "type" : "result" }\'); print("not json")']
     real_popen = subprocess.Popen
     popen = Mock(wraps=real_popen)
-    monkeypatch.setattr(Path, "open", create_autospec(Path.open, wraps=Path.open))
+    monkeypatch.setattr(Path, "open", create_autospec(Path.open, side_effect=Path.open))
     monkeypatch.setattr(cli.subprocess, "Popen", popen)
     monkeypatch.setattr(cli, "JSON", Mock(wraps=cli.JSON))
     monkeypatch.setattr(cli.console, "print", Mock(wraps=cli.console.print))
