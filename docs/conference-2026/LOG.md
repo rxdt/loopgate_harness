@@ -38,3 +38,6 @@ Routine fires into this session every 12h: AIE application status, both sponsor 
 
 ## Public record used for profile
 - github.com/rxdt · rxdt.dev · linkedin.com/in/roxdt · hackernoon.com/three-ai-agents-held-a-conference-and-decided-i-should-do-the-work-instead (byline Rox del Toro, 2026-07-22)
+
+## Ticks
+- 2026-09-03 12:12 UTC — AIE CODE: applications still "will open soon"; sponsors/side events not announced. AI Conference sponsors: none named. Giveaway sweep: nothing new (only Gracker, discounted). Checkout URL noted: tix.aiconference.com/events/theaiconference. New: **AI Engineer New York, Oct 12–14, 2026** (ai.engineer/nyc/2026) — same organizers, high caliber; not yet assessed.
