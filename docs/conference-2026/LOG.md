@@ -41,3 +41,4 @@ Routine fires into this session every 12h: AIE application status, both sponsor 
 
 ## Ticks
 - 2026-09-03 12:12 UTC — AIE CODE: applications still "will open soon"; sponsors/side events not announced. AI Conference sponsors: none named. Giveaway sweep: nothing new (only Gracker, discounted). Checkout URL noted: tix.aiconference.com/events/theaiconference. New: **AI Engineer New York, Oct 12–14, 2026** (ai.engineer/nyc/2026) — same organizers, high caliber; not yet assessed.
+- 2026-09-04 00:12 UTC — No change. AIE CODE apps still "will open soon" (page has an email-notify field — **[YOU]** drop your email there: ai.engineer/code/2026). apply.ai.engineer still shows 2025 NYC, closed. No sponsors either event. No new codes.
