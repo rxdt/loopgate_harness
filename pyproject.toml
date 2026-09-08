@@ -300,7 +300,16 @@ max-children = 2
 source_paths = ["preferences", "mutation", "harness"]  # what to mutate
 also_copy = [".githooks"]  # not mutated paths, these are copied for imports to work
 do_not_mutate = ["harness/tests/*"]    # explictly here because nested in a directory we said to mutate
+# ==============================================================================
+# Dead Code Vulture
+# ==============================================================================
 
+[tool.vulture]
+exclude = [".venv", ".env", ".tox", "dist", "mutants", "docs"]
+make_whitelist = false
+min_confidence = 75
+paths = ["preferences", "src", "harness"]
+verbose = false
 # ==============================================================================
 # Cognitive Complexity Complexipy Configuration
 # ==============================================================================
