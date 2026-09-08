@@ -241,7 +241,7 @@ derandomize = true   # false default seeds random, uncovers more bugs. True = de
 [tool.mutmut]
 max-children = 2
 source_paths = ["preferences", "src"]  # what to mutate
-also_copy = ["mutation", ".githooks"]  # not mutated paths, copied for imports
+also_copy = [".githooks"]  # not mutated paths, copied for imports
 
 # ==============================================================================
 # Cognitive Complexity Complexipy Configuration

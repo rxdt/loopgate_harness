@@ -32,6 +32,7 @@
 
 ## Index
 
+- [Install from PyPI](#install-from-pypi)
 - [Features](#features)
 - [Default Tools](#default-tools)
 - [Details](#details)
@@ -43,6 +44,22 @@
 - [FAQ](#faq)
 - [Coordination](#coordination)
 - [Before infinity loops](#read-this-before-a-first-run)
+
+---
+
+## Install from PyPI
+
+From an existing repository's root, add [loopgate](https://pypi.org/project/loopgate/) to its active environment and initialize it:
+
+```sh
+# choose one
+uv add --dev loopgate && uv run harness init
+poetry add --group dev loopgate && poetry run harness init
+python -m pip install loopgate && harness init
+```
+
+> [!NOTE]
+> A newly configured repository may have many failing checks. Review the `[tool.harness]` configuration that `harness init` generated or updated in [pyproject.toml](pyproject.toml). Run `harness info`, then `harness gate`, and adjust the configured checks for the project. New projects start with `behavior = "warn"`; switch to `"fail"` when those checks are ready to block.
 
 ---
 
@@ -88,12 +105,11 @@ _Edit at will_
 - [preferences.py](preferences/preferences.py) A custom AST-parser to optionally expand. It catches e.g. a [style preference](https://google.github.io/styleguide/pyguide) that tools don't.
 - Forbidden paths set in [[tool.harness]](pyproject.toml)
 - Update `[tool.harness.gate]` or `[tool.harness.gate]` in [pyproject](pyproject.toml) to change what is checked before a commit or push.
-- Failing checks block by default. If a fresh drop-in fails across the board, set [`behavior = "warn"`](pyproject.toml#L87) to report without blocking, then flip back to `"fail"`.
 
 ### The Gate: Tiered Checks
 
 > [!NOTE]
-> **A pre-commit or gate phase self-heals by un-staging forbidden files.**
+> **A blocking containment phase self-heals by un-staging forbidden files.**
 
 ⚡ `harness preflight` _(pre-commit)_
 
@@ -122,7 +138,6 @@ Note that `semgrep --config auto` needs network for semgrep registry rules.
 ### In summary, your job, the bare minimum:
 <mark>write something into the plan</mark>
 
-## Start a project
 ## Start a project
 
 1. `gh repo create <your-github-username>/<your-new-app-name> --template rxdt/loopgate_harness --private --clone` **or**

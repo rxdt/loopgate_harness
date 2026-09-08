@@ -99,12 +99,12 @@ harness run copilot 2 20
 Every run is saved as a log file in `scratchpad/runs/`. `harness status` shows how many logs you have and the path to the newest one — open that file to read everything the agent did.
 
 Tool commands are defined in `[tool.harness]` in [pyproject.toml](pyproject.toml). The gate and CI both derive them from there.
-Failing checks block by default. If your project fails across the board at first, set [`behavior = "warn"`](pyproject.toml#L87) to report without blocking, then flip back to `"fail"`.
+This template starts with `behavior = "warn"`. A newly configured repository may have many failing checks: run `harness info`, then `harness gate`, review `[tool.harness]` in [pyproject.toml](pyproject.toml), and adjust the configured checks. Switch to `"fail"` when those checks are ready to block.
 
 #### The Gate: Tiered Checks
 
 ⚡ `harness preflight` (pre-commit) → fast checks.
-Ruff lint + check format for everyone, _plus_ **containment** for the agents. Self-heals by un-staging forbidden files.
+Ruff lint + check format for everyone, _plus_ **containment** for the agents. Blocking containment self-heals by un-staging forbidden files.
 
 ✅ `harness gate` (pre-push, mirrored by CI) → ruff lint + format report-only, pyright, pylint, semgrep, complexipy, hypothesis, pytest @ 100% cov.
 

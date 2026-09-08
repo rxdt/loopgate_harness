@@ -322,11 +322,7 @@ def test_init_writes_detected_configuration(tmp_path: Path, monkeypatch: pytest.
         "report": {"show_missing": True, "skip_covered": False, "fail_under": 25},
         "skip_covered": False,
     }
-    assert written["tool"]["mutmut"] == {
-        "max-children": 2,
-        "source_paths": ["letta_evals"],
-        "also_copy": ["mutation", ".githooks"],
-    }
+    assert written["tool"]["mutmut"] == {"max-children": 2, "source_paths": ["letta_evals"], "also_copy": [".githooks"]}
     assert written["tool"]["complexipy"] == {
         "paths": ["letta_evals"],
         "exclude": ["**/tests/**"],
