@@ -151,9 +151,7 @@ def info(verbose: Annotated[bool, Option("--verbose", "-v", help="Show all check
     Args:
         verbose: `--verbose` or `-v` shows most of `tool.harness` configurations
     """
-    if verbose:
-        PHASES.update({"agents": gates().agents, "forbidden": gates().forbidden})
-    phases = PHASES
+    phases = PHASES | {"agents": gates().agents, "forbidden": gates().forbidden} if verbose else PHASES
     config = Table(title="\n[cyan2]Harness Configurations & Commands[/]\n[dim cyan2]See pyproject.toml[/]", box=None)
     for title, checks in phases.items():
         config.add_row(f"[bold cyan]{title}[/]", "")

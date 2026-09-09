@@ -66,6 +66,8 @@ The harness's own tests live in [`harness/tests/`](harness/tests). Hypothesis co
 
 The full suite runs as part of `harness gate` (at 100% coverage). To run only the harness tests while iterating:
 
+This repo has setting `[tool.harness] behavior = fail` in [`pyproject.toml`](pyproject.toml). If it's changed to `warn`, `harness/tests` assert blocking behavior (tests fail). Tests should be updated to react according to the flag soon.
+
 ```sh
 uv run pytest harness/tests
 ```
