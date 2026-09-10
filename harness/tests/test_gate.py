@@ -187,11 +187,9 @@ def test_pre_commit_hook_warns_then_blocks_on_staged_diff_size(
     assert (after != before) is lands
     assert f"{staged_lines} lines of code modified" in output
     assert get_logged_calls_and_clear(real_hook_repo) == [{"arguments": ["preflight"], "RALPH_LOOP": "1"}]
-    if verdict is None:
-        assert "WARNED" not in output
-        assert "FAILED" not in output
-    else:
-        assert verdict in output
+    summary = json.loads(output.splitlines()[-1])
+    assert bool(summary["warn"]) is (verdict is not None)
+    assert summary["fail"] == []
 
 
 @pytest.mark.parametrize("real_hook_repo", [("pre-commit", "pre-push")], indirect=True)
