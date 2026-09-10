@@ -21,7 +21,7 @@ from rich.table import Table
 from tomlkit import TOMLDocument, document, dumps, parse, table
 from typer import Argument, Exit, Option, Typer, colors, confirm, echo, prompt, secho, style
 
-from harness.config import ASSETS, CATEGORIES, CLAUDE_RULES, CODEX_RULES, PHASES, get_tools
+from harness.config import ASSETS, CATEGORIES, CLAUDE_RULES, CLAUDE_SLEEP_HOOK, CODEX_RULES, PHASES, get_tools
 from harness.gate import console, gates, run_git
 
 app = Typer(
@@ -547,6 +547,11 @@ def configure_agents() -> bool:
     claude.setdefault("env", {})["RALPH_LOOP"] = "1"
     permissions: dict[str, Any] = claude.setdefault("permissions", {})
     permissions["deny"] = list(set(permissions.get("deny", [])) | CLAUDE_RULES)
+
+    hooks: dict[str, Any] = claude.setdefault("hooks", {})
+    pre_tool_use: list[dict[str, Any]] = hooks.setdefault("PreToolUse", [])
+    if CLAUDE_SLEEP_HOOK not in pre_tool_use:
+        pre_tool_use.append(CLAUDE_SLEEP_HOOK)
     cx_confirm = confirm(style("5.2. Can we update CODEX rules and settings?", fg=10), default=True, abort=True)
     if cx_confirm and codex_path.is_file():
         rprint(f"config.toml edited. Original backup at {copy2(codex_path, f'{codex_path}.bak')}")

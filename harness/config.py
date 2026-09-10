@@ -224,6 +224,16 @@ prefix_rule(
 )
 """
 
+CLAUDE_SLEEP_HOOK: dict[str, object] = {
+    "matcher": "Bash",
+    "hooks": [
+        {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' | grep -qE '(^|[;&|][[:space:]]*)sleep[[:space:]]+[0-9]' && { echo 'Blocked: do not sleep. Start the long task in the background and do other work while it runs — work another broker, read another page, write another test. Come back and check the output when you have something to check it with.' >&2; exit 2; } || exit 0",
+        }
+    ],
+}
+
 CLAUDE_RULES: set[str] = {
     "Bash(*git push*--no-verify*)",
     "Bash(*git commit*--no-verify*)",
@@ -234,6 +244,7 @@ CLAUDE_RULES: set[str] = {
     "Bash(*unsetenv RALPH_LOOP*)",
     "Bash(*RALPH_LOOP=0*)",
     "Bash(*export RALPH_LOOP=0*)",
+    "Bash(sleep:*)",
 }
 
 ASSETS: dict[str, tuple[Path, Path]] = {
