@@ -91,17 +91,30 @@ def run_worker(command: list[str], log: Path, verbose: bool) -> int:
             return process.wait()
 
 
-def check(name: str, command: Callable[[], dict[str, list[str]]]) -> dict[str, list[str]]:
+def check(name: str, command: Callable[[], dict[str, list[str]]], json_output: bool = False) -> None:
     """Run a named phase (preflight or gate), render its summary, and exit by its verdict.
 
     Args:
         name: Phase label shown in the summary (e.g. "preflight" or "gate").
         command: Callable that runs the phase for a repo. Returns pass/fail buckets.
+        json_output: Whether to render the summary as JSON.
 
     Raises:
         typer.Exit: always — code 1 if anything failed, else code 0.
     """
     results = command()
+    if json_output or os.environ.get("RALPH_LOOP"):
+        echo(
+            json.dumps({
+                "phase": name,
+                "ok": not results["fail"],
+                "pass": results["pass"],
+                "fail": results["fail"],
+                "warn": results.get("warn", []),
+            })
+        )
+        raise Exit(code=1 if results["fail"] else 0)
+
     summary = Table(title="\nHarness Summary\n", title_style="bold grey82", box=None, padding=(0, 5))
     summary.add_column("RESULT")
     summary.add_column("CHECK", style="bold dim white")
@@ -126,9 +139,13 @@ def preflight() -> None:
 @app.command(
     help="Pre-push that runs ALL checks (lint, types, security, etc.). If CI is set up, this should match CI gate."
 )
-def gate() -> None:
-    """Dumb pass-through to the full pre-push gate; exit nonzero if anything fails."""
-    check("gate", gates().run_gate)
+def gate(json_output: Annotated[bool, Option("--json", "-j", help="Output results as JSON")] = False) -> None:
+    """Dumb pass-through to the full pre-push gate; exit nonzero if anything fails.
+
+    Args:
+        json_output: Whether to render the summary as JSON.
+    """
+    check("gate", gates().run_gate, json_output=json_output)
 
 
 @app.command(hidden=True, help="Git prepare-commit-msg hook. Called by .githooks, not by people.")

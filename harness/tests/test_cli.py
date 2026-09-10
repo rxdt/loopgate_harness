@@ -296,7 +296,7 @@ def test_every_supported_agent_has_a_nonempty_command() -> None:
         pytest.param(
             "preflight",
             "value = 1\n",
-            (0, "Harness Summary RESULT CHECK PASSED mutmut ok: preflight pass"),
+            (0, []),
             id="preflight-passes",
         ),
         pytest.param(
@@ -304,24 +304,19 @@ def test_every_supported_agent_has_a_nonempty_command() -> None:
             "_bad = 1\n",
             (
                 1,
-                (
-                    "Harness Summary RESULT CHECK PASSED mutmut FAILED "
-                    "PREFERENCES IGNORED: src/mod.py:1: Name '_bad' starts with underscore "
-                    "and is not in a class rejected by harness"
-                ),
+                ["PREFERENCES IGNORED:\nsrc/mod.py:1: Name '_bad' starts with underscore and is not in a class"],
             ),
             id="gate-rejects",
         ),
     ],
 )
 def test_cli_summaries_report_complete_agent_check_results(
-    command: str, source: str, expected: tuple[int, str], monkeypatch: pytest.MonkeyPatch, git_repo: Path
+    command: str, source: str, expected: tuple[int, list[str]], monkeypatch: pytest.MonkeyPatch, git_repo: Path
 ) -> None:
-    """Preflight and gate render every containment phase and preserve the final verdict exactly."""
-    exit_code, summary = expected
+    """Preflight and gate render every containment phase and preserve the agent JSON verdict."""
+    exit_code, failures = expected
     monkeypatch.setenv("RALPH_LOOP", "1")
     monkeypatch.setattr(gates(), "commit_checks" if command == "preflight" else "gate_checks", {})
-    monkeypatch.setattr(cli.console, "print", Mock(wraps=cli.console.print))
     source_path = git_repo / "src" / "mod.py"
     source_path.parent.mkdir()
     source_path.write_text(source, encoding="utf-8")
@@ -347,17 +342,30 @@ def test_cli_summaries_report_complete_agent_check_results(
     assert plain_output.startswith(phase_output)
     assert diff_size_output in output
     assert mutation_output in output
-    assert output.endswith(unstyle(summary))
-    assert (
-        cli.console.print.call_args_list[-2].args[0].title_style,
-        cli.console.print.call_args_list[-2].args[0].box,
-        cli.console.print.call_args_list[-2].args[0].padding,
-        [(column.header, column.style) for column in cli.console.print.call_args_list[-2].args[0].columns],
-    ) == ("bold grey82", None, (0, 5, 0, 5), [("RESULT", ""), ("CHECK", "bold dim white")])
-    assert [printed.kwargs for printed in cli.console.print.call_args_list[-2:]] == [
-        {"justify": "center"},
-        {"justify": "center"},
-    ]
+    assert json.loads(plain_output.splitlines()[-1]) == {
+        "phase": command,
+        "ok": not failures,
+        "pass": ["mutmut"],
+        "fail": failures,
+        "warn": [],
+    }
+
+
+@pytest.mark.parametrize("flag", ["--json", "-j"])
+def test_gate_json_output_is_available_explicitly_and_for_agents(
+    flag: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The JSON summary preserves every result bucket and the gate verdict."""
+    results = {"pass": ["lint"], "fail": ["types"], "warn": ["format"]}
+    monkeypatch.setattr(gates(), "run_gate", Mock(return_value=results))
+
+    explicit = runner.invoke(cli.app, ["gate", flag])
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    agent = runner.invoke(cli.app, ["gate"])
+
+    expected = {"phase": "gate", "ok": False, **results}
+    assert explicit.exit_code == agent.exit_code == 1
+    assert json.loads(explicit.stdout) == json.loads(agent.stdout) == expected
 
 
 def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
