@@ -257,7 +257,7 @@ def run_git(args: list[str], repo: Path | None = None, check: bool = True) -> st
     """
     target = gates().repo_root if repo is None else repo
     command = ["git", "-C", str(target), *args]
-    git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_") or key == "GIT_INDEX_FILE"}
     result = subprocess.run(command, capture_output=True, text=True, check=check, env=git_env)
     return result.stdout
 

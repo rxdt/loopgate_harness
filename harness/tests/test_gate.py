@@ -306,6 +306,117 @@ def test_agent_iteration_is_contained_and_rejected(real_hook_repo: Path, monkeyp
     assert gate.run_git(["show", "HEAD:src/clean.py"], real_hook_repo) == "good = 1\n"
 
 
+@pytest.mark.parametrize("real_hook_repo", [("pre-commit", "prepare-commit-msg")], indirect=True)
+@pytest.mark.parametrize(
+    ("commit_args", "expected_exit"),
+    [
+        pytest.param(["-m", "update", "--", "harness/protected.txt"], 1, id="path"),
+        pytest.param(["-i", "-m", "update", "--", "harness/protected.txt"], 0, id="include-short"),
+        pytest.param(["--include", "-m", "update", "--", "harness/protected.txt"], 0, id="include-long"),
+        pytest.param(["-o", "-m", "update", "--", "harness/protected.txt"], 1, id="only-short"),
+        pytest.param(["--only", "-m", "update", "--", "harness/protected.txt"], 1, id="only-long"),
+        pytest.param(["-a", "-m", "update"], 0, id="all-short"),
+        pytest.param(["--all", "-m", "update"], 0, id="all-long"),
+        pytest.param(["-am", "update"], 0, id="all-message"),
+    ],
+)
+def test_preflight_keeps_unstaged_forbidden_edit_out_of_commit(
+    real_hook_repo: Path, monkeypatch: pytest.MonkeyPatch, commit_args: list[str], expected_exit: int
+) -> None:
+    """Commit flags cannot sneak an unstaged forbidden edit past the real preflight command."""
+    repo = real_hook_repo
+    protected = "harness/protected.txt"
+    monkeypatch.delenv("RALPH_LOOP")
+    stage(repo, protected, "original\n")
+    gate.run_git(["commit", "-q", "-m", "track protected file"], repo)
+    monkeypatch.setenv("RALPH_LOOP", "1")
+
+    # Run the installed harness command directly and from the real Git hooks.
+    harness = shutil.which("harness", path=str(Path(sys.executable).parent))
+    assert harness is not None
+    monkeypatch.setenv("PYTHONPATH", str(REPO_ROOT))
+    (repo / ".git" / "harness-path").write_text(f"{harness}\n", encoding="utf-8")
+    config = tomllib.parse((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["harness"]
+    config["preflight"] = {"ruff": [str(Path(sys.executable).with_name("ruff")), "check", "--no-cache", "."]}
+    (repo / "pyproject.toml").write_text(tomllib.dumps({"tool": {"harness": config}}), encoding="utf-8")
+
+    # Stage the allowed edit; leave the forbidden edit unstaged.
+    stage(repo, "README.md", "allowed edit\n")
+    (repo / protected).write_text("forbidden edit\n", encoding="utf-8")
+    staged = gate.run_git(["diff", "--cached", "--name-only"], repo).splitlines()
+    unstaged = gate.run_git(["diff", "--name-only"], repo).splitlines()
+    assert staged == ["README.md"]
+    assert unstaged == [protected]
+
+    preflight = subprocess.run([harness, "preflight"], cwd=repo, capture_output=True, text=True, check=False)
+    assert preflight.returncode == 0, preflight.stdout + preflight.stderr
+
+    # Attempt to commit the forbidden edit without running git add on it.
+    commit = git_process(repo, ["commit", *commit_args])
+    committed = gate.run_git(["show", f"HEAD:{protected}"], repo)
+    assert commit.returncode == expected_exit, f"{commit.stdout}{commit.stderr}\nCommitted contents: {committed}"
+    assert "PHASE: EJECTED" in commit.stdout + commit.stderr
+    assert committed == "original\n"
+    assert gate.run_git(["show", "HEAD:README.md"], repo) == ("allowed edit\n" if expected_exit == 0 else "seed\n")
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_preflight_removes_forbidden_edit_from_hook_index(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch, relative: bool
+) -> None:
+    """Preflight removes the forbidden commit entry and preserves the regular staged edit."""
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    checks = {"ruff": [str(Path(sys.executable).with_name("ruff")), "check", "--no-cache", "."]}
+    monkeypatch.setattr(gates(), "commit_checks", checks)
+    index = git_repo / ".git" / "commit-index"
+    shutil.copy2(git_repo / ".git" / "index", index)
+    stage(git_repo, "README.md", "regular index change\n")
+    monkeypatch.setenv("GIT_INDEX_FILE", str(index.relative_to(git_repo) if relative else index))
+    (git_repo / "harness").mkdir()
+    (git_repo / "harness" / "protected.txt").write_text("forbidden edit\n", encoding="utf-8")
+    subprocess.run(["git", "add", "harness/protected.txt"], check=True)
+
+    result = gates().run_preflight()
+
+    assert result == {"pass": ["ruff", "mutmut"], "fail": [], "warn": []}
+    assert not subprocess.check_output(["git", "diff", "--cached", "--name-only"], text=True)
+    monkeypatch.delenv("GIT_INDEX_FILE")
+    assert subprocess.check_output(["git", "diff", "--cached", "--name-only"], text=True) == "README.md\n"
+
+
+@pytest.mark.parametrize("real_hook_repo", [("pre-commit", "prepare-commit-msg")], indirect=True)
+@pytest.mark.parametrize("form", ["all", "path"])
+@pytest.mark.parametrize("payload", ["forbidden", "pattern", "clean"])
+def test_commit_index_in_linked_worktree(
+    real_hook_repo: Path, monkeypatch: pytest.MonkeyPatch, form: str, payload: str
+) -> None:
+    """Linked worktrees use their own commit index even though hook resolution uses the common Git dir."""
+    target = "harness/protected.txt" if payload == "forbidden" else "allowed.txt"
+    monkeypatch.delenv("RALPH_LOOP")
+    stage(real_hook_repo, target, "seed\n")
+    gate.run_git(["commit", "-q", "-m", "seed tracked target"], real_hook_repo)
+    repo = real_hook_repo / "linked"
+    gate.run_git(["worktree", "add", "--detach", str(repo), "HEAD"], real_hook_repo)
+    shutil.copytree(real_hook_repo / ".active-hooks", repo / ".active-hooks")
+    shutil.copytree(real_hook_repo / "mutants", repo / "mutants")
+    monkeypatch.setenv("RALPH_LOOP", "1")
+    (repo / "harness.real").write_text("preflight\n", encoding="utf-8")
+    stage(repo, "README.md", "seed\nbenign edit\n")
+    content = "seed\n# noqa\n" if payload == "pattern" else "seed\nchanged\n"
+    (repo / target).write_text(content, encoding="utf-8")
+    args = ["-a"] if form == "all" else [target]
+
+    result = git_process(repo, ["commit", *args, "-q", "-m", "linked commit index"])
+
+    assert "Traceback" not in result.stdout + result.stderr
+    lands = payload == "clean" or (payload == "forbidden" and form == "all")
+    assert (result.returncode == 0) == lands, result.stdout + result.stderr
+    expected = content if payload == "clean" else "seed\n"
+    assert gate.run_git(["show", f"HEAD:{target}"], repo) == expected
+    assert not gate.run_git(["diff", "--cached", "--name-only"], real_hook_repo)
+
+
 def test_agent_iteration_that_does_the_work_lands(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], git_repo: Path
 ) -> None:

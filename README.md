@@ -17,7 +17,7 @@
 ![Claude](https://img.shields.io/badge/Claude-D97757?style=for-the-badge&logo=claude&logoColor=white)
 [![gate](https://github.com/rxdt/loopgate_harness/actions/workflows/ci.yml/badge.svg)](https://github.com/rxdt/loopgate_harness/actions/workflows/ci.yml)
 ![GitHub Repo Size](https://img.shields.io/github/repo-size/rxdt/loopgate-harness)
-[![mutation](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frxdt%2Floopgate_harness%2Fmain%2Fmutation-score.json)](https://github.com/rxdt/loopgate_harness/actions/workflows/mutation.yml)
+[![mutation](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frxdt%2Floopgate_harness%2Fbadges%2Fmutation-score.json)](https://github.com/rxdt/loopgate_harness/actions/workflows/mutation.yml)
 
 </div>
 
@@ -76,7 +76,8 @@ Each run starts fresh, has clear limits, saves its logs, protects key files, and
 - **No-rot**: Fresh-context agent iterations to reduce context rot 🧠
 - **Simple**: One-command setup gets you going 🆗
 - **Installable project template**: `harness install` gets a repo ready! 🚀
-- **Existing-repo setup**: `harness init` adds LoopGate without requiring the template
+- **CI matches the gate**: the template's [workflow](.github/workflows/ci.yml#L57) runs `harness gate` — the same command you run locally, not a reimplementation of it
+- **Existing-repo setup**: `harness init` adds LoopGate without requiring the template. It leaves your CI alone, so add the `harness gate` line to your own workflow
 - **Progressive**: Preflight vs full gate split ᯓ➤
 - **Forbidden-file containment**: Don't touch that!-configurable. Set forbidden files for agents ✋
 - **No-waste**: Timeouts and time-limits for all looping agents ⏰
@@ -229,9 +230,16 @@ harness run copilot 2 20
 ~/your-repo/.venv/bin/harness
 > uv run harness  # will find harness if executable exists
 ```
+With `harness init` the harness does not create a CI for you. If you already have a workflow we are not going to clobber it. It installs the git hooks and the `[tool.harness]` config only. So this local gate is a guardrail until you wire it to CI/CD. Add one line to whatever workflow you already have:
+```yaml
+- name: Harness Checks
+  run: uv run --no-sync harness gate
+```
+That is the same single line this repo uses, at [.github/workflows/ci.yml line 57](.github/workflows/ci.yml#L57). Then CI does not reimplement the checks: it runs the identical command you run locally.
+
 #### To run LoopGate with any agent, the worker must be installed and authenticated separately.
 
-### Add a mutation score badge
+## Add a mutation score badge
 
 Run `uv run mutmut run && uv run mutmut export-cicd-stats`, then use [check_mutmut.py](mutation/check_mutmut.py) to write `mutation-score.json` for the Shields badge.
 
@@ -356,6 +364,14 @@ npm run --prefix harness/js-scaffold preflight
 
 A shell loop only reruns an agent. LoopGate ensures fresh context, durable repo state, time and iteration limits, protected paths, and quality gates that stop bad changes _before_ they land. Also, we like to keep our shell loops dumb round these parts. And Let the configs do the lifting.
 
+- **Is there an AI slop detector?**
+
+Three examples of deterministic and gate-able checks for AI-slop habits:
+
+1. [`preferences/preferences.py`](preferences/preferences.py) is an AST checker for the patterns generated code actually produces: lazy `Any` hints, `*args`/`**kwargs` hiding a signature, classes with no behavior, asserts that can't fail, over-clever comprehensions, chaotic `continue`s.
+2. [`PATTERNS` in pyproject.toml](pyproject.toml#L212) blocks 35 ways to silence a tool instead of fixing the code — `# noqa`, `type: ignore`, `pragma: no cover`, `nosemgrep`, `# nosec`, `pytest.mark.skip`, `cov-fail-under`, `pragma: no mutate`. Suppressing a check is the agent's favorite escape hatch, so it is a blocked pattern on added lines.
+3. Mutation testing (`mutmut`) catches source code that is test-covered but but not truly tested.
+
 #### LoopGate Glossary
 
 Short definitions of common LoopGate terms.
@@ -365,19 +381,6 @@ Short definitions of common LoopGate terms.
 - worker: the coding agent that does the work, such as Claude, Codex, or Copilot.
 - gate: the checks that decide whether changes can be accepted. LoopGate runs these checks locally and in CI. aka pre-push, what happens right before a diff is pushed to origin.
 - preflight: the quick checks that run before the full gate to catch common problems early. aka 'pre-commit', what happens right before files are git committed.
-- prompt: the instructions in `docs/PROMPT.md` that tell the worker what to do in each loop.
-- spec: a file in `docs/specs/` that describes what needs to be built.
-- Ralph: LoopGate's loop runner. It starts the worker, gives it the prompt, and runs the workflow for each iteration.
-
-#### LoopGate Glossary
-
-Short definitions of common LoopGate terms.
-
-- harness: the LoopGate tool that runs agents, manages loops, and checks changes.
-- loop: one cycle of work where the worker reads instructions, works on a spec, makes changes, runs checks, and records progress.
-- worker: the coding agent that does the work, such as Claude, Codex, or Copilot.
-- gate: the checks that decide whether changes can be accepted. LoopGate runs these checks locally and in CI.
-- preflight: the quick checks that run before the full gate to catch common problems early.
 - prompt: the instructions in `docs/PROMPT.md` that tell the worker what to do in each loop.
 - spec: a file in `docs/specs/` that describes what needs to be built.
 - Ralph: LoopGate's loop runner. It starts the worker, gives it the prompt, and runs the workflow for each iteration.
@@ -455,8 +458,6 @@ Short definitions of common LoopGate terms.
 
 ![diagram](.assets/.diagram.png)
 
-## License
+Want to help? [CONTRIBUTING.md](CONTRIBUTING.md)
 
 [MIT LICENSE](LICENSE)
-
-Want to help? [CONTRIBUTING.md](CONTRIBUTING.md).
