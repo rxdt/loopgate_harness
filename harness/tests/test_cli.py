@@ -1747,3 +1747,41 @@ def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyP
     assert [event["type"] for event in events] == ["ralph", "result", "ralph", "result", "ralph"]
     assert [event.get("iteration") for event in events] == [1, None, 2, None, None]
     assert events[-1]["completed"] == 2
+
+
+def test_run_passes_extra_args_to_agent_and_handles_missing_model_in_preset(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Extra flags passed after run arguments reach the agent command, both with and without '--',
+    extra flags can be absent, and overriding --model on a preset without --model appends it.
+    """
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "check_for_timeout_and_prompt", Mock(return_value="timeout"))
+    freeze_run_day(monkeypatch)
+    (git_repo / "docs").mkdir(exist_ok=True)
+    (git_repo / "docs" / "PROMPT.md").write_text("prompt\n", encoding="utf-8")
+    launched: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run", fake_agent(launched))
+
+    # 1. Extra flags without '--'
+    res1 = runner.invoke(cli.app, ["run", "claude", "1", "2", "False", "--effort", "high", "--max-tokens", "4000"])
+    assert res1.exit_code == 0
+    assert launched[0][3:] == [*list(gates().agents["claude"]), "--effort", "high", "--max-tokens", "4000"]
+
+    # 2. Extra flags with '--'
+    res2 = runner.invoke(cli.app, ["run", "claude", "1", "2", "False", "--", "--effort", "high"])
+    assert res2.exit_code == 0
+    assert launched[1][3:] == [*list(gates().agents["claude"]), "--effort", "high"]
+
+    # 3. Extra flags absent
+    res3 = runner.invoke(cli.app, ["run", "claude", "1", "2", "False"])
+    assert res3.exit_code == 0
+    assert launched[2][3:] == list(gates().agents["claude"])
+
+    # 4. Preset without '--model' gets --model appended when model option is passed
+    res4 = runner.invoke(
+        cli.app, ["run", "copilot", "1", "2", "False", "--model", "custom-model", "--", "--extra-flag"]
+    )
+    assert res4.exit_code == 0
+    assert launched[3][3:] == [*list(gates().agents["copilot"]), "--model", "custom-model", "--extra-flag"]
