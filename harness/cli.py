@@ -286,7 +286,6 @@ def run(
     num_iterations: Annotated[int, Argument()] = 2,
     max_minutes: Annotated[int, Argument()] = 20,
     verbose: Annotated[bool, Argument()] = True,
-    *,
     model: Annotated[str | None, Option(help="Override the agent's model")] = None,
 ) -> None:
     """ralph.sh runs once for one agent.
