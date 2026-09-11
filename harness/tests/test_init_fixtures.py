@@ -155,6 +155,7 @@ def test_user_pyproject_table_is_preserved_exactly(tmp_path: Path, monkeypatch: 
 def test_tox_ini_pytest_section_selects_pytest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     written = configure_repo(tmp_path, monkeypatch, tox_ini="[pytest]\n")
     assert written["harness"]["gate"]["test"] == TOOLS["pytest"]["args"]
+    assert "pytest" not in written, "tox.ini [pytest] is authoritative but [tool.pytest] was written"
 
 
 def test_setup_cfg_pytest_section_drops_packaged_pytest_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -230,7 +231,12 @@ def test_available_audit_module_keeps_the_audit_check(tmp_path: Path, monkeypatc
     assert written["harness"]["gate"]["audit"] == TEMPLATE["harness"]["gate"]["audit"]
 
 
-def test_unavailable_audit_removes_the_audit_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_audit_check_needs_an_importable_module_or_an_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    on_path = configure_repo(tmp_path, monkeypatch, modules=MODULES - {"audit"}, executables=frozenset({"pip-audit"}))
+    assert on_path["harness"]["gate"]["audit"] == TOOLS["audit"]["args"], "pip-audit on PATH but its check is gone"
+
     written = configure_repo(tmp_path, monkeypatch, modules=MODULES - {"audit"})
     assert "audit" not in written["harness"]["gate"], "pip-audit cannot run but its check remains"
 
@@ -322,7 +328,13 @@ def test_init_writes_detected_configuration(tmp_path: Path, monkeypatch: pytest.
         "report": {"show_missing": True, "skip_covered": False, "fail_under": 25},
         "skip_covered": False,
     }
-    assert written["tool"]["mutmut"] == {"max-children": 2, "source_paths": ["letta_evals"], "also_copy": [".githooks"]}
+    assert written["tool"]["mutmut"] == {
+        "max-children": 2,
+        "source_paths": ["letta_evals"],
+        "also_copy": [".githooks"],
+        "cache_invalidation_files": ["tests/*.py", "tests/**/*.py"],
+        "on_dependency_change": "rerun",
+    }
     assert written["tool"]["complexipy"] == {
         "paths": ["letta_evals"],
         "exclude": ["**/tests/**"],
