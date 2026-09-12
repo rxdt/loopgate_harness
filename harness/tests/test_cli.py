@@ -352,12 +352,10 @@ def test_cli_summaries_report_complete_agent_check_results(
 
 
 @pytest.mark.parametrize("flag", ["--json", "-j"])
-def test_gate_json_output_is_available_explicitly_and_for_agents(
-    flag: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_gate_json_output_is_available_explicitly_and_for_agents(flag: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """The JSON summary preserves every result bucket and the gate verdict."""
     results = {"pass": ["lint"], "fail": ["types"], "warn": ["format"]}
-    monkeypatch.setattr(gates(), "run_gate", Mock(return_value=results))
+    monkeypatch.setattr(Gate, "run_gate", Mock(return_value=results))
 
     explicit = runner.invoke(cli.app, ["gate", flag])
     monkeypatch.setenv("RALPH_LOOP", "1")
@@ -547,6 +545,13 @@ def test_write_harness_config_is_idempotent_with_existing_wiring(
     original = f'{INIT_PROJECT_COMMENT}\n[tool.project]\nsentinel = "keep"\n'
     pyproject.write_text(original, encoding="utf-8")
     selected_tools = config.get_tools({"package"})
+
+    assert selected_tools["ruff_lint"]["args"] == ["ruff", "check", "--no-cache", "--show-fixes", "package"]
+    assert selected_tools["pyright"]["table"] == {"include": ["package"]}
+    assert selected_tools["complexipy"]["table"] == {"paths": ["package"]}
+    assert selected_tools["mutmut"]["table"] == {"source_paths": ["package"]}
+    assert sorted(selected_tools["coverage"]["table"]["run"]["source"]) == ["mutation", "package", "preferences"]
+
     monkeypatch.setattr(cli.util, "find_spec", Mock(side_effect={name: object() for name in selected_tools}.get))
     monkeypatch.setattr(cli, "which", Mock(return_value=None))
 
@@ -557,6 +562,9 @@ def test_write_harness_config_is_idempotent_with_existing_wiring(
     configured = tomllib.loads(first_config)
 
     assert first_checks == second_checks
+    assert first_checks == {"ruff_lint", "ruff_format", "complexity", "audit", "security", "types", "test"}, (
+        "the reported checks must name every wired preflight and gate command"
+    )
     assert INIT_PROJECT_COMMENT in first_config
     assert INIT_PROJECT_COMMENT in second_config
     assert configured["tool"]["project"] == {"sentinel": "keep"}
@@ -578,6 +586,157 @@ def test_write_harness_config_is_idempotent_with_existing_wiring(
 
 def test_write_harness_config_selects_installed_user_tools(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Config generation preserves user settings and selects project and standalone tool configs."""
+    assert (
+        config.get_tools(set())
+        == TOOLS
+        == {
+            "audit": {"category": "audit", "args": ["pip-audit"]},
+            "bandit": {
+                "category": "security",
+                "filenames": [".bandit"],
+                "pyproject": ["bandit"],
+                "args": ["bandit", "-r", ".", "-x", "build,tox,docs,tests,.venv,scratchpad,mutants,tests"],
+            },
+            "ruff_format": {
+                "category": "format",
+                "filenames": [".ruff.toml", "ruff.toml"],
+                "pyproject": ["ruff", "format"],
+                "args": ["ruff", "format", "--no-cache", "--check", "."],
+            },
+            "ruff_lint": {
+                "category": "lint",
+                "filenames": [".ruff.toml", "ruff.toml"],
+                "pyproject": ["ruff", "lint"],
+                "args": ["ruff", "check", "--no-cache", "--show-fixes", "."],
+            },
+            "black": {"category": "format", "pyproject": ["black"], "args": ["black", "--check", "."]},
+            "coverage": {
+                "category": "test",
+                "filenames": [".coveragerc", ".coveragerc.toml"],
+                "pyproject": ["coverage", "run"],
+                "table": {"run": {"source": ["."]}},
+            },
+            "flake8": {"category": "lint", "filenames": [".flake8"], "args": ["flake8", "."]},
+            "hypothesis": {"category": "test", "pyproject": ["hypothesis"]},
+            "pytest": {
+                "category": "test",
+                "filenames": ["pytest.toml", ".pytest.toml", "pytest.ini", ".pytest.ini"],
+                "pyproject": ["pytest", "ini_options"],
+                "args": [
+                    "pytest",
+                    "-p",
+                    "no:cacheprovider",
+                    "-n",
+                    "auto",
+                    "--cov",
+                    "--cov-report=term-missing",
+                    "--cov-fail-under=25",
+                    "--durations=5",
+                ],
+            },
+            "pyright": {
+                "category": "types",
+                "filenames": ["pyrightconfig.json"],
+                "pyproject": ["pyright"],
+                "args": ["pyright", "--outputjson", "."],
+                "table": {"include": ["."]},
+            },
+            "pylint": {
+                "category": "lint",
+                "filenames": ["pylintrc", "pylintrc.toml", ".pylintrc", ".pylintrc.toml"],
+                "pyproject": ["pylint"],
+                "args": ["pylint", "."],
+            },
+            "mypy": {
+                "category": "types",
+                "filenames": ["mypy.ini", ".mypy.ini"],
+                "pyproject": ["mypy"],
+                "args": ["mypy", "."],
+            },
+            "mutmut": {"category": "test", "pyproject": ["mutmut"], "table": {"source_paths": ["."]}},
+            "radon": {
+                "category": "complexity",
+                "filenames": ["radon.cfg"],
+                "pyproject": ["radon"],
+                "args": [
+                    "radon",
+                    "cc",
+                    ".",
+                    "-s",
+                    "-a",
+                    "-i",
+                    "build,tox,docs,tests,.venv,scratchpad,mutants,tests",
+                    "-e",
+                    "**/__init__.py.",
+                ],
+            },
+            "safety": {"category": "audit", "args": ["safety", "scan"]},
+            "sonarqube": {
+                "category": "security",
+                "filenames": ["sonar-project.properties"],
+                "args": ["sonar-scanner", "-Dsonar.qualitygate.wait=true"],
+            },
+            "snyk": {"category": "security", "filenames": [".snyk"], "args": ["snyk", "test"]},
+            "ty": {
+                "category": "types",
+                "filenames": [
+                    "ty.toml",
+                    "~/.config/ty/ty.toml",
+                    "$XDG_CONFIG_HOME/ty/ty.toml",
+                    "%APPDATA%\\ty\\ty.toml",
+                ],
+                "pyproject": ["ty"],
+                "args": ["ty", "check", "."],
+            },
+            "complexipy": {
+                "category": "complexity",
+                "filenames": ["complexipy.toml", ".complexipy.toml"],
+                "pyproject": ["complexipy"],
+                "args": ["complexipy", "."],
+                "table": {"paths": ["."]},
+            },
+            "semgrep": {
+                "category": "security",
+                "filenames": [
+                    ".semgrep.yml",
+                    ".semgrep.yaml",
+                    "semgrep.yml",
+                    "semgrep.yaml",
+                    "semgrep.config.yml",
+                    "semgrep.config.yaml",
+                ],
+                "args": [
+                    "semgrep",
+                    "scan",
+                    "--no-error",
+                    "--config",
+                    "auto",
+                    "--config",
+                    "p/secrets",
+                    "--exclude-rule",
+                    "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag",
+                    ".",
+                ],
+            },
+            "pyrefly": {
+                "category": "types",
+                "filenames": ["pyrefly.toml", ".pyrefly.toml"],
+                "pyproject": ["pyrefly"],
+                "args": ["pyrefly", "check", "."],
+            },
+            "xenon": {
+                "category": "complexity",
+                "filenames": [".xenon.yml"],
+                "args": ["xenon", "--max-absolute", "B", "--max-modules", "A", "--max-average", "A", "."],
+            },
+            "zuban": {
+                "category": "types",
+                "filenames": [".zuban.toml"],
+                "pyproject": ["zuban"],
+                "args": ["zuban", "check", "."],
+            },
+        }
+    ), "an empty source selection checks the repository root with every tool's packaged argv"
     installed = {name: object() for name in TOOLS if name != "pylint"}
     monkeypatch.setattr(cli.util, "find_spec", Mock(side_effect=installed.get))
     monkeypatch.setattr(cli, "which", Mock(return_value=None))
@@ -917,6 +1076,7 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
     assert (repo / "docs" / "nested" / "new.txt").read_text(encoding="utf-8") == "new\n"
     assert (repo / "docs" / "existing.txt").read_text(encoding="utf-8") == "existing\n"
     assert (repo / "scratchpad" / "runs" / ".gitkeep").is_file()
+    assert sorted(entry.name for entry in (repo / "scratchpad" / "runs").iterdir()) == [".gitkeep"]
     assert confirm.call_args_list == [
         call(cli.style("\n2. OK to wire githooks so quality checks run?", fg=10), default=True, abort=True),
         call(
@@ -928,9 +1088,16 @@ def test_hoist_rejects_missing_required_assets(monkeypatch: pytest.MonkeyPatch, 
             abort=True,
         ),
     ]
-    Path.mkdir.assert_any_call(repo / ".githooks", parents=True, exist_ok=True)
-    assert Path.mkdir.call_args_list.count(call(repo / "docs" / "nested", parents=True, exist_ok=True)) == 2
-    Path.mkdir.assert_any_call(repo / "scratchpad" / "runs", parents=True, exist_ok=True)
+    assert Path.mkdir.call_args_list == [
+        call(repo / ".githooks", parents=True, exist_ok=True),
+        call(repo / "docs" / "nested", parents=True, exist_ok=True),
+        call(repo / "docs" / "nested", parents=True, exist_ok=True),
+        call(repo / ".githooks", parents=True, exist_ok=True),
+        call(repo / "scratchpad" / "runs", parents=True, exist_ok=True),
+        call(repo / "scratchpad", parents=True, exist_ok=True),
+        call(repo / "scratchpad" / "runs", 511, parents=False, exist_ok=True),
+        call(repo / "scratchpad" / "runs", parents=True, exist_ok=True),
+    ], "hoist creates exactly the destination directories its assets need"
     cli.console.print.assert_called_once_with("[green]\n3. Ran script to make `.githooks` executable[/]")
     assert message.call_args_list[0] == call(
         "\n[bold yellow]We will need to add these files[/]\n* `.githooks` are what ensure quality checks run"
@@ -1118,7 +1285,7 @@ def test_cleanup_requires_both_template_files(has_readme: bool, has_project: boo
 
 
 def test_cleanup_does_not_amend_a_dirty_template(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
-    """Real dirty state prevents cleanup from amending the historical template commit."""
+    """Real dirty state prevents cleanup from amending even a single-commit template checkout."""
     replacement_project = (REPO_ROOT / "harness" / "temp.pyproject.toml").read_text(encoding="utf-8")
     (git_repo / "pyproject.toml").write_text('[project]\nname = "template"\n', encoding="utf-8")
     (git_repo / "README.template.md").write_text("replacement project readme\n", encoding="utf-8")
@@ -1129,11 +1296,15 @@ def test_cleanup_does_not_amend_a_dirty_template(monkeypatch: pytest.MonkeyPatch
     assert not gate.run_git(["status", "--porcelain"], git_repo)
     original_head = gate.run_git(["rev-parse", "HEAD"], git_repo).strip()
     (git_repo / "README.md").write_text("uncommitted user work\n", encoding="utf-8")
-    run_git = Mock(wraps=cli.run_git, side_effect=[DEFAULT, "867f2df\n"])
+    run_git = Mock(wraps=cli.run_git, side_effect=[DEFAULT, "1\n"])
     monkeypatch.setattr(cli, "run_git", run_git)
 
     assert cli.cleanup(git_repo) is True
 
+    assert run_git.call_args_list == [
+        call(["status", "--porcelain"], git_repo),
+        call(["rev-list", "--count", "HEAD"], git_repo),
+    ], "the dirty tree must stop cleanup before it amends"
     assert gate.run_git(["rev-parse", "HEAD"], git_repo).strip() == original_head
     assert gate.run_git(["status", "--porcelain"], git_repo)
 
@@ -1190,6 +1361,12 @@ def test_install_picks_the_package_manager_from_project_signals(
         "pip": harness_executable(interpreter),
     }
     assert [call for call in calls if call in managers.values()] == [managers[manager]]
+    install_call = next(record for record in toolchain.call_args_list if tuple(record.args[0]) == managers[manager])
+    assert install_call.kwargs == {"cwd": str(git_repo), "check": True}, "a failed install must stop the setup"
+    if manager == "poetry":
+        assert toolchain.call_args_list[1] == call(
+            ["poetry", "env", "info", "--executable"], cwd=str(git_repo), check=True, capture_output=True, text=True
+        ), "the interpreter Poetry reports is read from its captured text output"
     installed = (git_repo / ".git" / "harness-path").read_text(encoding="utf-8").strip()
     assert normalized_path(installed) == normalized_path(recorded[manager])
 
@@ -1570,3 +1747,41 @@ def test_claude_preset_runs_two_real_loop_iterations(monkeypatch: pytest.MonkeyP
     assert [event["type"] for event in events] == ["ralph", "result", "ralph", "result", "ralph"]
     assert [event.get("iteration") for event in events] == [1, None, 2, None, None]
     assert events[-1]["completed"] == 2
+
+
+def test_run_passes_extra_args_to_agent_and_handles_missing_model_in_preset(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Extra flags passed after run arguments reach the agent command, both with and without '--',
+    extra flags can be absent, and overriding --model on a preset without --model appends it.
+    """
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "check_for_timeout_and_prompt", Mock(return_value="timeout"))
+    freeze_run_day(monkeypatch)
+    (git_repo / "docs").mkdir(exist_ok=True)
+    (git_repo / "docs" / "PROMPT.md").write_text("prompt\n", encoding="utf-8")
+    launched: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run", fake_agent(launched))
+
+    # 1. Extra flags without '--'
+    res1 = runner.invoke(cli.app, ["run", "claude", "1", "2", "False", "--effort", "high", "--max-tokens", "4000"])
+    assert res1.exit_code == 0
+    assert launched[0][3:] == [*list(gates().agents["claude"]), "--effort", "high", "--max-tokens", "4000"]
+
+    # 2. Extra flags with '--'
+    res2 = runner.invoke(cli.app, ["run", "claude", "1", "2", "False", "--", "--effort", "high"])
+    assert res2.exit_code == 0
+    assert launched[1][3:] == [*list(gates().agents["claude"]), "--effort", "high"]
+
+    # 3. Extra flags absent
+    res3 = runner.invoke(cli.app, ["run", "claude", "1", "2", "False"])
+    assert res3.exit_code == 0
+    assert launched[2][3:] == list(gates().agents["claude"])
+
+    # 4. Preset without '--model' gets --model appended when model option is passed
+    res4 = runner.invoke(
+        cli.app, ["run", "copilot", "1", "2", "False", "--model", "custom-model", "--", "--extra-flag"]
+    )
+    assert res4.exit_code == 0
+    assert launched[3][3:] == [*list(gates().agents["copilot"]), "--model", "custom-model", "--extra-flag"]

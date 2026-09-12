@@ -242,6 +242,8 @@ derandomize = true   # false default seeds random, uncovers more bugs. True = de
 max-children = 2
 source_paths = ["preferences", "src"]  # what to mutate
 also_copy = [".githooks"]  # not mutated paths, copied for imports
+cache_invalidation_files = ["tests/*.py", "tests/**/*.py"]
+on_dependency_change = "rerun"
 
 # ==============================================================================
 # Cognitive Complexity Complexipy Configuration

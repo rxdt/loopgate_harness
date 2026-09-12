@@ -300,6 +300,8 @@ max-children = 2
 source_paths = ["preferences", "mutation", "harness"]  # what to mutate
 also_copy = [".githooks"]  # not mutated paths, these are copied for imports to work
 do_not_mutate = ["harness/tests/*"]    # explictly here because nested in a directory we said to mutate
+cache_invalidation_files = ["harness/tests/*.py", "harness/tests/**/*.py", "tests/*.py", "tests/**/*.py"]
+on_dependency_change = "rerun"
 # ==============================================================================
 # Dead Code Vulture
 # ==============================================================================

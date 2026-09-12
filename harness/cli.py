@@ -19,7 +19,7 @@ from rich import print as rprint
 from rich.json import JSON
 from rich.table import Table
 from tomlkit import TOMLDocument, document, dumps, parse, table
-from typer import Argument, Exit, Option, Typer, colors, confirm, echo, prompt, secho, style
+from typer import Argument, Context, Exit, Option, Typer, colors, confirm, echo, prompt, secho, style
 
 from harness.config import ASSETS, CATEGORIES, CLAUDE_RULES, CLAUDE_SLEEP_HOOK, CODEX_RULES, PHASES, get_tools
 from harness.gate import console, gates, run_git
@@ -276,10 +276,12 @@ def check_for_timeout_and_prompt() -> str | None:
 
 
 @app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     help="Run one harnessed ralph loop with <agent>, e.g. `harness run claude 3 20`.\n\n"
-    f"Agents in pyproject.toml (from tool.harness.agents): {', '.join(gates().agents)}"
+    f"Agents in pyproject.toml (from tool.harness.agents): {', '.join(gates().agents)}",
 )
 def run(
+    ctx: Context,
     agent: str,
     num_iterations: Annotated[int, Argument()] = 2,
     max_minutes: Annotated[int, Argument()] = 20,
@@ -289,6 +291,7 @@ def run(
     """ralph.sh runs once for one agent.
 
     Args:
+        ctx: Typer Context holding unparsed extra arguments.
         agent: Agent key to run.
         num_iterations: Number of ralph loop iterations.
         max_minutes: Wall-clock budget per run in minutes.
@@ -314,8 +317,11 @@ def run(
     )
     agent_argv = [tok.replace("{log_path}", str(log)) for tok in gates().agents[agent]]
     if model:
-        agent_argv[agent_argv.index("--model") + 1] = model
-    command = [*launcher, str(num_iterations), str(max_minutes), *agent_argv]
+        if "--model" in agent_argv:
+            agent_argv[agent_argv.index("--model") + 1] = model
+        else:
+            agent_argv.extend(("--model", model))
+    command = [*launcher, str(num_iterations), str(max_minutes), *agent_argv, *ctx.args]
     echo(f"harness: {' '.join(command)} -> {log}", err=True)
     raise Exit(code=run_worker(command, log, verbose))
 
