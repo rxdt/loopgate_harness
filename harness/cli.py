@@ -23,6 +23,7 @@ from typer import Argument, Context, Exit, Option, Typer, colors, confirm, echo,
 
 from harness.config import ASSETS, CATEGORIES, CLAUDE_RULES, CODEX_RULES, PHASES, get_tools
 from harness.gate import console, gates, run_git
+from harness.runs import iter_logs, read_runs
 
 app = Typer(
     name="loopgate",
@@ -177,13 +178,49 @@ def info(verbose: Annotated[bool, Option("--verbose", "-v", help="Show all check
     console.print(config)
 
 
-@app.command(help="Count agent run logs under scratchpad/runs")
-def status() -> None:
-    """Count run logs and point at the newest one."""
+@app.command(help="Summarize agent run logs under scratchpad/runs; --verbose adds each agent's last message")
+def status(
+    verbose: Annotated[bool, Option("--verbose", "-v", help="Add each run's log path and last message")] = False,
+) -> None:
+    """Show a newest-first table of recent runs: iterations, tokens (cache split out), cost, stop reason.
+
+    Args:
+        verbose: When True, also show each run's last message, the agent's own words for why it stopped,
+            and the log path; useful for picking a log to open.
+    """
     runs = REPO_ROOT / "scratchpad" / "runs"
-    logs = sorted(runs.rglob("*.jsonl"), reverse=True) if runs.is_dir() else []
-    newest = "\n".join(str(log) for log in logs[:3]) if logs else ""
-    secho(f"{len(logs)} run log(s) in {runs}\nnewest:\n{newest}", fg=30)
+    logs = iter_logs(runs)
+    if not logs:
+        secho(f"0 run log(s) in {runs}", fg=30)
+        return
+    rows = read_runs(list(reversed(logs)))
+    table = Table(title=f"\n{len(logs)} run(s) in {runs}\n", title_style="bold grey82", box=None, padding=(0, 1))
+    columns = (
+        ("DATE", "when"),
+        ("AGENT", "agent"),
+        ("RUN", "run"),
+        ("ITERS", "iterations"),
+        ("MIN", "minutes"),
+        ("TOKENS IN", "tokens_in"),
+        ("TOKENS OUT", "tokens_out"),
+        ("CACHE R", "cache_read"),
+        ("CACHE W", "cache_write"),
+        ("COST", "cost_usd"),
+        ("MS", "ms"),
+        ("STOP", "stopped"),
+    )
+    for label, _ in columns:
+        table.add_column(label, style="bold dim white")
+    for row in rows:
+        table.add_row(*(getattr(row, field) for _, field in columns))
+    console.print(table, justify="left")
+    if verbose:
+        messages = Table(title="Last messages", title_style="bold grey82", box=None, padding=(0, 1))
+        for column in ("DATE", "AGENT", "RUN", "LAST MESSAGE", "LOG"):
+            messages.add_column(column, style="bold dim white", overflow="fold")
+        for row in rows:
+            messages.add_row(row.when, row.agent, row.run, row.message, row.log)
+        console.print(messages, justify="left")
 
 
 def cleanup(cwd: Path) -> bool:

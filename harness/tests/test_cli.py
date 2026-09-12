@@ -366,15 +366,18 @@ def test_gate_json_output_is_available_explicitly_and_for_agents(flag: str, monk
     assert json.loads(explicit.stdout) == json.loads(agent.stdout) == expected
 
 
-def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The installed and importable status commands count receipts and name the newest three."""
+def test_status_counts_run_receipts_and_orders_them_newest_first(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The installed and importable status commands count receipts and summarize every run newest-first."""
     runs = git_repo / "scratchpad" / "runs"
     command = [str(Path(sys.executable).with_name("harness.exe" if cli.IS_WINDOWS else "harness")), "status"]
     environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    environment["COLUMNS"] = "200"  # wide console so every run-table column survives rendering
     empty = subprocess.run(command, cwd=git_repo, capture_output=True, text=True, env=environment, check=False)
 
     assert empty.returncode == 0, empty.stderr
-    assert empty.stdout == f"0 run log(s) in {runs}\nnewest:\n\n"
+    assert empty.stdout == f"0 run log(s) in {runs}\n"
 
     claude_runs = runs / "20990102" / "claude"
     codex_runs = runs / "20990102" / "codex"
@@ -388,18 +391,20 @@ def test_status_counts_run_receipts_and_names_the_newest(git_repo: Path, monkeyp
     counted = subprocess.run(command, cwd=git_repo, capture_output=True, text=True, env=environment, check=False)
 
     assert counted.returncode == 0, counted.stderr
-    lines = counted.stdout.splitlines()
-    assert lines[0] == f"4 run log(s) in {runs}"
-    assert lines[1:] == [
-        "newest:",
-        str(codex_runs / "0001.jsonl"),
-        str(claude_runs / "0003.jsonl"),
-        str(claude_runs / "0002.jsonl"),
+    plain = unstyle(counted.stdout)
+    flat = [" ".join(line.split()) for line in plain.splitlines() if line.strip()]
+    assert "4 run(s)" in plain
+    assert flat[-4:] == [
+        "- codex 0001 - - - - - - - - -",
+        "- claude 0003 - - - - - - - - -",
+        "- claude 0002 - - - - - - - - -",
+        "- claude 0001 - - - - - - - - -",
     ]
     monkeypatch.setattr(cli, "REPO_ROOT", git_repo)
-    imported = runner.invoke(cli.app, ["status"])
+    with patch.object(cli, "console", Console(width=200, color_system=None, force_terminal=False)):
+        imported = runner.invoke(cli.app, ["status"])
     assert imported.exit_code == 0, imported.output
-    assert imported.stdout == counted.stdout
+    assert unstyle(imported.stdout) == unstyle(counted.stdout)
 
 
 def test_setup_git_hooks_records_exact_posix_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -982,7 +987,7 @@ def test_init_hoists_and_records_the_installed_harness(git_repo: Path) -> None:
     assert committed.returncode == 0, committed.stdout + committed.stderr
     assert gate.run_git(["show", "--name-only", "--format=", "HEAD"], git_repo).splitlines() == ["hook_check.py"]
     assert status.returncode == 0, status.stderr
-    assert status.stdout == f"0 run log(s) in {git_repo / 'scratchpad/runs'}\nnewest:\n\n"
+    assert status.stdout == f"0 run log(s) in {git_repo / 'scratchpad/runs'}\n"
     cache_files = []
     for destination in ("preferences", "mutation", "tests"):
         cache_files.extend(
