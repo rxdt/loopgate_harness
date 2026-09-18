@@ -2,6 +2,8 @@
 
 Now that you have the template locally:
 
+The default prose gate requires Vale 3.17+ on `PATH`.
+
 1. `uv sync` OR `poetry install` OR `pip install -r requirements.txt`, then `harness install && git add . && git commit`
 2. If your repo is private and you don't have a paid Github delete [ci.yml line#20](.github/workflows/ci.yml#L29) or you will get an `Error: Dependency review is not supported on this repository`
 3. **Write your project goal in [docs/plan.md](docs/plan.md)**
@@ -15,6 +17,7 @@ Now that you have the template locally:
 - [ruff](https://docs.astral.sh/ruff/) lints and formats Python code, fast
 - [pylint](https://pypi.org/project/pylint/) catches code errors and style problems
 - [pydoclint](https://pypi.org/project/pydoclint/0.9.1/) checks docstrings match function signatures
+- [Vale](https://vale.sh/) checks Python comments and docstrings with LoopGate's own advisory plain-English rules. Vale 3.17+ is required when this gate is enabled; LoopGate ships no ASD word list and does not claim ASD-STE100 conformance or certification.
 - [pyright](https://github.com/microsoft/pyright) enforces types before code ever runs
 - [pytest](https://docs.pytest.org/en/stable/) runs the project's test suite
 - [hypothesis](https://hypothesis.readthedocs.io/) generates test inputs to expose edge cases. **_Tests the code_.** [Real Example](tests/preferences/test_properties.py)
@@ -106,7 +109,7 @@ This template starts with `behavior = "warn"`. A newly configured repository may
 ⚡ `harness preflight` (pre-commit) → fast checks.
 Ruff lint + check format for everyone, _plus_ **containment** for the agents. Blocking containment self-heals by un-staging forbidden files.
 
-✅ `harness gate` (pre-push, mirrored by CI) → ruff lint + format report-only, pyright, pylint, semgrep, complexipy, hypothesis, pytest @ 100% cov.
+✅ `harness gate` (pre-push, mirrored by CI) → ruff lint + format report-only, Vale prose checks, pyright, pylint, semgrep, complexipy, hypothesis, pytest @ 100% cov.
 
 🤥 `prepare-commit-msg` ensures an agent is not trying to commit empty -- must do work.
 

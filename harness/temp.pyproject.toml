@@ -108,11 +108,13 @@ security = [
     ".",
 ]
 types = ["pyright", "--outputjson", "."]
+vale = ["vale", "--no-global", "--glob=!{.venv/**,**/.venv/**,.git/**,**/.git/**,.tox/**,**/.tox/**,build/**,**/build/**,dist/**,**/dist/**,node_modules/**,**/node_modules/**,mutants/**,**/mutants/**,scratchpad/**,**/scratchpad/**,.worktrees/**,**/.worktrees/**,worktrees/**,**/worktrees/**}", "."]
 test = ["pytest", "-p", "no:cacheprovider", "-n", "auto", "--cov", "--cov-report=term-missing", "--cov-fail-under=25", "--durations=5"]
 
 [tool.harness.FORBIDDEN]
-DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/", "mutation", "tests/mutation/"]
+DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/", "mutation", "tests/mutation/", ".vale/"]
 FILES = [
+    ".vale.ini",
     "agents.md",
     "docs/prompt.md",
     "docs/plan.md",  # delete/comment line if you want agents to manage the core plan

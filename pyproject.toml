@@ -67,6 +67,8 @@ exclude = ["harness/tests/**"]
 "tests/mutation" = "harness/tests/mutation"
 ".githooks" = "harness/.githooks"
 "scratchpad/runs/.gitkeep" = "harness/scratchpad/runs/.gitkeep"
+".vale.ini" = "harness/vale/.vale.ini"
+".vale/styles" = "harness/vale/styles"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -77,7 +79,9 @@ include = [
     "tests/preferences/**",
     "tests/mutation/**",
     ".githooks/**",
-    "scratchpad/runs/.gitkeep"
+    "scratchpad/runs/.gitkeep",
+    ".vale.ini",
+    ".vale/**"
 ]
 
 # ==============================================================================
@@ -158,12 +162,14 @@ security = [
     "--exclude-rule", "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag",
     ".",
 ]
+vale = ["vale", "--no-global", "--glob=!{.venv/**,**/.venv/**,.git/**,**/.git/**,.tox/**,**/.tox/**,build/**,**/build/**,dist/**,**/dist/**,node_modules/**,**/node_modules/**,mutants/**,**/mutants/**,scratchpad/**,**/scratchpad/**,.worktrees/**,**/.worktrees/**,worktrees/**,**/worktrees/**}", "."]
 test = ["pytest", "-p", "no:cacheprovider", "-n", "auto", "--cov", "--cov-report=term-missing", "--cov-fail-under=100", "--durations=5"]
 types = ["pyright", "--outputjson", "preferences"]
 
 [tool.harness.FORBIDDEN]
-DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/", "mutation", "tests/mutation/"]
+DIRS = ["harness/", ".githooks/", ".github/", ".git/", "preferences/", "tests/preferences/", "mutation", "tests/mutation/", ".vale/"]
 FILES = [
+    ".vale.ini",
     "agents.md",
     "docs/prompt.md",
     "docs/plan.md",  # delete/comment line if you want agents to manage the core plan
