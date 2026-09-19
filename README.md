@@ -218,7 +218,7 @@ harness configure-agents  # configures Claude and Codex with containment rules a
 harness preflight  # fast checks: preferences, ruff lint + format (plus loop containment)
 harness gate  # full pass: preferences, ruff, format, pyright, pylint, complexipy, semgrep, pip-audit, pytest @ 100% cov, hypothesis
 harness info  # show configured agents, checks, and protected paths
-harness status  # shows run log link, the newest json / latest run of N loops, 1 iteration
+harness status  # newest-first table of runs: iterations, tokens (cache split), cost, stop reason; --verbose adds last message + log path
 RALPH_LOOP=1 harness gate  # explicitly run as if you are the agent in the loop
 harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/copilot, defaults: 2 20 True
 
@@ -282,7 +282,7 @@ src/            your product/source code (add to coverage source)
 
 ### Run logs
 
-Every run is saved as a log file in `scratchpad/runs/`. `harness status` shows how many logs you have and the path to the newest one. Open that file to read what the agent thought and did. _(Metrics and audited logs coming soon.)_
+Every run is saved as a log file in `scratchpad/runs/`. `harness status` turns those logs into a newest-first table — iterations, tokens in/out with cache read/write split out, cost, duration, and stop reason — without opening the JSONL. `--verbose` adds the agent's last message and each log path. Facts an agent never reported render as `-`, never a zero, and Claude and Codex totals are mapped onto the same columns despite their different field names.
 
 [`pyproject.toml`](pyproject.toml) is the single source of harness configuration. Humans own it and [`preferences/`](preferences/); both are agent-protected.
 
