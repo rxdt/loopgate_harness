@@ -26,9 +26,9 @@ Nov 10–12, 2026 · Hilton Union Square, 333 O'Farrell St, SF · ai.engineer/co
 
 | # | Route | Status | Evidence / Source | Next action | Date |
 |---|-------|--------|-------------------|-------------|------|
-| 1 | Attendee application | NOT OPEN YET | ai.engineer/code/2026: "Applications for the 2026 San Francisco summit will open soon." Hand-selected attendees | Monitor site + @aidotengineer + @swyx; submit within the hour of opening | — |
+| 1 | Attendee application | **OPEN — drafted, awaiting your approval** | ai.engineer/code/2026/apply · official MCP route ai.engineer/mcp · early review Sep 15 (missed — routine did not fire Sep 10–20), final Oct 11 23:59 PT, rolling | See APPLICATION.md. **[YOU]** reply "approve" → I submit via MCP and log the submissionId | 2026-09-20 |
 | 2 | **Speaking (CFP) — BEST FREE ROUTE** | **OPEN — closes Oct 11, 2026 23:59 PT** | sessionize.com/aiecode26 — "Free for speakers"; travel: "Economy flights, up to 2 nights domestic, 3 nights international". Up to 3 proposals. Formats: Workshop 1–2h / Stage Talk 15–20m / Lightning 5–10m / Online 5–55m. Vendor talks welcome. Historical accept rate 5–15% | **DRAFTED — see CFP.md (bio + 3 proposals).** **[YOU]** paste into sessionize.com/aiecode26. Mark submitted here with timestamp | — |
-| 3 | Sponsor comps | BLOCKED | "Sponsors announcing soon" | Re-check weekly | — |
+| 3 | Sponsor comps | NAMED: **Google DeepMind** (presenting), **G2i** (supporting); more TBA | ai.engineer/code/2026 | Only actionable if you are a paying customer of either. No public evidence you are. Idle | 2026-09-20 |
 | 4 | Side events | BLOCKED | "Announcing soon" | Re-check weekly | — |
 | 5 | Promo codes | N/A | Application-only event; no public checkout | — | — |
 | 6 | Livestream | Available (YouTube) — noted, not a substitute | ai.engineer/code/2026 | — | — |
@@ -42,3 +42,4 @@ Routine fires into this session every 12h: AIE application status, both sponsor 
 ## Ticks
 - 2026-09-03 12:12 UTC — AIE CODE: applications still "will open soon"; sponsors/side events not announced. AI Conference sponsors: none named. Giveaway sweep: nothing new (only Gracker, discounted). Checkout URL noted: tix.aiconference.com/events/theaiconference. New: **AI Engineer New York, Oct 12–14, 2026** (ai.engineer/nyc/2026) — same organizers, high caliber; not yet assessed.
 - 2026-09-04 00:12 UTC — No change. AIE CODE apps still "will open soon" (page has an email-notify field — **[YOU]** drop your email there: ai.engineer/code/2026). apply.ai.engineer still shows 2025 NYC, closed. No sponsors either event. No new codes.
+- 2026-09-20 12:11 UTC — **AIE CODE applications OPEN.** Early-review deadline (Sep 15) missed: no ticks fired between Sep 10 and Sep 20. Application drafted from PROFILE.md, server-validated (first draft; final trimmed draft checked locally against the same schema), written to APPLICATION.md + application_payload.json. Sponsors named: Google DeepMind, G2i. AI Conference sponsors: still none named, event in 9 days. No new codes.
