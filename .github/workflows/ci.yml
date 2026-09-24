@@ -45,6 +45,15 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      - name: Set up Go for Vale
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.7"
+          cache: false
+      - name: Install Vale
+        run: |
+          go install github.com/vale-cli/vale/v3/cmd/vale@v3.22.0
+          python -c "import os, subprocess; root = subprocess.check_output(['go', 'env', 'GOPATH'], text=True).strip(); open(os.environ['GITHUB_PATH'], 'a', encoding='utf-8').write(os.path.join(root, 'bin') + os.linesep)"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:

@@ -11,6 +11,15 @@ from harness.gate import gates
 site_packages = Path(str(distribution("loopgate").locate_file("")))
 package_root = site_packages / "harness"
 repo_root = gates().repo_root
+packaged_vale_root = package_root / "vale"
+VALE_GLOB = (
+    "!{.venv/**,**/.venv/**,.git/**,**/.git/**,.tox/**,**/.tox/**,"
+    "build/**,**/build/**,dist/**,**/dist/**,node_modules/**,**/node_modules/**,"
+    "mutants/**,**/mutants/**,scratchpad/**,**/scratchpad/**,"
+    ".worktrees/**,**/.worktrees/**,worktrees/**,**/worktrees/**}"
+)
+vale_config_source = packaged_vale_root / ".vale.ini" if packaged_vale_root.is_dir() else repo_root / ".vale.ini"
+vale_styles_source = packaged_vale_root / "styles" if packaged_vale_root.is_dir() else repo_root / ".vale/styles"
 
 
 def get_tools(paths: set[str]) -> dict[str, dict[str, Any]]:
@@ -163,6 +172,11 @@ def get_tools(paths: set[str]) -> dict[str, dict[str, Any]]:
             "pyproject": ["pyrefly"],
             "args": ["pyrefly", "check", *source],
         },
+        "vale": {
+            "category": "prose",
+            "filenames": [".vale.ini", "vale.ini"],
+            "args": ["vale", "--no-global", f"--glob={VALE_GLOB}", *source],
+        },
         "xenon": {
             "category": "complexity",
             "filenames": [".xenon.yml"],
@@ -182,6 +196,7 @@ CATEGORIES: dict[str, str] = {
     "complexity": "complexity",
     "format": "ruff_format",
     "lint": "ruff_lint",
+    "prose": "vale",
     "security": "security",
     "test": "test",
     "types": "types",
@@ -253,6 +268,8 @@ ASSETS: dict[str, tuple[Path, Path]] = {
     "scratchpad": (package_root / "scratchpad/runs/.gitkeep", repo_root / "scratchpad/runs/.gitkeep"),
     "preferences": (site_packages / "preferences/preferences.py", repo_root / "preferences/preferences.py"),
     "mutation": (site_packages / "mutation/check_mutmut.py", repo_root / "mutation/check_mutmut.py"),
+    "vale_config": (vale_config_source, repo_root / ".vale.ini"),
+    "vale_styles": (vale_styles_source, repo_root / ".vale/styles"),
     "tests/preferences": (
         package_root / "tests/preferences/test_preferences.py",
         repo_root / "tests/preferences/test_preferences.py",

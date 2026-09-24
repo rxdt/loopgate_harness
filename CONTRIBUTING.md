@@ -21,6 +21,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 source .venv/bin/activate
 
+# Vale >= 3.17 is required for the Python comment/docstring View.
+# macOS: brew install vale
+# Windows: choco install vale
+# Linux: install Vale from GitHub Releases or a supported distro package
 git config core.hooksPath .githooks  # enable the repo's git hooks
 ```
 
@@ -64,7 +68,9 @@ Changes to the [`harness/`](harness) itself should preserve the core contract: *
 
 The harness's own tests live in [`harness/tests/`](harness/tests). Hypothesis coverage for the gate and preferences lives in [`test_properties.py`](tests/preferences/test_properties.py).
 
-The full suite runs as part of `harness gate` (at 100% coverage). To run only the harness tests while iterating:
+The full suite runs as part of `harness gate` (at 100% coverage). The gate also runs the repository's own advisory Vale style over Python comments and docstrings. These plain-English rules are project-owned approximations; they do not ship an ASD word list and do not claim ASD-STE100 conformance or certification.
+
+To run only the harness tests while iterating:
 
 This repo has setting `[tool.harness] behavior = fail` in [`pyproject.toml`](pyproject.toml). If it's changed to `warn`, `harness/tests` assert blocking behavior (tests fail). Tests should be updated to react according to the flag soon.
 

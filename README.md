@@ -30,7 +30,7 @@
 1. `gh repo create <your-github-username>/<your-new-app-name> --template rxdt/loopgate_harness --private --clone && cd <your-new-app-name> && uv run harness install && source .venv/bin/activate && git add . && git commit --amend --no-edit`
 2. `harness gate` and to loop `harness codex`
 
-**Requirements**: `pip`, `uv`, or `poetry`; Python 3.10 or newer; Linux or macOS. Windows support is experimental.
+**Requirements**: `pip`, `uv`, or `poetry`; Python 3.10 or newer; Vale 3.17+ for the default prose gate; Linux or macOS. Windows support is experimental.
 
 ## Index
 
@@ -96,6 +96,7 @@ _Edit at will_
 - [ruff](https://docs.astral.sh/ruff/) lints and formats Python code, fast
 - [pylint](https://pypi.org/project/pylint/) catches code errors and style problems
 - [pydoclint](https://pypi.org/project/pydoclint/0.9.1/) checks docstrings match function signatures
+- [Vale](https://vale.sh/) checks Python comments and docstrings with LoopGate's own advisory plain-English rules. Vale 3.17+ is required when this gate is enabled; LoopGate ships no ASD word list and does not claim ASD-STE100 conformance or certification.
 - [pyright](https://github.com/microsoft/pyright) enforces types before code ever runs
 - [pytest](https://docs.pytest.org/en/stable/) runs the project's test suite (runs across multiple CPUs)
 - [hypothesis](https://hypothesis.readthedocs.io/) generates test inputs to expose edge cases.
@@ -120,7 +121,7 @@ are the fast checks to run often. Lint + check format for everyone, _plus_ **con
 
 ✅ `harness gate` _(pre-push)_  =  _(pre-commit)_ checks **+**
 
-adds type-checks, security audit, dependency audit, AST-scan, complexity analysis, full test coverage, prompt to run mutmut
+adds type-checks, prose linting, security audit, dependency audit, AST-scan, complexity analysis, full test coverage, prompt to run mutmut
 
 Only humans can bypass triggered gates and commit, always. Only humans can use flag `--no-verify`.
 

@@ -1,0 +1,29 @@
+# Python source comments and docstrings, read as Markdown.
+# The comment/function-docstring shape follows Vale's MIT-licensed Python View:
+# https://github.com/vale-cli/packages/blob/master/assets/views/Python.yml
+# Module and class docstrings use the same tree-sitter pattern.
+engine: tree-sitter
+scopes:
+  - name: comment
+    expr: (comment)+ @comment
+    type: md
+
+  - name: module_docstring
+    expr: |
+      ((module . (comment)* . (expression_statement (string) @module_docstring))
+      (#offset! @module_docstring 0 3 0 -3))
+    type: md
+
+  - name: class_docstring
+    expr: |
+      ((class_definition
+        body: (block . (expression_statement (string) @class_docstring)))
+      (#offset! @class_docstring 0 3 0 -3))
+    type: md
+
+  - name: function_docstring
+    expr: |
+      ((function_definition
+        body: (block . (expression_statement (string) @function_docstring)))
+      (#offset! @function_docstring 0 3 0 -3))
+    type: md

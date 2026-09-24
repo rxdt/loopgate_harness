@@ -1,0 +1,12 @@
+extends: substitution
+message: "Use '%s' instead of '%s' for plainer technical prose."
+level: warning
+ignorecase: true
+swap:
+  'utili[sz]e': use
+  'in order to': to
+  'due to the fact that': because
+  'at this point in time': now
+  'perform an inspection of': inspect
+  'make a decision': decide
+  'provide assistance': help

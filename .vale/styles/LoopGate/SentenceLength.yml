@@ -1,0 +1,7 @@
+extends: existence
+message: "Sentence exceeds 30 words; split it into shorter statements."
+level: warning
+scope: text
+nonword: true
+tokens:
+  - '(?:\b\w+\b[^\w.!?]*){31,}'
