@@ -285,7 +285,7 @@ def test_every_supported_agent_has_a_nonempty_command() -> None:
     ]["agents"]
 
     assert agents == gates().agents
-    assert set(agents) == {"claude", "codex", "agy", "copilot"}
+    assert set(agents) == {"claude", "codex", "agy", "copilot", "muse"}
     assert all(isinstance(command, list) and bool(command) for command in agents.values())
     assert all(isinstance(argument, str) and bool(argument) for command in agents.values() for argument in command)
 
