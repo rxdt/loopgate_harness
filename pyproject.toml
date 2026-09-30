@@ -132,6 +132,16 @@ copilot = [
     "--output-format", "json", "--stream", "on",
     "--allow-all", "--no-ask-user",
 ]
+muse = [
+    # Meta's Muse Code CLI: install with `curl -fsSL https://dev.meta.ai/install.sh | bash`,
+    # then authenticate once with `muse login` or set META_API_KEY.
+    # CLI docs: https://dev.meta.ai/docs/muse-code/
+    # `muse exec` takes the prompt as a positional arg (no native stdin), so the
+    # prompt ralph.sh pipes to stdin is forwarded via the `sh -c '"$(cat)"'` wrapper.
+    # --disable-approval silences tool-approval prompts but KEEPS the OS sandbox on.
+    # Do NOT swap in --yolo here: it disables approval AND the sandbox.
+    "sh", "-c", "muse exec --json --disable-approval \"$(cat)\"",
+]
 # EXAMPLE OF WHAT Javascript checks might be
 #
 # [tool.harness.preflight]
