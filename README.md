@@ -154,7 +154,7 @@ Note that `semgrep --config auto` needs network for semgrep registry rules.
 7. Product code goes in [`src/`](src/).  _List your source code directories in [`pyproject.toml [tool.coverage.run] line 234`](pyproject.toml#toolcoveragerun)_
 8. Run some loops!
 
-   `harness run <agent=claude|codex|agy|copilot> [iterations] [minutes]`
+   `harness run <agent=claude|codex|agy|copilot|muse> [iterations] [minutes]`
 9.  Not what you wanted? Refine [`docs/plan.md`](docs/plan.md) / [`docs/PROMPT.md`](docs/PROMPT.md) and re-run
 10. Configurations for Ruff linting, type-checking Pyright, Complexipy, Pytest coverage, etcetera are set in [`pyproject.toml`](pyproject.toml).
 11. Your coding quirks go in [`preferences/preferences.py`](preferences/preferences.py). Delete functions that don't serve you. Add your own.
@@ -221,13 +221,14 @@ harness gate  # full pass: preferences, ruff, format, pyright, pylint, complexip
 harness info  # show configured agents, checks, and protected paths
 harness status  # shows run log link, the newest json / latest run of N loops, 1 iteration
 RALPH_LOOP=1 harness gate  # explicitly run as if you are the agent in the loop
-harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/copilot, defaults: 2 20 True
+harness run <agent> [max_iterations] [max_minutes] [verbose] # claude/codex/agy/copilot/muse, defaults: 2 20 True
 
 # AGENT CALLS, examples
 harness run claude 10 20
 harness run codex 2 20
 harness run agy 3 10
 harness run copilot 2 20
+harness run muse 2 20  # Meta's Muse Code CLI: install via https://dev.meta.ai/install.sh, then `muse login` or set META_API_KEY
 
 > which harness  # the actual executable
 ~/your-repo/.venv/bin/harness
@@ -241,6 +242,15 @@ With `harness init` the harness does not create a CI for you. If you already hav
 That is the same single line this repo uses, at [.github/workflows/ci.yml line 57](.github/workflows/ci.yml#L57). Then CI does not reimplement the checks: it runs the identical command you run locally.
 
 #### To run LoopGate with any agent, the worker must be installed and authenticated separately.
+
+#### Adding (or editing) an agent preset
+
+Agent presets live in `[tool.harness.agents]` in [pyproject.toml](pyproject.toml): one key per agent, mapping to the argv `harness run <agent>` hands to `harness/ralph.sh`. Ralph pipes the prompt to the worker's **stdin**, so:
+
+- If the CLI reads stdin natively, list the binary and flags directly (see `claude`, `agy`).
+- If it takes the prompt as an argument instead, wrap it so stdin is forwarded: `["sh", "-c", "myagent run \"$(cat)\" --json"]` (see `muse`).
+
+Keep the worker's own safety model intact: prefer the flag that silences approval prompts without disabling the sandbox (e.g. Muse's `--disable-approval`, not `--yolo`). Add a comment with the install command and a link to the CLI docs, then update the agent set in `harness/tests/test_cli.py::test_every_supported_agent_has_a_nonempty_command` and the examples above.
 
 ## Add a mutation score badge
 
