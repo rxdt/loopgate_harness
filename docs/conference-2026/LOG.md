@@ -2,8 +2,10 @@
 
 Status as of 2026-09-03. Owner action items marked **[YOU]**.
 
-## Event 1 — The AI Conference
+## Event 1 — The AI Conference — **CLOSED 2026-10-01, no ticket obtained**
 Sept 29 – Oct 1, 2026 · Pier 48, Shed A/B, San Francisco · aiconference.com
+
+Exhaustion summary: speaker/CFP closed before start; Day Zero sold out; volunteer excluded; sponsors never publicly named, so no sponsor-comp route existed; no 2026 promo code ever surfaced; GrackerAI was discounted-only; media and Gracker forms were drafted but never submitted (sandbox denied the browser run on Sep 3 and the user did not submit manually). Evidence: tick entries below.
 
 | # | Route | Status | Evidence / Source | Next action | Date |
 |---|-------|--------|-------------------|-------------|------|
@@ -43,3 +45,4 @@ Routine fires into this session every 12h: AIE application status, both sponsor 
 - 2026-09-03 12:12 UTC — AIE CODE: applications still "will open soon"; sponsors/side events not announced. AI Conference sponsors: none named. Giveaway sweep: nothing new (only Gracker, discounted). Checkout URL noted: tix.aiconference.com/events/theaiconference. New: **AI Engineer New York, Oct 12–14, 2026** (ai.engineer/nyc/2026) — same organizers, high caliber; not yet assessed.
 - 2026-09-04 00:12 UTC — No change. AIE CODE apps still "will open soon" (page has an email-notify field — **[YOU]** drop your email there: ai.engineer/code/2026). apply.ai.engineer still shows 2025 NYC, closed. No sponsors either event. No new codes.
 - 2026-09-20 12:11 UTC — **AIE CODE applications OPEN.** Early-review deadline (Sep 15) missed: no ticks fired between Sep 10 and Sep 20. Application drafted from PROFILE.md, server-validated (first draft; final trimmed draft checked locally against the same schema), written to APPLICATION.md + application_payload.json. Sponsors named: Google DeepMind, G2i. AI Conference sponsors: still none named, event in 9 days. No new codes.
+- 2026-10-01 00:11 UTC — Ticks Sep 21–Oct 1 delivered in one batch (session was idle). AIE CODE: applications still open, no attendee deadline posted, sponsors unchanged (Google DeepMind, G2i), no side events. **Application still awaiting your approval — not submitted.** AI Conference ended today without a ticket; route closed above. Next hard date: speaker CFP Oct 11 23:59 PT.
