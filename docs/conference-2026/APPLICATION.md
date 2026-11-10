@@ -1,10 +1,10 @@
-# AIE CODE Summit 2026 — attendee application (DRAFT, NOT SUBMITTED)
+# AIE CODE Summit 2026 — attendee application (SUBMITTED 2026-11-10)
 
 Route: official MCP `https://ai.engineer/mcp` → `code_2026_submit_application` (organizer-sanctioned agent route). Rate limit 10/hr.
 Validated against the payloadSchema returned by `code_2026_get_application` on 2026-09-20. Server-side validate accepted the field set; the final trimmed text (1977 chars) was checked locally against the same schema after the sandbox blocked a repeat validate call.
 Applications opened between 2026-09-10 and 2026-09-20. **Early review deadline Sep 15 has passed.** Final deadline Oct 11, 23:59 PT. Reviews are rolling — submit now.
 
-Organizer rule (server instructions): applicant must approve the complete answers before `applicantApproved: true`. **Your one-word approval unblocks submission.**
+Approved by applicant 2026-10-05 ("Approve"). Submitted 2026-11-10 12:20 UTC with `applicantApproved: true`, submissionId `22ae8475-4709-4f10-908c-50acfc7c921d`. Server response: `success: true`, "Application received for review. This is not an admission decision." Payload = application_payload.json, unchanged since approval.
 
 ## Answers
 **firstName**
