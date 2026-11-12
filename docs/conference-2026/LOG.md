@@ -36,7 +36,7 @@ Nov 10–12, 2026 · Hilton Union Square, 333 O'Farrell St, SF · ai.engineer/co
 | 6 | Livestream | Available (YouTube) — noted, not a substitute | ai.engineer/code/2026 | — | — |
 
 ## Monitor
-Routine fires into this session every 12h: AIE application status, both sponsor pages, AIE side events, giveaway/code sweep. Updates this file on change only.
+Routine (12h) ran Sep 3 – Nov 12 and deleted itself on 2026-11-12 per its own rule. Monitoring is over.
 
 ## Public record used for profile
 - github.com/rxdt · rxdt.dev · linkedin.com/in/roxdt · hackernoon.com/three-ai-agents-held-a-conference-and-decided-i-should-do-the-work-instead (byline Rox del Toro, 2026-07-22)
@@ -47,3 +47,4 @@ Routine fires into this session every 12h: AIE application status, both sponsor 
 - 2026-09-20 12:11 UTC — **AIE CODE applications OPEN.** Early-review deadline (Sep 15) missed: no ticks fired between Sep 10 and Sep 20. Application drafted from PROFILE.md, server-validated (first draft; final trimmed draft checked locally against the same schema), written to APPLICATION.md + application_payload.json. Sponsors named: Google DeepMind, G2i. AI Conference sponsors: still none named, event in 9 days. No new codes.
 - 2026-10-01 00:11 UTC — Ticks Sep 21–Oct 1 delivered in one batch (session was idle). AIE CODE: applications still open, no attendee deadline posted, sponsors unchanged (Google DeepMind, G2i), no side events. **Application still awaiting your approval — not submitted.** AI Conference ended today without a ticket; route closed above. Next hard date: speaker CFP Oct 11 23:59 PT.
 - 2026-11-10 12:20 UTC — Ticks Oct 6–Nov 10 (27) delivered in one batch; session stalled after your "Approve" on Oct 5 and did not submit. **Submitted now via MCP: submissionId 22ae8475-4709-4f10-908c-50acfc7c921d, "Application received for review."** Summit starts today; CFP closed Oct 11 unsubmitted. Nothing else changed: sponsors Google DeepMind + G2i, no side events, no codes. Routine deletes itself Nov 12.
+- 2026-11-12 00:12 UTC — Final tick. Summit ends today. No organizer reply logged for the Nov 10 submission. Routine deleted. **Outcome: no ticket to either event.** Next cycle: apply the day applications open; submit the CFP yourself on Sessionize (drafts in CFP.md).
